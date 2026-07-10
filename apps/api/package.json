@@ -9,11 +9,12 @@
     "start": "node dist/index.js",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "fastify": "^4.28.0",
-    "@stellar/stellar-sdk": "^12.3.0",
-    "dotenv": "^16.4.5"
-  },
+ "dependencies": {
+  "@velo/shared": "*",
+  "fastify": "^4.28.0",
+  "@stellar/stellar-sdk": "^16.0.1",
+"dotenv": "^16.4.5"
+},
   "devDependencies": {
     "typescript": "^5.5.4",
     "tsx": "^4.16.2",
