@@ -30,6 +30,7 @@ pub enum Error {
     InvalidSecret = 6,
     TimeoutNotReached = 7,
     InvalidAmount = 8,
+    InvalidTimeout = 9,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledger, sanity cap
@@ -77,7 +78,7 @@ impl Htlc for EscrowContract {
             panic_with_error(&env, Error::InvalidAmount);
         }
         if timeout_ledgers == 0 || timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
-            panic_with_error(&env, Error::InvalidAmount);
+            panic_with_error(&env, Error::InvalidTimeout);
         }
 
         let key = DataKey::Trade(id.clone());
