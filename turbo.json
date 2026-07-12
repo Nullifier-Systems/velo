@@ -1,5 +1,16 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    ".env"
+  ],
+  "globalEnv": [
+    "STELLAR_NETWORK",
+    "SOROBAN_RPC_URL",
+    "FRONTEND_BASE_URL",
+    "BUYER_SECRET_KEY",
+    "MERCHANT_ADDRESS",
+    "ESCROW_CONTRACT_ID"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
