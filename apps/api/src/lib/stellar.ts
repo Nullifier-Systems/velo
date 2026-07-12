@@ -8,10 +8,10 @@ import {
     scValToNative,
     xdr,
 } from "@stellar/stellar-sdk";
-import { Server, Api } from "@stellar/stellar-sdk/rpc";
+import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK === "PUBLIC"
+export const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK === "PUBLIC"
     ? Networks.PUBLIC
     : Networks.TESTNET;
 
@@ -27,6 +27,9 @@ export const server = new Server(RPC_URL, { allowHttp: RPC_URL.startsWith("http:
  * client-side, and only the signed envelope comes back to be submitted.
  */
 function loadSignerKeypair(): Keypair {
+    if (process.env.STELLAR_NETWORK === "PUBLIC") {
+        throw new Error("Custodial signer cannot be used on mainnet.");
+    }
     const secret = process.env.BUYER_SECRET_KEY;
     if (!secret) {
         throw new Error(
@@ -77,7 +80,7 @@ async function invokeContract(
         throw new Error(`simulation failed: ${sim.error}`);
     }
 
-    const prepared = await server.prepareTransaction(tx);
+    const prepared = assembleTransaction(tx, sim).build();
     prepared.sign(signer);
 
     const sendResult = await server.sendTransaction(prepared);
