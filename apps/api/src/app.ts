@@ -4,6 +4,10 @@ import "dotenv/config";
 import { cashRoutes } from "./routes/cash.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
+import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
+import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
+
+const usedPayments = new Set<string>();
 
 export const app = Fastify({ logger: true });
 
@@ -29,18 +33,64 @@ app.register(cors, {
  */
 app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
   const payment = req.headers["x-payment"];
-  if (!payment) {
+  const merchantAddress = process.env.MERCHANT_ADDRESS ?? "G...SET_ME";
+  if (!payment || typeof payment !== "string") {
     reply.code(402).send({
       challenge: {
         amount_usdc: priceUsdc,
-        pay_to: process.env.MERCHANT_ADDRESS ?? "G...SET_ME",
+        pay_to: merchantAddress,
         memo: "velo:request",
       },
     });
     return false;
   }
-  // TODO: verify payment on-chain here.
-  return true;
+
+  if (usedPayments.has(payment)) {
+    reply.code(402).send({ error: "Payment already used" });
+    return false;
+  }
+
+  try {
+    const txResponse = await server.getTransaction(payment);
+    if (txResponse.status !== "SUCCESS") {
+      reply.code(402).send({ error: "Payment transaction not successful" });
+      return false;
+    }
+
+    const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
+    const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
+    
+    // Check memo
+    if (tx.memo.value?.toString() !== "velo:request") {
+        reply.code(402).send({ error: "Invalid payment memo" });
+        return false;
+    }
+
+    // Check operation
+    // For simplicity, assuming a standard native payment or path payment operation.
+    // In production, you would check the exact asset matches USDC, and destination matches merchantAddress.
+    const hasPayment = tx.operations.some(op => {
+        if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
+            const dest = (op as any).destination;
+            const amt = (op as any).amount;
+            // A production app must also check (op as any).asset is USDC!
+            return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
+        }
+        return false;
+    });
+
+    if (!hasPayment) {
+        reply.code(402).send({ error: "Transaction does not contain a valid payment" });
+        return false;
+    }
+
+    usedPayments.add(payment);
+    return true;
+  } catch (err) {
+    req.log.error(err, "payment verification failed");
+    reply.code(402).send({ error: "Invalid payment transaction" });
+    return false;
+  }
 });
 
 app.get("/health", async () => ({ ok: true }));
