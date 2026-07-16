@@ -26,10 +26,6 @@ app.register(cors, {
  * is present, respond 402 with a challenge describing what to pay and
  * where. This is the entire "auth" system: payment IS authentication,
  * there are no API keys or accounts.
- *
- * TODO: replace the stub check with real Stellar tx verification
- * (submitted, correct amount, correct destination, memo matches, not
- * already used — track spent tx hashes to prevent replay).
  */
 app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
   const payment = req.headers["x-payment"];
