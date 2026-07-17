@@ -156,7 +156,7 @@ export async function cashRoutes(app: FastifyInstance) {
       reply.code(201).send(provider);
   });
 
-  app.post<{ Body: CashRequestBody }>(
+  app.post<{ Body: CashRequestBody; Querystring: { lang?: string } }>(
     "/cash/request",
     {
       config: {
@@ -205,12 +205,18 @@ export async function cashRoutes(app: FastifyInstance) {
         createdAt: new Date().toISOString(),
       });
 
+      const langParam = req.query.lang || (req.body as any)?.lang;
+      const isSpanish = typeof langParam === "string" && langParam.toLowerCase().startsWith("es");
+      const instructions = isSpanish
+        ? "Muestra este QR al proveedor de efectivo para recibir tu efectivo."
+        : "Show this QR to the cash provider to receive your cash.";
+
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       reply.code(201).send({
         // The secret is held client-side and is NOT returned by the API
         claim_url: `${baseUrl}/claim/${tradeId}`,
         qr_payload: `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`,
-        instructions: "Show this QR to the cash provider to receive your cash.",
+        instructions,
       });
     }
   );

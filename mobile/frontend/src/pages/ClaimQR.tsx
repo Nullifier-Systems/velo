@@ -8,14 +8,16 @@ import {
   shortAddress,
   type CashRequestStatus,
 } from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
 import "./ClaimQR.css";
 
 const POLL_INTERVAL_MS = 4000;
 
-function statusLabel(status: CashRequestStatus["status"]): string {
-  if (status === "locked") return "Ready to claim";
-  if (status === "released") return "Released";
-  return "Refunded";
+function statusLabel(status: CashRequestStatus["status"], lang: "en" | "es"): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
 }
 
 export default function ClaimQR() {
@@ -26,6 +28,8 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const { lang } = useLanguage();
+  const t = translations[lang];
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -54,8 +58,9 @@ export default function ClaimQR() {
   if (!id) {
     return (
       <div className="claim-page">
+        <LanguageToggle />
         <p className="claim-page__state claim-page__state--error">
-          This link is missing a claim ID.
+          {t.missingId}
         </p>
       </div>
     );
@@ -64,9 +69,9 @@ export default function ClaimQR() {
   if (error === "not-found") {
     return (
       <div className="claim-page">
+        <LanguageToggle />
         <p className="claim-page__state claim-page__state--error">
-          We couldn't find this claim. It may have expired or the link may be
-          incorrect.
+          {t.notFound}
         </p>
       </div>
     );
@@ -75,9 +80,9 @@ export default function ClaimQR() {
   if (error) {
     return (
       <div className="claim-page">
+        <LanguageToggle />
         <p className="claim-page__state claim-page__state--error">
-          Couldn't load this claim right now. Check your connection and try
-          again.
+          {t.loadError}
         </p>
       </div>
     );
@@ -86,7 +91,8 @@ export default function ClaimQR() {
   if (!status) {
     return (
       <div className="claim-page" aria-busy="true" aria-live="polite">
-        <div className="claim-ticket claim-ticket--loading" aria-label="Loading your claim">
+        <LanguageToggle />
+        <div className="claim-ticket claim-ticket--loading" aria-label={t.loadingLabel}>
           <div className="claim-ticket__header">
             <span className="claim-ticket__brand">VELO</span>
             <span className="claim-ticket__stamp claim-ticket__stamp--skeleton" />
@@ -106,7 +112,7 @@ export default function ClaimQR() {
           <div className="claim-ticket__perforation" />
 
           <div className="claim-ticket__details">
-            {["Amount", "Provider", "Claim ID"].map((label, index) => (
+            {[t.amount, t.provider, t.claimId].map((label, index) => (
               <div className="claim-ticket__row" key={label}>
                 <span className="claim-ticket__label">{label}</span>
                 <span
@@ -130,13 +136,14 @@ export default function ClaimQR() {
 
   return (
     <div className="claim-page">
+      <LanguageToggle />
       <div className="claim-ticket">
         <div className="claim-ticket__header">
           <span className="claim-ticket__brand">VELO</span>
           <span
             className={`claim-ticket__stamp claim-ticket__stamp--${status.status}`}
           >
-            {statusLabel(status.status)}
+            {statusLabel(status.status, lang)}
           </span>
         </div>
 
@@ -147,22 +154,22 @@ export default function ClaimQR() {
                 <QRCodeSVG value={qrPayload} size={200} level="M" />
               </div>
               <p className="claim-ticket__instruction">
-                <strong>Show this to the cash provider.</strong>
+                <strong>{t.instructionLocked}</strong>
                 <br />
-                They'll scan it to hand you your cash.
+                {t.instructionLockedSub}
               </p>
             </>
           ) : status.status === "released" ? (
             <p className="claim-ticket__instruction">
-              <strong>This claim has been completed.</strong>
+              <strong>{t.instructionReleased}</strong>
               <br />
-              Funds were released to the provider.
+              {t.instructionReleasedSub}
             </p>
           ) : (
             <p className="claim-ticket__instruction">
-              <strong>This claim was refunded.</strong>
+              <strong>{t.instructionRefunded}</strong>
               <br />
-              Funds were returned to the sender.
+              {t.instructionRefundedSub}
             </p>
           )}
         </div>
@@ -171,19 +178,19 @@ export default function ClaimQR() {
 
         <div className="claim-ticket__details">
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Amount</span>
+            <span className="claim-ticket__label">{t.amount}</span>
             <span className="claim-ticket__amount">
               {formatStroops(status.amountStroops)}
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Provider</span>
+            <span className="claim-ticket__label">{t.provider}</span>
             <span className="claim-ticket__value">
               {shortAddress(status.seller)}
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Claim ID</span>
+            <span className="claim-ticket__label">{t.claimId}</span>
             <span className="claim-ticket__value">
               {shortAddress(status.id)}
             </span>
@@ -192,7 +199,7 @@ export default function ClaimQR() {
 
         {status.status === "locked" && secret && (
           <details className="claim-ticket__debug">
-            <summary>Testnet: simulate provider scan</summary>
+            <summary>{t.debugTitle}</summary>
             <button
               className="claim-ticket__debug-button"
               disabled={releasing}
@@ -208,7 +215,7 @@ export default function ClaimQR() {
                 }
               }}
             >
-              {releasing ? "Releasing…" : "Confirm hand-off (release funds)"}
+              {releasing ? t.debugReleasing : t.debugButton}
             </button>
           </details>
         )}
@@ -216,3 +223,4 @@ export default function ClaimQR() {
     </div>
   );
 }
+

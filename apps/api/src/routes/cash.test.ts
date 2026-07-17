@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
+
+vi.mock("../lib/stellar.js", () => ({
+  lockEscrow: vi.fn().mockResolvedValue(undefined),
+  releaseEscrow: vi.fn().mockResolvedValue(undefined),
+  refundEscrow: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe("cashRoutes", () => {
   const registerApp = (app: any) => {
@@ -58,6 +64,53 @@ describe("cashRoutes", () => {
     expect(response.json()).toMatchObject({
       error: "invalid_request",
     });
+
+    await app.close();
+  });
+
+  it("returns English instructions by default when creating cash request", async () => {
+    const app: any = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.instructions).toBe("Show this QR to the cash provider to receive your cash.");
+
+    await app.close();
+  });
+
+  it("returns Spanish instructions when lang=es is supplied in query", async () => {
+    const app: any = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      query: { lang: "es" },
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.instructions).toBe("Muestra este QR al proveedor de efectivo para recibir tu efectivo.");
 
     await app.close();
   });
