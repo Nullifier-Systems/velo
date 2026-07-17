@@ -16,7 +16,8 @@
     "@stellar/stellar-sdk": "^16.0.1",
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
-    "fastify": "^4.28.0"
+    "fastify": "^4.28.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
