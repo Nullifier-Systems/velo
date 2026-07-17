@@ -26,6 +26,51 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    const url = window.location.href;
+    let success = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(url);
+        success = true;
+      } catch (err) {
+        console.error("Failed to copy using navigator.clipboard", err);
+      }
+    }
+
+    if (!success) {
+      // Fallback for older browsers or non-secure contexts
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      textArea.style.position = "fixed";
+      textArea.style.top = "0";
+      textArea.style.left = "0";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        success = document.execCommand("copy");
+      } catch (err) {
+        console.error("Fallback copy failed", err);
+      }
+      document.body.removeChild(textArea);
+    }
+
+    if (success) {
+      setCopied(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -188,6 +233,52 @@ export default function ClaimQR() {
               {shortAddress(status.id)}
             </span>
           </div>
+          <button
+            type="button"
+            className={`claim-ticket__copy-button ${
+              copied ? "claim-ticket__copy-button--copied" : ""
+            }`}
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="claim-ticket__copy-icon"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Copied!
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="claim-ticket__copy-icon"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                Copy claim link
+              </>
+            )}
+          </button>
         </div>
 
         {status.status === "locked" && secret && (
