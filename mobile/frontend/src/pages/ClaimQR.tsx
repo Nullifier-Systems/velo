@@ -5,15 +5,12 @@ import {
   fetchCashRequest,
   releaseCashRequest,
   formatStroops,
+  shortAddress,
   type CashRequestStatus,
 } from "../lib/api";
 import "./ClaimQR.css";
 
 const POLL_INTERVAL_MS = 4000;
-
-function shortAddress(addr: string): string {
-  return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
-}
 
 function statusLabel(status: CashRequestStatus["status"]): string {
   if (status === "locked") return "Ready to claim";

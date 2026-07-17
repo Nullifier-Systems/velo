@@ -10,7 +10,8 @@
     "BUYER_SECRET_KEY",
     "MERCHANT_ADDRESS",
     "ESCROW_CONTRACT_ID",
-    "ADMIN_API_KEY"
+    "ADMIN_API_KEY",
+    "REFUND_WEBHOOK_URL"
   ],
   "tasks": {
     "dev": {

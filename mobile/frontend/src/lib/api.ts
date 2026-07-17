@@ -38,3 +38,8 @@ export function formatStroops(stroops: string): string {
   const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
   return `${whole}.${frac}`;
 }
+
+/** Truncates a long address/ID to its first and last 5 characters. */
+export function shortAddress(addr: string): string {
+  return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
+}

@@ -8,6 +8,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "devDependencies": {
     "typescript": "^5.5.4"
   }

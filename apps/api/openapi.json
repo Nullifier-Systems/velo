@@ -679,6 +679,7 @@
           "buyer",
           "amountStroops",
           "secretHashHex",
+          "qrPayload",
           "status",
           "createdAt"
         ],
@@ -702,6 +703,10 @@
           },
           "secretHashHex": {
             "type": "string"
+          },
+          "qrPayload": {
+            "type": "string",
+            "description": "Persisted QR payload from creation; contains request_id and contract only, no secret."
           },
           "status": {
             "type": "string",

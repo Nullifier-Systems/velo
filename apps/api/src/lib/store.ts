@@ -13,6 +13,7 @@ export interface CashRequestRecord {
     amountStroops: string; // bigint as string, JSON-safe
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
+    qrPayload: string; // safe to persist — contains no secret, only request_id + contract
     status: "locked" | "released" | "refunded";
     createdAt: string;
 }

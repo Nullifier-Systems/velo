@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
 
-describe("cashRoutes", () => {
-  it("returns a payment challenge when no payment header is present", async () => {
-    const app: any = Fastify();
+vi.mock("../lib/stellar.js", () => ({
+  lockEscrow: vi.fn().mockResolvedValue(undefined),
+  releaseEscrow: vi.fn(),
+  refundEscrow: vi.fn(),
+}));
 
+describe("cashRoutes", () => {
+  const registerApp = (app: any) => {
     app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
       const payment = req.headers["x-payment"];
       if (!payment) {
@@ -22,6 +26,11 @@ describe("cashRoutes", () => {
     });
 
     app.register(cashRoutes, { prefix: "/api/v1" });
+  };
+
+  it("returns a payment challenge when no payment header is present", async () => {
+    const app: any = Fastify();
+    registerApp(app);
 
     const response = await app.inject({ method: "GET", url: "/api/v1/cash/agents" });
 
@@ -31,6 +40,74 @@ describe("cashRoutes", () => {
         amount_usdc: "0.001",
       },
     });
+
+    await app.close();
+  });
+
+  it("rejects malformed cash request bodies with a 400 response", async () => {
+    const app: any = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "not-a-stellar-address",
+        buyer: "G123",
+        amount_stroops: "not-a-number",
+        secret_hash: "abc",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "invalid_request",
+    });
+
+    await app.close();
+  });
+
+  it("POST /cash/request persists qrPayload and GET /cash/request/:id returns it matching the POST response", async () => {
+    const app: any = Fastify();
+    registerApp(app);
+
+    const secretHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    const postResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: secretHash,
+      },
+    });
+
+    expect(postResponse.statusCode).toBe(201);
+    const postBody = postResponse.json();
+    expect(postBody).toHaveProperty("qr_payload");
+
+    const qrPayload = postBody.qr_payload;
+    const tradeId = qrPayload.match(/request_id=([^&]+)/)?.[1];
+    expect(tradeId).toBeTruthy();
+
+    expect(qrPayload).toContain(`request_id=${tradeId}`);
+    expect(qrPayload).toMatch(/contract=/);
+    expect(qrPayload).not.toContain(secretHash);
+    expect(qrPayload).not.toMatch(/secret=/);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/cash/request/${tradeId}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    const getBody = getResponse.json();
+    expect(getBody).toHaveProperty("qrPayload");
+    expect(getBody.qrPayload).toBe(qrPayload);
+    expect(getBody).not.toHaveProperty("secretHex");
 
     await app.close();
   });

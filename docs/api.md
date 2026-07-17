@@ -17,6 +17,7 @@ The API is implemented with Fastify and is intended to expose payment-aware rout
 | POST   | `/api/v1/cash/request`        | 0.01         | Create a cash request           |
 | GET    | `/api/v1/cash/request/:id`    | Free         | Poll request status             |
 | POST   | `/api/v1/cash/request/:id/release` | Free    | Release escrow (hand-off)       |
+| POST   | `/api/v1/cash/request/:id/refund`  | Free    | Refund escrow (after timeout)   |
 | GET    | `/api/v1/reputation/:address` | 0.0005       | On-chain reputation lookup      |
 | GET    | `/api/v1/admin/status`        | Admin auth   | System status & store metrics   |
 
@@ -33,6 +34,7 @@ All API endpoints are rate-limited per IP address to prevent abuse. The followin
 | `POST /api/v1/cash/request`          | 20 req / 1 min        | Paid escrow lock (costly)        |
 | `GET /api/v1/cash/request/:id`       | 60 req / 1 min        | Free polling                     |
 | `POST /api/v1/cash/request/:id/release` | 20 req / 1 min     | Free state transition            |
+| `POST /api/v1/cash/request/:id/refund`  | 10 req / 1 min     | Free refund (after timeout)      |
 | `GET /api/v1/reputation/:address`    | 30 req / 1 min        | Paid reputation lookup           |
 | `GET /api/v1/admin/status`           | 20 req / 1 min        | Admin status (requires API key)  |
 
@@ -62,6 +64,21 @@ Authorization: Bearer <admin-api-key>
 ```
 
 If the key is missing or invalid, the API responds with `401 Unauthorized` or `403 Forbidden`.
+
+## Refund Webhook
+
+When a refund is processed via `POST /api/v1/cash/request/:id/refund`, the API can notify a Slack or Discord channel via a webhook URL.
+
+**Setup:**
+
+1. Create an incoming webhook in your Slack workspace or Discord server.
+2. Set the URL in your environment or `.env` file:
+   ```
+   REFUND_WEBHOOK_URL=https://hooks.slack.com/services/.../.../...
+   ```
+3. Restart the API server.
+
+The webhook payload includes the trade ID, amount in USDC, buyer address, and seller address. The format auto-detects whether the URL points to Discord or Slack. Leave the variable empty (or unset) to disable webhook notifications entirely.
 
 ## Payment Gate
 
