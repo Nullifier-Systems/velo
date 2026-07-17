@@ -7,7 +7,7 @@
   --ink-muted: #5c6b5f;
   --line: #c7d0be;
   --stamp-blue: #1b4b8f;
-  --stamp-green: #1f6b4a;
+  --stamp-green: #18583a;
   --stamp-red: #8f2a1b;
 }
 
@@ -178,6 +178,13 @@
   font-size: 12px;
   color: var(--ink-muted);
   cursor: pointer;
+  border-radius: 2px;
+  outline: none;
+}
+
+.claim-ticket__debug summary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
 }
 
 .claim-ticket__debug-button {
@@ -192,11 +199,23 @@
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  outline: none;
+}
+
+.claim-ticket__debug-button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .claim-ticket__debug-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Lang toggle button overrides for visible focus rings */
+.lang-toggle-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: no-preference) {

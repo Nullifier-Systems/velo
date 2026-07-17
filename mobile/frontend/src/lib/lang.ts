@@ -52,6 +52,7 @@ export const translations = {
     notFound: "We couldn't find this claim. It may have expired or the link may be incorrect.",
     loadError: "Couldn't load this claim right now. Check your connection and try again.",
     loadingLabel: "Loading your claim",
+    qrCodeDescription: "QR code containing the claim instructions and secret for the cash provider to scan.",
     
     amount: "Amount",
     provider: "Provider",
@@ -83,6 +84,7 @@ export const translations = {
     notFound: "No pudimos encontrar este reclamo. Es posible que haya expirado o que el enlace sea incorrecto.",
     loadError: "No se pudo cargar este reclamo en este momento. Verifique su conexión e intente de nuevo.",
     loadingLabel: "Cargando su reclamo",
+    qrCodeDescription: "Código QR que contiene las instrucciones del reclamo y el secreto para que lo escanee el proveedor de efectivo.",
     
     amount: "Monto",
     provider: "Proveedor",

@@ -8,6 +8,8 @@ export default function LanguageToggle() {
       <button
         className={`lang-toggle-btn ${lang === "en" ? "lang-toggle-btn--active" : ""}`}
         onClick={() => lang !== "en" && toggleLanguage()}
+        aria-label="English"
+        aria-pressed={lang === "en"}
       >
         EN
       </button>
@@ -15,6 +17,8 @@ export default function LanguageToggle() {
       <button
         className={`lang-toggle-btn ${lang === "es" ? "lang-toggle-btn--active" : ""}`}
         onClick={() => lang !== "es" && toggleLanguage()}
+        aria-label="Español"
+        aria-pressed={lang === "es"}
       >
         ES
       </button>

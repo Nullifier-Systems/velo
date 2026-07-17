@@ -24,6 +24,7 @@ export default function ClaimQR() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const secret = searchParams.get("secret");
+  const mockStatus = searchParams.get("mockStatus") as CashRequestStatus["status"] | "loading" | null;
 
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +32,34 @@ export default function ClaimQR() {
   const { lang } = useLanguage();
   const t = translations[lang];
 
+  // Synchronize HTML lang attribute with active UI language for screen readers
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+
   const load = useCallback(async () => {
     if (!id) return;
+
+    if (mockStatus) {
+      if (mockStatus === "loading") {
+        setStatus(null);
+        setError(null);
+        return;
+      }
+      setStatus({
+        id,
+        contractId: "test-contract-id",
+        seller: "G1234567890123456789012345678901234567890123456789012345",
+        buyer: "G5432109876543210987654321098765432109876543210987654321",
+        amountStroops: "150000000", // 15.00 USDC
+        secretHashHex: "abcdef",
+        status: mockStatus as CashRequestStatus["status"],
+        createdAt: new Date().toISOString(),
+      });
+      setError(null);
+      return;
+    }
+
     try {
       const result = await fetchCashRequest(id);
       setStatus(result);
@@ -40,10 +67,11 @@ export default function ClaimQR() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "something went wrong");
     }
-  }, [id]);
+  }, [id, mockStatus]);
 
   useEffect(() => {
     load();
+    if (mockStatus) return; // Don't poll in mock mode
     // Poll while locked so the screen updates the moment a merchant scans
     // and releases funds — no manual refresh needed at the counter.
     const interval = setInterval(() => {
@@ -53,7 +81,7 @@ export default function ClaimQR() {
       });
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, mockStatus]);
 
   if (!id) {
     return (
@@ -92,9 +120,9 @@ export default function ClaimQR() {
     return (
       <div className="claim-page" aria-busy="true" aria-live="polite">
         <LanguageToggle />
-        <div className="claim-ticket claim-ticket--loading" aria-label={t.loadingLabel}>
+        <div className="claim-ticket claim-ticket--loading" role="status" aria-label={t.loadingLabel}>
           <div className="claim-ticket__header">
-            <span className="claim-ticket__brand">VELO</span>
+            <span className="claim-ticket__brand" role="heading" aria-level={1}>VELO</span>
             <span className="claim-ticket__stamp claim-ticket__stamp--skeleton" />
           </div>
 
@@ -139,9 +167,10 @@ export default function ClaimQR() {
       <LanguageToggle />
       <div className="claim-ticket">
         <div className="claim-ticket__header">
-          <span className="claim-ticket__brand">VELO</span>
+          <span className="claim-ticket__brand" role="heading" aria-level={1}>VELO</span>
           <span
             className={`claim-ticket__stamp claim-ticket__stamp--${status.status}`}
+            aria-live="polite"
           >
             {statusLabel(status.status, lang)}
           </span>
@@ -151,23 +180,29 @@ export default function ClaimQR() {
           {status.status === "locked" && qrPayload ? (
             <>
               <div className="claim-ticket__qr-box">
-                <QRCodeSVG value={qrPayload} size={200} level="M" />
+                <QRCodeSVG
+                  value={qrPayload}
+                  size={200}
+                  level="M"
+                  role="img"
+                  title={t.qrCodeDescription}
+                />
               </div>
               <p className="claim-ticket__instruction">
-                <strong>{t.instructionLocked}</strong>
+                <strong role="heading" aria-level={2}>{t.instructionLocked}</strong>
                 <br />
                 {t.instructionLockedSub}
               </p>
             </>
           ) : status.status === "released" ? (
             <p className="claim-ticket__instruction">
-              <strong>{t.instructionReleased}</strong>
+              <strong role="heading" aria-level={2}>{t.instructionReleased}</strong>
               <br />
               {t.instructionReleasedSub}
             </p>
           ) : (
             <p className="claim-ticket__instruction">
-              <strong>{t.instructionRefunded}</strong>
+              <strong role="heading" aria-level={2}>{t.instructionRefunded}</strong>
               <br />
               {t.instructionRefundedSub}
             </p>
@@ -206,8 +241,14 @@ export default function ClaimQR() {
               onClick={async () => {
                 setReleasing(true);
                 try {
-                  await releaseCashRequest(status.id, secret);
-                  await load();
+                  if (mockStatus) {
+                    // Simulate API network delay and status transition
+                    await new Promise((resolve) => setTimeout(resolve, 800));
+                    setStatus((current) => current ? { ...current, status: "released" } : null);
+                  } else {
+                    await releaseCashRequest(status.id, secret);
+                    await load();
+                  }
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "release failed");
                 } finally {
