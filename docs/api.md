@@ -18,6 +18,7 @@ The API is implemented with Fastify and is intended to expose payment-aware rout
 | GET    | `/api/v1/cash/request/:id`    | Free         | Poll request status             |
 | POST   | `/api/v1/cash/request/:id/release` | Free    | Release escrow (hand-off)       |
 | GET    | `/api/v1/reputation/:address` | 0.0005       | On-chain reputation lookup      |
+| GET    | `/api/v1/admin/status`        | Admin auth   | System status & store metrics   |
 
 ## Rate Limiting
 
@@ -33,8 +34,34 @@ All API endpoints are rate-limited per IP address to prevent abuse. The followin
 | `GET /api/v1/cash/request/:id`       | 60 req / 1 min        | Free polling                     |
 | `POST /api/v1/cash/request/:id/release` | 20 req / 1 min     | Free state transition            |
 | `GET /api/v1/reputation/:address`    | 30 req / 1 min        | Paid reputation lookup           |
+| `GET /api/v1/admin/status`           | 20 req / 1 min        | Admin status (requires API key)  |
 
 When a client exceeds the limit, the API responds with `429 Too Many Requests` and a `Retry-After` header indicating the number of seconds to wait before retrying.
+
+## Admin Authentication
+
+Admin-only endpoints (e.g., `GET /api/v1/admin/status`) are protected by a shared API key.
+
+**Setup:**
+
+1. Generate a secure key:
+   ```
+   openssl rand -hex 32
+   ```
+2. Set it in your environment or `.env` file:
+   ```
+   ADMIN_API_KEY=<your-generated-key>
+   ```
+3. Restart the API server.
+
+**Usage:**
+
+Include the key as a Bearer token in the `Authorization` header:
+```
+Authorization: Bearer <admin-api-key>
+```
+
+If the key is missing or invalid, the API responds with `401 Unauthorized` or `403 Forbidden`.
 
 ## Payment Gate
 

@@ -57,3 +57,16 @@ export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
         record => record.seller === sellerAddress
     );
 }
+
+export function getStoreStats() {
+    const requests = Array.from(store.values());
+    return {
+        total_cash_requests: store.size,
+        total_providers: providersStore.size,
+        cash_requests_by_status: {
+            locked: requests.filter(r => r.status === "locked").length,
+            released: requests.filter(r => r.status === "released").length,
+            refunded: requests.filter(r => r.status === "refunded").length,
+        },
+    };
+}
