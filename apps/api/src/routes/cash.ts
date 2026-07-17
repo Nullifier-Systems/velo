@@ -1,18 +1,22 @@
  import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { CONTRACTS } from "@velo/shared";
 import { lockEscrow, releaseEscrow } from "../lib/stellar.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus } from "../lib/store.js";
+import { parseBody } from "../lib/validation.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
 
-interface CashRequestBody {
-  seller: string; // G... address of the cash provider
-  buyer: string; // G... address of the person requesting cash
-  amount_stroops: string; // bigint as string, e.g. "10000000" = 1 XLM/USDC unit
-  secret_hash: string; // 64-character hex string representing SHA256 of the secret
-}
+const cashRequestSchema = z.object({
+  seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+  buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+  amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+  secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+});
+
+type CashRequestBody = z.infer<typeof cashRequestSchema>;
 
 /**
  * GET  /api/v1/cash/agents        — find nearby cash providers ($0.001)
@@ -41,11 +45,10 @@ export async function cashRoutes(app: FastifyInstance) {
     const paid = await (app as any).requirePayment(req, reply, "0.01");
     if (!paid) return;
 
-    const { seller, buyer, amount_stroops, secret_hash } = req.body ?? ({} as CashRequestBody);
-    if (!seller || !buyer || !amount_stroops || !secret_hash) {
-      reply.code(400).send({ error: "seller, buyer, amount_stroops, and secret_hash are required" });
-      return;
-    }
+    const body = parseBody(cashRequestSchema, req.body, reply);
+    if (!body) return;
+
+    const { seller, buyer, amount_stroops, secret_hash } = body;
 
     const tradeId = randomHex32();
 
@@ -112,11 +115,14 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      const { secret } = req.body ?? {};
-      if (!secret) {
-        reply.code(400).send({ error: "secret is required (from the scanned QR)" });
-        return;
-      }
+      const releaseBody = parseBody(
+        z.object({ secret: z.string().trim().min(1) }),
+        req.body,
+        reply
+      );
+      if (!releaseBody) return;
+
+      const { secret } = releaseBody;
 
       try {
         await releaseEscrow({
