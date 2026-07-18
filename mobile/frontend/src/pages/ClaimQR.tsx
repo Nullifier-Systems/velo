@@ -26,6 +26,7 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -37,6 +38,26 @@ export default function ClaimQR() {
       setError(err instanceof Error ? err.message : "something went wrong");
     }
   }, [id]);
+
+  const copyUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement("textarea");
+      textarea.value = window.location.href;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, []);
 
   useEffect(() => {
     load();
@@ -188,6 +209,16 @@ export default function ClaimQR() {
               {shortAddress(status.id)}
             </span>
           </div>
+        </div>
+
+        <div className="claim-ticket__copy">
+          <button
+            className="claim-ticket__copy-button"
+            onClick={copyUrl}
+            disabled={copied}
+          >
+            {copied ? "Copied!" : "Copy link"}
+          </button>
         </div>
 
         {status.status === "locked" && secret && (

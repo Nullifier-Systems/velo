@@ -168,6 +168,35 @@
   color: var(--stamp-red);
 }
 
+.claim-ticket__copy {
+  padding: 0 24px 24px;
+}
+
+.claim-ticket__copy-button {
+  width: 100%;
+  padding: 12px;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1.5px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.claim-ticket__copy-button:hover {
+  background: var(--paper);
+  border-color: var(--ink-muted);
+}
+
+.claim-ticket__copy-button:disabled {
+  color: var(--stamp-green);
+  border-color: var(--stamp-green);
+  cursor: default;
+}
+
 .claim-ticket__debug {
   margin: 0 24px 24px;
   padding-top: 16px;
