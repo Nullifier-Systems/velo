@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Velo — anonymous cash liquidity on Stellar, by Nullifier Systems",
+  "license": "Apache-2.0",
   "workspaces": [
     "apps/*",
     "mobile/*",

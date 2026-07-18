@@ -6,6 +6,7 @@ import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
+import { checkFraud } from "../lib/fraud-detection.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -173,6 +174,15 @@ export async function cashRoutes(app: FastifyInstance) {
       const { seller, buyer, amount_stroops, secret_hash } = body;
 
       const tradeId = randomHex32();
+
+      // --- Fraud detection (flag only, never blocks) ---
+      const fraudResult = checkFraud({ tradeId, buyer, seller, amountStroops: amount_stroops });
+      if (fraudResult.flagged) {
+        req.log.warn(
+          { tradeId, buyer, seller, reasons: fraudResult.reasons, windowCount: fraudResult.windowCount },
+          "fraud_flag: suspicious cash request detected"
+        );
+      }
 
       try {
         await lockEscrow({
