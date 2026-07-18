@@ -279,7 +279,7 @@ export async function cashRoutes(app: FastifyInstance) {
     }
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
     "/cash/request/:id/refund",
     {
       config: {
@@ -296,6 +296,8 @@ export async function cashRoutes(app: FastifyInstance) {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
       }
+
+      const reason = (req.body as any)?.reason;
 
       try {
         await refundEscrow({
@@ -315,6 +317,7 @@ export async function cashRoutes(app: FastifyInstance) {
         amountStroops: record.amountStroops,
         buyer: record.buyer,
         seller: record.seller,
+        reason,
       });
 
       return { id: record.id, status: "refunded" };
