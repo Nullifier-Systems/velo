@@ -22,7 +22,12 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "public/**"]
     },
-    "lint": {},
+    "lint": {
+      "cache": false
+    },
+    "format": {
+      "cache": false
+    },
     "test": {
       "dependsOn": ["^build"]
     }

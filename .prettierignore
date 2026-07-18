@@ -1,0 +1,6 @@
+dist
+build
+.turbo
+node_modules
+coverage
+*.min.js
