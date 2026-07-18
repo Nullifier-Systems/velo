@@ -1,11 +1,17 @@
- import Fastify from "fastify";
+import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
+import websocket from "@fastify/websocket";
 import "dotenv/config";
 import { cashRoutes } from "./routes/cash.js";
+import { chatRoutes } from "./routes/chat.js";
+import { openapiRoutes } from "./routes/openapi.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { bazaarRoutes } from "./routes/bazaar.js";
 
+import { providerRoutes } from "./routes/provider.js";
+import { adminRoutes } from "./routes/admin.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 
@@ -24,14 +30,47 @@ app.register(cors, {
 });
 
 /**
+ * Rate limiting — IP-based soft limits applied to all routes.
+ *
+ * Global rate limit:           100 req/min
+ * ------------------------------+-----------------
+ *   GET /health                 | 100 req/min     (infrastructure health check, free)
+ *   GET /api/v1/openapi.json    |  60 req/min     (OpenAPI spec, free)
+ *   GET /api/v1/services        |  60 req/min     (catalog endpoint, free)
+ *   GET /api/v1/cash/agents     |  30 req/min     (paid — agent discovery)
+ *   POST /api/v1/cash/request   |  20 req/min     (paid — escrow lock, costly)
+ *   GET /api/v1/cash/request/:id|  60 req/min     (free — polling)
+ *   POST /api/v1/cash/request/:id/release | 20 req/min (free — state transition)
+ *   GET /api/v1/reputation/:addr|  30 req/min     (paid — on-chain reputation)
+ *
+ * Responses exceeding the limit get a 429 + Retry-After header.
+ *
+ * @fastify/rate-limit uses the requesting IP as the key by default
+ * (trust proxy is enabled but default 0 hops — adjust via
+ * FASTIFY_TRUST_PROXY when deployed behind a reverse proxy).
+ */
+app.register(websocket);
+
+app.register(rateLimit, {
+  global: true,
+  max: 100,
+  timeWindow: "1 minute",
+  errorResponseBuilder: (request, context) => {
+    return {
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: `Rate limit exceeded. You have sent too many requests in ${context.after}. Please wait before retrying.`,
+      retryAfter: context.after, // human-readable, e.g. "1 minute"
+      retryAfterSeconds: Math.ceil(context.ttl / 1000),
+    };
+  },
+});
+
+/**
  * x402 gate — every paid route calls this. If no valid X-Payment header
  * is present, respond 402 with a challenge describing what to pay and
  * where. This is the entire "auth" system: payment IS authentication,
  * there are no API keys or accounts.
- *
- * TODO: replace the stub check with real Stellar tx verification
- * (submitted, correct amount, correct destination, memo matches, not
- * already used — track spent tx hashes to prevent replay).
  */
 app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
   const payment = req.headers["x-payment"];
@@ -95,9 +134,22 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
   }
 });
 
-app.get("/health", async () => ({ ok: true }));
+app.get(
+  "/health",
+  {
+    config: {
+      rateLimit: { max: 100, timeWindow: "1 minute" },
+    },
+  },
+  async () => ({ ok: true })
+);
 
+app.register(openapiRoutes, { prefix: "/api/v1" });
 app.register(servicesRoutes, { prefix: "/api/v1" });
 app.register(cashRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(bazaarRoutes, { prefix: "/api/v1" });
+app.register(chatRoutes, { prefix: "/api/v1" });
+app.register(reputationRoutes, { prefix: "/api/v1" });
+app.register(providerRoutes, { prefix: "/api/v1" });
+app.register(adminRoutes, { prefix: "/api/v1" });

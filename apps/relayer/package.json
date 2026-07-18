@@ -1,0 +1,26 @@
+{
+  "name": "@velo/relayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Off-chain relayer: watches Soroban atomic-swap release() events and claims the counterpart HTLC on an EVM chain.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@velo/shared": "*",
+    "@stellar/stellar-sdk": "^16.0.1",
+    "ethers": "^6.13.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.16.2",
+    "vitest": "^2.0.5",
+    "@types/node": "^20.14.0"
+  }
+}

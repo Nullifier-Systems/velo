@@ -12,6 +12,16 @@
   --font-mono: 'IBM Plex Mono', monospace;
 }
 
+html.dark {
+  --bg-sage: #1c2720;
+  --bg-backdrop: #121b16;
+  --ink-black: #edf1e7;
+  --status-locked: #5294e2;
+  --status-released: #52b788;
+  --status-refunded: #e63946;
+  --perforation: #384d3f;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -253,4 +263,117 @@ body {
   font-family: var(--font-mono);
   font-size: 0.85rem;
   color: #7a8a81;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
 }
+
+.home-crash-button {
+  background-color: transparent;
+  color: var(--status-refunded);
+  border: 1px solid var(--status-refunded);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.home-crash-button:hover {
+  background-color: var(--status-refunded);
+  color: var(--bg-sage);
+}
+
+/* Error Boundary Styles */
+.error-boundary-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.error-boundary-card {
+  width: 100%;
+  max-width: 360px;
+  background-color: var(--bg-sage);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(27, 42, 34, 0.15), 0 2px 5px rgba(27, 42, 34, 0.1);
+  padding: 3rem 2rem;
+  text-align: center;
+  border: 1px solid rgba(143, 42, 27, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.error-boundary-icon {
+  font-size: 3rem;
+  color: var(--status-refunded);
+  margin-bottom: 0.5rem;
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.error-boundary-title {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  color: var(--status-refunded);
+  margin-bottom: 0.25rem;
+}
+
+.error-boundary-subtitle {
+  font-size: 0.95rem;
+  color: #5a6660;
+  line-height: 1.4;
+  margin-bottom: 0.5rem;
+}
+
+.error-boundary-details {
+  width: 100%;
+  max-height: 150px;
+  overflow-y: auto;
+  background-color: rgba(143, 42, 27, 0.05);
+  border: 1px solid rgba(143, 42, 27, 0.15);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--status-refunded);
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.error-boundary-button {
+  background-color: var(--ink-black);
+  color: var(--bg-sage);
+  border: none;
+  border-radius: 6px;
+  padding: 0.75rem 1.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.error-boundary-button:hover {
+  background-color: #273e32;
+  transform: translateY(-1px);
+}
+
+.error-boundary-button:active {
+  transform: translateY(0);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+

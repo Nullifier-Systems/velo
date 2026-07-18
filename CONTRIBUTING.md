@@ -82,6 +82,14 @@ Use concise, descriptive commit messages. A good pattern is:
 - avoid introducing hidden side effects,
 - preserve the current modular structure.
 
+## Dependency Updates
+
+To prevent bugs from unpinned version drift, this project adheres to strict dependency management:
+
+- **Pin dependencies**: All dependencies in `package.json`, `Cargo.toml`, and other manifests should be pinned to specific versions where possible.
+- **Reviewing Dependabot PRs**: Dependabot is configured to propose updates. All Dependabot PRs must be actively reviewed. Reviewers should check the dependency's changelog for breaking changes and verify that all CI checks (tests, linting, formatting) pass before merging.
+- **Commit lockfiles**: Ensure `package-lock.json`, `Cargo.lock` and any other lockfiles are always committed and up-to-date with your changes.
+
 ## Review Expectations
 
 Pull requests should:

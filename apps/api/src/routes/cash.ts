@@ -1,106 +1,427 @@
- import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { CONTRACTS } from "@velo/shared";
-import { lockEscrow, releaseEscrow } from "../lib/stellar.js";
+import {
+  lockEscrow, buildLockTx, submitLockTx,
+  releaseEscrow, buildReleaseTx, submitReleaseTx,
+  refundEscrow, buildRefundTx, submitRefundTx,
+  NETWORK_PASSPHRASE,
+} from "../lib/stellar.js";
+import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
-import { saveCashRequest, getCashRequest, updateStatus } from "../lib/store.js";
+import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders } from "../lib/store.js";
+import { notifyTradeStatus } from "./chat.js";
+import { parseBody } from "../lib/validation.js";
+import { sendNotification } from "../lib/notification.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
 
-interface CashRequestBody {
-  seller: string; // G... address of the cash provider
-  buyer: string; // G... address of the person requesting cash
-  amount_stroops: string; // bigint as string, e.g. "10000000" = 1 XLM/USDC unit
-  secret_hash: string; // 64-character hex string representing SHA256 of the secret
+const cashRequestSchema = z.object({
+  seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+  buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+  amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+  secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+  notification_type: z.enum(["email", "sms", "none"]).optional(),
+  contact_info: z.string().optional(),
+  signed_xdr: z.string().optional(),
+});
+
+type CashRequestBody = z.infer<typeof cashRequestSchema>;
+
+interface RegisterProviderBody {
+  name: string;
+  lat: number;
+  lng: number;
+  rate?: string;
+}
+
+interface BoundingBox {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
+/**
+ * Calculates bounding-box coordinates for a given search point and radius.
+ * @param lat Target Latitude (degrees)
+ * @param lng Target Longitude (degrees)
+ * @param radiusInKm Search radius in kilometers (defaults to 5km)
+ */
+function getBoundingBox(lat: number, lng: number, radiusInKm: number): BoundingBox {
+  const kmPerDegreeLat = 111;
+  // Account for longitude shrinkage as we move away from the equator
+  const kmPerDegreeLng = 111 * Math.cos(lat * (Math.PI / 180));
+
+  const latDelta = radiusInKm / kmPerDegreeLat;
+  const lngDelta = radiusInKm / kmPerDegreeLng;
+
+  return {
+    minLat: lat - latDelta,
+    maxLat: lat + latDelta,
+    minLng: lng - lngDelta,
+    maxLng: lng + lngDelta,
+  };
+}
+
+/**
+ * Simple Haversine distance formula to calculate exact path distance
+ */
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 /**
  * GET  /api/v1/cash/agents        — find nearby cash providers ($0.001)
+ * POST /api/v1/cash/agents        — register a cash provider ($0.000)
+ * POST /api/v1/cash/request/prepare — build + simulate lock tx, return
+ *                                    unsigned XDR for client-side signing
+ *                                    ($0.01, non-custodial on mainnet)
  * POST /api/v1/cash/request       — lock funds via the escrow contract,
  *                                    return a claim_url + QR payload ($0.01)
+ *                                    (testnet: custodial; mainnet: use /prepare + signed_xdr)
  * GET  /api/v1/cash/request/:id   — poll a pending cash request (free)
  * POST /api/v1/cash/request/:id/release — merchant confirms hand-off,
  *                                    releases escrow using the secret
- *                                    embedded in the scanned QR (free —
- *                                    this is a state-transition call, not
- *                                    a discovery/search call)
+ *                                    embedded in the scanned QR (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
-  app.get("/cash/agents", async (req, reply) => {
-    const paid = await (app as any).requirePayment(req, reply, "0.001");
-    if (!paid) return;
+  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string } }>(
+    "/cash/agents",
+    {
+      config: {
+        rateLimit: { max: 30, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const paid = await (app as any).requirePayment(req, reply, "0.001");
+      if (!paid) return;
 
-    // TODO: query a real merchant registry (on-chain reputation + off-chain
-    // location index). Stub data below for local dev only.
-    return {
-      agents: [{ name: "Farmacia Guadalupe", distance_km: 0.3, tier: "Maestro" }],
-    };
+      const { lat, lng, radius } = req.query;
+      const providers = getProviders().filter(p => p.status === "available");
+      
+      if (lat && lng) {
+        const userLat = parseFloat(lat);
+        const userLng = parseFloat(lng);
+        const searchRadiusKm = radius ? parseFloat(radius) : 5.0; // Default to 5km radius if not provided
+
+        if (isNaN(userLat) || isNaN(userLng) || isNaN(searchRadiusKm)) {
+          reply.code(400).send({ error: "Invalid numeric coordinates or radius supplied" });
+          return;
+        }
+
+        // 1. Obtain bounding box
+        const box = getBoundingBox(userLat, userLng, searchRadiusKm);
+
+        // 2. High-speed Bounding-box pre-filtering
+        const candidates = providers.filter(p => 
+          p.lat >= box.minLat && p.lat <= box.maxLat &&
+          p.lng >= box.minLng && p.lng <= box.maxLng
+        );
+
+        // 3. Exact distance calculation on remaining filtered candidates
+        const withDistance = candidates
+          .map(p => ({
+            ...p,
+            distance_km: parseFloat(getDistanceFromLatLonInKm(userLat, userLng, p.lat, p.lng).toFixed(2))
+          }))
+          // Prune out mathematical corner cases falling in the box but outside the circle radius
+          .filter(p => p.distance_km <= searchRadiusKm);
+        
+        withDistance.sort((a, b) => a.distance_km - b.distance_km);
+        return { agents: withDistance };
+      }
+
+      // Default if no coordinates are provided
+      return { agents: providers };
+    }
+  );
+
+  app.post<{ Body: RegisterProviderBody }>("/cash/agents", async (req, reply) => {
+      // Registration is free in this implementation
+      const { name, lat, lng, rate } = req.body ?? ({} as RegisterProviderBody);
+      if (!name || typeof lat !== "number" || typeof lng !== "number") {
+          reply.code(400).send({ error: "name, lat (number), and lng (number) are required" });
+          return;
+      }
+      
+      const id = randomHex32();
+      const provider = {
+          id,
+          name,
+          lat,
+          lng,
+          rate: rate || "1.0",
+          tier: "Standard",
+          status: "available" as const,
+          createdAt: new Date().toISOString()
+      };
+      
+      saveProvider(provider);
+      reply.code(201).send(provider);
   });
 
-  app.post<{ Body: CashRequestBody }>("/cash/request", async (req, reply) => {
-    const paid = await (app as any).requirePayment(req, reply, "0.01");
-    if (!paid) return;
+  const requestSchema = z.object({
+    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+  });
 
-    const { seller, buyer, amount_stroops, secret_hash } = req.body ?? ({} as CashRequestBody);
-    if (!seller || !buyer || !amount_stroops || !secret_hash) {
-      reply.code(400).send({ error: "seller, buyer, amount_stroops, and secret_hash are required" });
-      return;
+  const prepareLockSchema = z.object({
+    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+    notification_type: z.enum(["email", "sms", "none"]).optional(),
+    contact_info: z.string().optional(),
+  });
+
+  app.post<{ Body: z.infer<typeof prepareLockSchema> }>(
+    "/cash/request/prepare",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const paid = await (app as any).requirePayment(req, reply, "0.01");
+      if (!paid) return;
+
+      const body = parseBody(prepareLockSchema, req.body, reply);
+      if (!body) return;
+
+      const { seller, buyer, amount_stroops, secret_hash, notification_type, contact_info } = body;
+
+      if (notification_type && notification_type !== "none") {
+        if (!contact_info) {
+          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
+          return;
+        }
+        if (notification_type === "email") {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(contact_info)) {
+            reply.code(400).send({ error: "Invalid email address format for contact_info" });
+            return;
+          }
+        } else if (notification_type === "sms") {
+          const phoneRegex = /^\+?[1-9]\d{5,14}$/;
+          if (!phoneRegex.test(contact_info)) {
+            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
+            return;
+          }
+        }
+      }
+
+      const tradeId = randomHex32();
+
+      try {
+        const { unsignedXdr } = await buildLockTx({
+          contractId: ESCROW_CONTRACT_ID,
+          tradeId,
+          seller,
+          buyer,
+          amountStroops: BigInt(amount_stroops),
+          secretHashHex: secret_hash,
+          timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+        });
+
+        reply.code(200).send({
+          trade_id: tradeId,
+          unsigned_xdr: unsignedXdr,
+          contract_id: ESCROW_CONTRACT_ID,
+          network_passphrase: NETWORK_PASSPHRASE,
+        });
+      } catch (err) {
+        req.log.error(err, "buildLockTx failed");
+        reply.code(502).send({ error: "failed to prepare lock transaction", detail: String(err) });
+      }
     }
+  );
 
-    const tradeId = randomHex32();
+  const submitLockSchema = z.object({
+    signed_xdr: z.string().trim().min(1),
+    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+    trade_id: z.string().trim().min(1),
+  });
 
-    try {
-      await lockEscrow({
+  app.post<{ Body: z.infer<typeof submitLockSchema> }>(
+    "/cash/request/submit",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const paid = await (app as any).requirePayment(req, reply, "0.01");
+      if (!paid) return;
+
+      const body = parseBody(submitLockSchema, req.body, reply);
+      if (!body) return;
+
+      const { signed_xdr, seller, buyer, amount_stroops, secret_hash, trade_id } = body;
+
+      try {
+        await submitLockTx(signed_xdr);
+      } catch (err) {
+        req.log.error(err, "submitLockTx failed");
+        reply.code(502).send({ error: "lock transaction submission failed", detail: String(err) });
+        return;
+      }
+
+      const qrPayload = `velo://claim?request_id=${trade_id}&contract=${ESCROW_CONTRACT_ID}`;
+      saveCashRequest({
+        id: trade_id,
         contractId: ESCROW_CONTRACT_ID,
-        tradeId,
         seller,
         buyer,
-        amountStroops: BigInt(amount_stroops),
+        amountStroops: amount_stroops,
+        secretHex: "",
         secretHashHex: secret_hash,
-        timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+        qrPayload,
+        status: "locked",
+        createdAt: new Date().toISOString(),
       });
-    } catch (err) {
-      req.log.error(err, "lockEscrow failed");
-      reply.code(502).send({
-        error: "escrow lock failed",
-        detail: String(err),
-        stack: err instanceof Error ? err.stack : undefined,
+
+      const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      reply.code(201).send({
+        claim_url: `${baseUrl}/claim/${trade_id}`,
+        qr_payload: `velo://claim?request_id=${trade_id}&contract=${ESCROW_CONTRACT_ID}`,
+        instructions: "Show this QR to the cash provider to receive your cash.",
       });
-      return;
     }
-    saveCashRequest({
-      id: tradeId,
-      contractId: ESCROW_CONTRACT_ID,
-      seller,
-      buyer,
-      amountStroops: amount_stroops,
-      secretHex: "", // The API no longer knows the secret
-      secretHashHex: secret_hash,
-      status: "locked",
-      createdAt: new Date().toISOString(),
-    });
+  );
 
-    const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
-    reply.code(201).send({
-      // The secret is held client-side and is NOT returned by the API
-      claim_url: `${baseUrl}/claim/${tradeId}`,
-      qr_payload: `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`,
-      instructions: "Show this QR to the cash provider to receive your cash.",
-    });
-  });
+  app.post<{ Body: z.infer<typeof cashRequestSchema> }>(
+    "/cash/request",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const paid = await (app as any).requirePayment(req, reply, "0.01");
+      if (!paid) return;
 
-  app.get<{ Params: { id: string } }>("/cash/request/:id", async (req, reply) => {
-    const record = getCashRequest(req.params.id);
-    if (!record) {
-      reply.code(404).send({ error: "request not found" });
-      return;
+      const body = parseBody(cashRequestSchema, req.body, reply);
+      if (!body) return;
+
+      const { seller, buyer, amount_stroops, secret_hash, signed_xdr, notification_type, contact_info } = body;
+
+      if (notification_type && notification_type !== "none") {
+        if (!contact_info) {
+          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
+          return;
+        }
+        if (notification_type === "email") {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(contact_info)) {
+            reply.code(400).send({ error: "Invalid email address format for contact_info" });
+            return;
+          }
+        } else if (notification_type === "sms") {
+          const phoneRegex = /^\+?[1-9]\d{5,14}$/;
+          if (!phoneRegex.test(contact_info)) {
+            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
+            return;
+          }
+        }
+      }
+
+      const tradeId = randomHex32();
+
+      if (signed_xdr) {
+        try {
+          await submitLockTx(signed_xdr);
+        } catch (err) {
+          req.log.error(err, "submitLockTx failed");
+          reply.code(502).send({ error: "lock submission failed", detail: String(err) });
+          return;
+        }
+      } else {
+        try {
+          await lockEscrow({
+            contractId: ESCROW_CONTRACT_ID,
+            tradeId,
+            seller,
+            buyer,
+            amountStroops: BigInt(amount_stroops),
+            secretHashHex: secret_hash,
+            timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+          });
+        } catch (err) {
+          req.log.error(err, "lockEscrow failed");
+          reply.code(502).send({
+            error: "escrow lock failed",
+            detail: String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+          return;
+        }
+      }
+
+      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
+      saveCashRequest({
+        id: tradeId,
+        contractId: ESCROW_CONTRACT_ID,
+        seller,
+        buyer,
+        amountStroops: amount_stroops,
+        secretHex: "",
+        secretHashHex: secret_hash,
+        qrPayload,
+        status: "locked",
+        createdAt: new Date().toISOString(),
+        notificationType: notification_type,
+        contactInfo: contact_info,
+      });
+
+      const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      reply.code(201).send({
+        claim_url: `${baseUrl}/claim/${tradeId}`,
+        qr_payload: qrPayload,
+        instructions: "Show this QR to the cash provider to receive your cash.",
+      });
     }
-    const { secretHex: _omit, ...safe } = record;
-    return safe;
-  });
+  );
 
-  app.post<{ Params: { id: string }; Body: { secret: string } }>(
+  app.get<{ Params: { id: string } }>(
+    "/cash/request/:id",
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        reply.code(404).send({ error: "request not found" });
+        return;
+      }
+      const { secretHex: _omit, ...safe } = record;
+      return safe;
+    }
+  );
+
+  app.post<{ Params: { id: string }; Body: { secret?: string; signed_xdr?: string } }>(
     "/cash/request/:id/release",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
@@ -112,26 +433,108 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      const { secret } = req.body ?? {};
-      if (!secret) {
-        reply.code(400).send({ error: "secret is required (from the scanned QR)" });
-        return;
-      }
+      const releaseBody = parseBody(
+        z.object({
+          secret: z.string().trim().min(1).optional(),
+          signed_xdr: z.string().trim().min(1).optional(),
+        }),
+        req.body,
+        reply
+      );
+      if (!releaseBody) return;
 
-      try {
-        await releaseEscrow({
-          contractId: record.contractId,
-          tradeId: record.id,
-          secretHex: secret,
-        });
-      } catch (err) {
-        req.log.error(err, "releaseEscrow failed");
-        reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+      const { secret, signed_xdr } = releaseBody;
+
+      if (signed_xdr) {
+        try {
+          await submitReleaseTx(signed_xdr);
+        } catch (err) {
+          req.log.error(err, "submitReleaseTx failed");
+          reply.code(502).send({ error: "release submission failed", detail: String(err) });
+          return;
+        }
+      } else if (secret) {
+        try {
+          await releaseEscrow({
+            contractId: record.contractId,
+            tradeId: record.id,
+            secretHex: secret,
+          });
+        } catch (err) {
+          req.log.error(err, "releaseEscrow failed");
+          reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          return;
+        }
+      } else {
+        reply.code(400).send({ error: "either secret or signed_xdr is required" });
         return;
       }
 
       updateStatus(record.id, "released");
+      notifyTradeStatus(record.id, "released");
+      await sendNotification(record, "released");
       return { id: record.id, status: "released" };
+    }
+  );
+
+  app.post<{ Params: { id: string }; Body: { signed_xdr?: string } }>(
+    "/cash/request/:id/refund",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        reply.code(404).send({ error: "request not found" });
+        return;
+      }
+      if (record.status !== "locked") {
+        reply.code(409).send({ error: `request is already ${record.status}` });
+        return;
+      }
+
+      const refundBody = parseBody(
+        z.object({ signed_xdr: z.string().trim().min(1).optional() }),
+        req.body ?? {},
+        reply
+      );
+      if (!refundBody) return;
+
+      if (refundBody.signed_xdr) {
+        try {
+          await submitRefundTx(refundBody.signed_xdr);
+        } catch (err) {
+          req.log.error(err, "submitRefundTx failed");
+          reply.code(502).send({ error: "refund submission failed", detail: String(err) });
+          return;
+        }
+      } else {
+        try {
+          await refundEscrow({
+            contractId: record.contractId,
+            tradeId: record.id,
+          });
+        } catch (err) {
+          req.log.error(err, "refundEscrow failed");
+          reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          return;
+        }
+      }
+
+      updateStatus(record.id, "refunded");
+      notifyTradeStatus(record.id, "refunded");
+      await sendNotification(record, "refunded");
+
+      sendRefundAlert({
+        tradeId: record.id,
+        amountStroops: record.amountStroops,
+        buyer: record.buyer,
+        seller: record.seller,
+      });
+
+      return { id: record.id, status: "refunded" };
     }
   );
 }

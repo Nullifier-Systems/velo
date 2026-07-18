@@ -1,5 +1,7 @@
 # Velo
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Velo is an open-source payment and liquidity platform for privacy-preserving cash access on Stellar. It combines Soroban smart contracts, a lightweight API layer, and a mobile-first experience to make cash-like settlement practical for real-world use cases such as agent-assisted payments, local commerce, and programmable escrow.
 
 ## Why Velo Exists
@@ -67,6 +69,14 @@ flowchart LR
 
 The contracts in this repository currently focus on escrow and HTLC-style primitives that make conditional settlement possible. The escrow contract locks funds from a buyer until a release condition is satisfied or a refund condition is reached.
 
+### Deployed Escrow Contract Addresses
+
+The repository keeps escrow contract addresses in the shared registry under [packages/shared/src/index.ts](packages/shared/src/index.ts). The current documented testnet deployment is:
+
+- Testnet escrow: `CAEYSVTKTCZYTSMPD7CU3NOFYOO4S5V6LJLGRNV7LKTNZ65N66PCHLMC`
+
+The mainnet escrow address remains unset until a production deployment is finalized. This separation makes it clear which network a client or integrator should target when interacting with the escrow flow.
+
 ## Zero-Knowledge Infrastructure
 
 Velo is also structured around privacy-preserving identity and credential concepts. While the current repository primarily exposes the core payment and escrow workflow, the architecture anticipates future integration with zero-knowledge credential verification and nullifier-based privacy primitives.
@@ -91,7 +101,7 @@ The mobile experience is intentionally lightweight and QR-centric. It allows a u
 - Node.js 20 or newer
 - npm 10 or newer
 - Rust toolchain
-- wasm target: `wasm32-unknown-unknown`
+- wasm target: `wasm32v1-none`
 - Soroban CLI or Stellar CLI
 - A funded Stellar testnet account
 
@@ -104,6 +114,8 @@ npm install
 cp apps/api/.env.example apps/api/.env
 cp mobile/backend/.env.example mobile/backend/.env
 ```
+
+For the full ordered local setup walkthrough, including the Rust and Soroban prerequisites plus the Windows-specific gotchas, see [docs/development.md](docs/development.md).
 
 ## Local Development
 
@@ -173,7 +185,7 @@ Velo is an actively evolving platform. The core contracts and integrations are p
 
 ### Is the repository open source?
 
-Yes. The project is intended for open collaboration and public review.
+Yes. Velo is released under the [Apache License 2.0](LICENSE) and is intended for open collaboration and public review.
 
 ### Where should I start?
 

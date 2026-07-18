@@ -12,7 +12,14 @@ The HTLC core crate provides shared types and interfaces used by the escrow cont
 
 ## Atomic Swap
 
-The atomic swap crate is present as a scaffold for additional conditional settlement primitives and may be extended as the product evolves.
+The atomic-swap crate implements the Stellar leg of a cross-chain HTLC. It
+implements the same `htlc-core::Htlc` state machine as escrow (lock/release/
+refund), charges no platform fee, and — critically — its `release()` publishes
+the revealed secret in an event so an off-chain relayer can claim the
+counterpart HTLC on another chain. See
+[docs/cross-chain-relayer.md](cross-chain-relayer.md) for the relayer and the
+end-to-end demo, and [docs/relayer-architecture.md](relayer-architecture.md) for
+the design rationale.
 
 ## Operational Notes
 
