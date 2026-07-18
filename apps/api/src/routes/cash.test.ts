@@ -233,10 +233,10 @@ describe("cashRoutes", () => {
     });
   });
 
-  it("validates mode parameter in cash request", async () => {
+  it("validates mode parameter in cash request prepare", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/api/v1/cash/request",
+      url: "/api/v1/cash/request/prepare",
       headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -253,10 +253,10 @@ describe("cashRoutes", () => {
     });
   });
 
-  it("returns unsigned XDR in non-custodial mode", async () => {
+  it("returns unsigned XDR in non-custodial mode via prepare endpoint", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/api/v1/cash/request",
+      url: "/api/v1/cash/request/prepare",
       headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -284,10 +284,10 @@ describe("cashRoutes", () => {
   });
 
   it("submits signed XDR successfully", async () => {
-    // First create a pending_signature request
+    // First create a pending_signature request via prepare endpoint
     const createRes = await app.inject({
       method: "POST",
-      url: "/api/v1/cash/request",
+      url: "/api/v1/cash/request/prepare",
       headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
