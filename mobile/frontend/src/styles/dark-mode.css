@@ -1,0 +1,135 @@
+/*
+ * Dark mode for Velo
+ *
+ * Activated via data-theme="dark" on <html>.
+ * Respects prefers-color-scheme by default (set by ThemeToggle.tsx).
+ */
+
+/* ── index.css overrides ────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg-sage: #1a1f1c;
+  --bg-backdrop: #121513;
+  --ink-black: #e2e8e4;
+  --perforation: #2e3630;
+  --card: #1e231f;
+}
+
+/* ── ClaimQR.css overrides ──────────────────────────────────────── */
+[data-theme="dark"] {
+  --paper: #121513;
+  --card: #1a1f1c;
+  --ink: #e2e8e4;
+  --ink-muted: #8a9a8e;
+  --line: #2e3630;
+}
+
+/* ── Shared element overrides ───────────────────────────────────── */
+
+/* Body */
+[data-theme="dark"] body {
+  background-color: var(--bg-backdrop);
+  color: var(--ink-black);
+}
+
+/* Cards / tickets */
+[data-theme="dark"] .home-card,
+[data-theme="dark"] .claim-ticket,
+[data-theme="dark"] .error-boundary-card {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35),
+              0 2px 5px rgba(0, 0, 0, 0.25);
+}
+
+/* QR code box stays white for readability */
+[data-theme="dark"] .qr-window,
+[data-theme="dark"] .claim-ticket__qr-box {
+  background-color: #ffffff;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15),
+              0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Divider punch-holes must match the page backdrop */
+[data-theme="dark"] .ticket-divider::before,
+[data-theme="dark"] .ticket-divider::after,
+[data-theme="dark"] .claim-ticket__perforation::before,
+[data-theme="dark"] .claim-ticket__perforation::after {
+  background-color: var(--bg-backdrop);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.25);
+}
+
+/* Detail label muted text */
+[data-theme="dark"] .detail-label,
+[data-theme="dark"] .claim-ticket__label,
+[data-theme="dark"] .home-subtitle,
+[data-theme="dark"] .instructions,
+[data-theme="dark"] .error-boundary-subtitle,
+[data-theme="dark"] .claim-ticket__debug summary,
+[data-theme="dark"] .error-boundary-details {
+  color: var(--ink-muted);
+}
+
+/* Home placeholder */
+[data-theme="dark"] .home-placeholder {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-color: var(--perforation);
+  color: var(--ink-muted);
+}
+
+/* Crash button (inverted) */
+[data-theme="dark"] .home-crash-button {
+  color: var(--status-refunded);
+  border-color: var(--status-refunded);
+}
+[data-theme="dark"] .home-crash-button:hover {
+  background-color: var(--status-refunded);
+  color: var(--bg-sage);
+}
+
+/* Error boundary details box */
+[data-theme="dark"] .error-boundary-details {
+  background-color: rgba(143, 42, 27, 0.08);
+  border-color: rgba(143, 42, 27, 0.2);
+}
+
+/* Debug section border */
+[data-theme="dark"] .claim-ticket__debug {
+  border-top-color: var(--line);
+}
+
+/* Skeleton shimmer — dark gradient */
+[data-theme="dark"] .claim-ticket__stamp--skeleton,
+[data-theme="dark"] .claim-ticket__skeleton-qr,
+[data-theme="dark"] .claim-ticket__skeleton-line,
+[data-theme="dark"] .claim-ticket__skeleton-value {
+  background: linear-gradient(90deg, #242b26 25%, #2a322c 37%, #242b26 63%);
+  background-size: 400% 100%;
+}
+
+/* ── Theme toggle button ────────────────────────────────────────── */
+.theme-toggle {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 100;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--perforation);
+  background: var(--bg-sage);
+  color: var(--ink-black);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.theme-toggle:hover {
+  background: var(--ink-black);
+  color: var(--bg-sage);
+}
+
+.theme-toggle svg {
+  width: 20px;
+  height: 20px;
+}
