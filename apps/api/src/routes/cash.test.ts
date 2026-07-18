@@ -10,6 +10,8 @@ vi.mock("../lib/stellar.js", () => ({
   lockEscrow: vi.fn().mockResolvedValue(undefined),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
+  buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
+  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
 
@@ -241,8 +243,8 @@ describe("cashRoutes", () => {
       method: "POST",
       url: "/api/v1/cash/request",
       payload: {
-        seller: "GSELLER",
-        buyer: "GBUYER",
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
         amount_stroops: "10000000",
         secret_hash: "a".repeat(64),
         mode: "invalid_mode",
@@ -251,7 +253,7 @@ describe("cashRoutes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      error: "mode must be either 'custodial' or 'non_custodial'",
+      error: "invalid_request",
     });
 
     await app.close();
@@ -267,17 +269,18 @@ describe("cashRoutes", () => {
       method: "POST",
       url: "/api/v1/cash/request",
       payload: {
-        seller: "GSELLER",
-        buyer: "GBUYER",
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
         amount_stroops: "10000000",
         secret_hash: "a".repeat(64),
         mode: "non_custodial",
       },
     });
 
-    // This will fail without proper Stellar setup, but we can validate the request structure
-    // In a real test environment, we would mock the stellar functions
-    expect(response.statusCode).toBe(502); // Expected to fail without Stellar RPC
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toHaveProperty("unsigned_xdr");
+    expect(response.json()).toHaveProperty("submit_url");
+    expect(response.json().unsigned_xdr).toBe("dummy_unsigned_xdr");
 
     await app.close();
   });
@@ -295,6 +298,44 @@ describe("cashRoutes", () => {
     });
 
     expect(response.statusCode).toBe(404); // Request not found
+
+    await app.close();
+  });
+
+  it("submits signed XDR successfully", async () => {
+    const app: any = Fastify();
+
+    app.decorate("requirePayment", async () => true);
+    app.register(cashRoutes, { prefix: "/api/v1" });
+
+    // First create a pending_signature request
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+        mode: "non_custodial",
+      },
+    });
+
+    expect(createRes.statusCode).toBe(201);
+    const { request_id } = createRes.json();
+
+    // Now submit signed XDR
+    const submitRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${request_id}/submit`,
+      payload: { signed_xdr: "dummy_signed_xdr" },
+    });
+
+    expect(submitRes.statusCode).toBe(200);
+    expect(submitRes.json()).toMatchObject({
+      status: "locked",
+      transaction_hash: "dummy_hash",
+    });
 
     await app.close();
   });
