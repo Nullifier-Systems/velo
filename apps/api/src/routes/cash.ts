@@ -221,7 +221,7 @@ export async function cashRoutes(app: FastifyInstance) {
       reply.code(201).send({
         // The secret is held client-side and is NOT returned by the API
         claim_url: `${baseUrl}/claim/${tradeId}`,
-        qr_payload: qrPayload,
+        qr_payload: `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`,
         instructions: "Show this QR to the cash provider to receive your cash.",
       });
     }
