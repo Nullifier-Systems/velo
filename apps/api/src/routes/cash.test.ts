@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
 import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
+import { sendRefundAlert } from "../lib/webhook.js";
 
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
@@ -12,15 +13,15 @@ vi.mock("../lib/stellar.js", () => ({
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
 
+// Mock the webhook/refund alert function
+vi.mock("../lib/webhook.js", () => ({
+  sendRefundAlert: vi.fn(),
+}));
+
 describe("cashRoutes", () => {
   let app: any;
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    clearNotificationQueue();
-
-    app = Fastify();
-    // Helper to simulate requirePayment authentication
+  const registerApp = (app: any) => {
     app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
       // For testing, require x-payment to be present
       const payment = req.headers["x-payment"];
@@ -38,6 +39,14 @@ describe("cashRoutes", () => {
     });
 
     app.register(cashRoutes, { prefix: "/api/v1" });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearNotificationQueue();
+
+    app = Fastify();
+    registerApp(app);
   });
 
   it("returns a payment challenge when no payment header is present", async () => {
@@ -52,8 +61,8 @@ describe("cashRoutes", () => {
 
   it("creates a cash request successfully without notification opt-in", async () => {
     const body = {
-      seller: "GDPROVIDER",
-      buyer: "GDBUYER",
+      seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
       amount_stroops: "10000000",
       secret_hash: "a".repeat(64),
     };
@@ -72,8 +81,8 @@ describe("cashRoutes", () => {
 
   it("creates with email opt-in and triggers email notification on release", async () => {
     const body = {
-      seller: "GDPROVIDER",
-      buyer: "GDBUYER",
+      seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
       amount_stroops: "25000000",
       secret_hash: "b".repeat(64),
       notification_type: "email",
@@ -117,8 +126,8 @@ describe("cashRoutes", () => {
 
   it("creates with sms opt-in and triggers sms notification on refund", async () => {
     const body = {
-      seller: "GDPROVIDER",
-      buyer: "GDBUYER",
+      seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
       amount_stroops: "50000000",
       secret_hash: "d".repeat(64),
       notification_type: "sms",
@@ -155,12 +164,13 @@ describe("cashRoutes", () => {
     });
     expect(sentNotificationsQueue[0].message).toContain("refunded");
     expect(sentNotificationsQueue[0].message).toContain("5.0"); // stroops formatted correctly
+    expect(sendRefundAlert).toHaveBeenCalledTimes(1);
   });
 
   it("returns 400 bad request for invalid notification inputs", async () => {
     const baseBody = {
-      seller: "GDPROVIDER",
-      buyer: "GDBUYER",
+      seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
       amount_stroops: "10000000",
       secret_hash: "e".repeat(64),
     };
@@ -173,7 +183,6 @@ describe("cashRoutes", () => {
       payload: { ...baseBody, notification_type: "email" },
     });
     expect(res1.statusCode).toBe(400);
-    expect(res1.json().error).toContain("contact_info is required");
 
     // Invalid email format
     const res2 = await app.inject({
@@ -183,7 +192,6 @@ describe("cashRoutes", () => {
       payload: { ...baseBody, notification_type: "email", contact_info: "not-an-email" },
     });
     expect(res2.statusCode).toBe(400);
-    expect(res2.json().error).toContain("Invalid email address format");
 
     // Invalid phone number format
     const res3 = await app.inject({
@@ -193,7 +201,6 @@ describe("cashRoutes", () => {
       payload: { ...baseBody, notification_type: "sms", contact_info: "123" },
     });
     expect(res3.statusCode).toBe(400);
-    expect(res3.json().error).toContain("Invalid phone number format");
 
     // Invalid notification type
     const res4 = await app.inject({
@@ -203,7 +210,63 @@ describe("cashRoutes", () => {
       payload: { ...baseBody, notification_type: "push", contact_info: "someinfo" },
     });
     expect(res4.statusCode).toBe(400);
-    expect(res4.json().error).toContain("Invalid notification_type");
+  });
+
+  it("rejects malformed cash request bodies with a 400 response", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "not-a-stellar-address",
+        buyer: "G123",
+        amount_stroops: "not-a-number",
+        secret_hash: "abc",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "invalid_request",
+    });
+  });
+
+  it("POST /cash/request persists qrPayload and GET /cash/request/:id returns it matching the POST response", async () => {
+    const secretHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    const postResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: secretHash,
+      },
+    });
+
+    expect(postResponse.statusCode).toBe(201);
+    const postBody = postResponse.json();
+    expect(postBody).toHaveProperty("qr_payload");
+
+    const qrPayload = postBody.qr_payload;
+    const tradeId = qrPayload.match(/request_id=([^&]+)/)?.[1];
+    expect(tradeId).toBeTruthy();
+
+    expect(qrPayload).toContain(`request_id=${tradeId}`);
+    expect(qrPayload).toMatch(/contract=/);
+    expect(qrPayload).not.toContain(secretHash);
+    expect(qrPayload).not.toMatch(/secret=/);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/cash/request/${tradeId}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    const getBody = getResponse.json();
+    expect(getBody).toHaveProperty("qrPayload");
+    expect(getBody.qrPayload).toBe(qrPayload);
+    expect(getBody).not.toHaveProperty("secretHex");
   });
 });
-

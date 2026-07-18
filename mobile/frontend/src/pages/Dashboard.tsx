@@ -1,0 +1,166 @@
+import React, { useState, useEffect } from 'react';
+
+interface Trade {
+  id: string;
+  buyer: string;
+  amount_stroops: string;
+  status: string;
+  created_at: string;
+}
+
+interface DashboardMetrics {
+  total_trades: number;
+  total_volume_usdc: string;
+  fees_earned_usdc: string;
+}
+
+interface DashboardData {
+  address: string;
+  metrics: DashboardMetrics;
+  trades: Trade[];
+}
+
+export default function Dashboard() {
+  const [address, setAddress] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchDashboard = async (providerAddress: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const res = await fetch(`${apiUrl}/api/v1/provider/dashboard`, {
+        headers: {
+          'x-provider-address': providerAddress
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const json = await res.json();
+      setData(json);
+      setIsAuthenticated(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (address.trim()) {
+      fetchDashboard(address.trim());
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">Provider Login</h2>
+          <p className="text-center text-sm text-gray-600">Enter your Stellar address to view earnings</p>
+          <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+            <div>
+              <input
+                type="text"
+                required
+                className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                placeholder="G..."
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+            </div>
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              {loading ? 'Loading...' : 'View Dashboard'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Provider Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500">Address: <span className="font-mono">{data?.address}</span></p>
+          <button onClick={() => { setIsAuthenticated(false); setData(null); }} className="text-blue-600 text-sm mt-2">Log out</button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+          <div className="bg-white overflow-hidden shadow rounded-lg border border-gray-100">
+            <div className="px-4 py-5 sm:p-6">
+              <dt className="text-sm font-medium text-gray-500 truncate">Total Completed Trades</dt>
+              <dd className="mt-1 text-3xl font-semibold text-gray-900">{data?.metrics.total_trades}</dd>
+            </div>
+          </div>
+          <div className="bg-white overflow-hidden shadow rounded-lg border border-gray-100">
+            <div className="px-4 py-5 sm:p-6">
+              <dt className="text-sm font-medium text-gray-500 truncate">Total Volume (USDC)</dt>
+              <dd className="mt-1 text-3xl font-semibold text-gray-900">${data?.metrics.total_volume_usdc}</dd>
+            </div>
+          </div>
+          <div className="bg-white overflow-hidden shadow rounded-lg border border-gray-100">
+            <div className="px-4 py-5 sm:p-6">
+              <dt className="text-sm font-medium text-gray-500 truncate">Estimated Fees Earned</dt>
+              <dd className="mt-1 text-3xl font-semibold text-green-600">${data?.metrics.fees_earned_usdc}</dd>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white shadow overflow-hidden sm:rounded-md border border-gray-100">
+          <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
+            <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Trades</h3>
+          </div>
+          <ul role="list" className="divide-y divide-gray-200">
+            {data?.trades.length === 0 ? (
+              <li className="px-4 py-4 sm:px-6 text-gray-500 text-sm">No trades found.</li>
+            ) : (
+              data?.trades.map((trade) => (
+                <li key={trade.id}>
+                  <div className="px-4 py-4 sm:px-6">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-blue-600 truncate">{trade.id.substring(0, 8)}...</p>
+                      <div className="ml-2 flex-shrink-0 flex">
+                        <p className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                          {trade.status}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2 sm:flex sm:justify-between">
+                      <div className="sm:flex">
+                        <p className="flex items-center text-sm text-gray-500 font-mono">
+                          Buyer: {trade.buyer.substring(0, 8)}...
+                        </p>
+                      </div>
+                      <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                        <p>
+                          Amount: ${(Number(trade.amount_stroops) / 10000000).toFixed(2)}
+                        </p>
+                        <p className="ml-4">
+                          {new Date(trade.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,10 +1,13 @@
- import Fastify from "fastify";
+import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import "dotenv/config";
 import { cashRoutes } from "./routes/cash.js";
+import { openapiRoutes } from "./routes/openapi.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
+import { providerRoutes } from "./routes/provider.js";
+import { adminRoutes } from "./routes/admin.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 
@@ -28,6 +31,7 @@ app.register(cors, {
  * Global rate limit:           100 req/min
  * ------------------------------+-----------------
  *   GET /health                 | 100 req/min     (infrastructure health check, free)
+ *   GET /api/v1/openapi.json    |  60 req/min     (OpenAPI spec, free)
  *   GET /api/v1/services        |  60 req/min     (catalog endpoint, free)
  *   GET /api/v1/cash/agents     |  30 req/min     (paid — agent discovery)
  *   POST /api/v1/cash/request   |  20 req/min     (paid — escrow lock, costly)
@@ -134,6 +138,9 @@ app.get(
   async () => ({ ok: true })
 );
 
+app.register(openapiRoutes, { prefix: "/api/v1" });
 app.register(servicesRoutes, { prefix: "/api/v1" });
 app.register(cashRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
+app.register(providerRoutes, { prefix: "/api/v1" });
+app.register(adminRoutes, { prefix: "/api/v1" });
