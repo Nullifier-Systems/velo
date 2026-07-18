@@ -135,6 +135,8 @@ export default function ClaimQR() {
           <span className="claim-ticket__brand">VELO</span>
           <span
             className={`claim-ticket__stamp claim-ticket__stamp--${status.status}`}
+            role="status"
+            aria-label={`Status: ${statusLabel(status.status)}`}
           >
             {statusLabel(status.status)}
           </span>
@@ -144,7 +146,13 @@ export default function ClaimQR() {
           {status.status === "locked" && qrPayload ? (
             <>
               <div className="claim-ticket__qr-box">
-                <QRCodeSVG value={qrPayload} size={200} level="M" />
+                <QRCodeSVG
+                  value={qrPayload}
+                  size={200}
+                  level="M"
+                  role="img"
+                  aria-label="QR code for claim: scan to release funds"
+                />
               </div>
               <p className="claim-ticket__instruction">
                 <strong>Show this to the cash provider.</strong>
