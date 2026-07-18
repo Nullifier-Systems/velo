@@ -31,6 +31,7 @@ pub enum Error {
     TimeoutNotReached = 7,
     InvalidAmount = 8,
     InvalidTimeout = 9,
+    InvalidFee = 10,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledger, sanity cap
@@ -50,6 +51,9 @@ impl EscrowContract {
     ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
+        }
+        if platform_fee_bps > 10_000 {
+            return Err(Error::InvalidFee);
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
@@ -74,7 +78,7 @@ impl Htlc for EscrowContract {
     ) {
         buyer.require_auth();
 
-        if amount <= 0 {
+        if amount <= 0 || amount > (i128::MAX / 10_000) {
             panic_with_error(&env, Error::InvalidAmount);
         }
         if timeout_ledgers == 0 || timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
@@ -144,14 +148,15 @@ impl Htlc for EscrowContract {
         let fee = (state.amount * fee_bps as i128) / 10_000;
         let payout = state.amount - fee;
 
+        // CEI pattern: update state before external calls
+        state.status = TradeStatus::Released;
+        env.storage().persistent().set(&key, &state);
+
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.seller, &payout);
         if fee > 0 {
             client.transfer(&env.current_contract_address(), &admin, &fee);
         }
-
-        state.status = TradeStatus::Released;
-        env.storage().persistent().set(&key, &state);
 
         env.events()
             .publish((symbol_short(&env, "released"), id), payout);
@@ -172,12 +177,13 @@ impl Htlc for EscrowContract {
             panic_with_error(&env, Error::TimeoutNotReached);
         }
 
+        // CEI pattern: update state before external calls
+        state.status = TradeStatus::Refunded;
+        env.storage().persistent().set(&key, &state);
+
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
-
-        state.status = TradeStatus::Refunded;
-        env.storage().persistent().set(&key, &state);
 
         env.events()
             .publish((symbol_short(&env, "refunded"), id), state.amount);
@@ -194,7 +200,7 @@ fn symbol_short(env: &Env, s: &str) -> soroban_sdk::Symbol {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn lock_release_pays_seller_minus_fee() {
@@ -210,5 +216,36 @@ mod test {
         // the scaffold dependency-light. This test documents the intended
         // behavior for whoever picks up the first PR against this file.
         let _ = (env, admin, buyer, seller);
+    }
+
+    #[test]
+    #[should_panic(expected = "10")]
+    fn test_initialize_invalid_fee() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        EscrowContractClient::new(&env, &env.register_contract(None, EscrowContract))
+            .initialize(&admin, &token, &10_001);
+    }
+
+    #[test]
+    #[should_panic(expected = "8")]
+    fn test_lock_overflow_amount_panics() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let client = EscrowContractClient::new(&env, &env.register_contract(None, EscrowContract));
+        
+        client.initialize(&admin, &token, &100);
+        
+        let id = BytesN::from_array(&env, &[1u8; 32]);
+        let secret = BytesN::from_array(&env, &[7u8; 32]);
+        let secret_hash = env.crypto().sha256(&secret.into()).to_bytes();
+        
+        // Large amount that exceeds i128::MAX / 10_000
+        let overflow_amount = (i128::MAX / 10_000) + 1;
+        client.lock(&id, &seller, &buyer, &overflow_amount, &secret_hash, &100);
     }
 }
