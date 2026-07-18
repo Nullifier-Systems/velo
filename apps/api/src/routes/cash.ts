@@ -15,6 +15,7 @@ const cashRequestSchema = z.object({
   buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
   amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
   secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+  fee_bump: z.boolean().optional().default(false),
 });
 
 type CashRequestBody = z.infer<typeof cashRequestSchema>;
@@ -170,7 +171,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const body = parseBody(cashRequestSchema, req.body, reply);
       if (!body) return;
 
-      const { seller, buyer, amount_stroops, secret_hash } = body;
+      const { seller, buyer, amount_stroops, secret_hash, fee_bump } = body;
 
       const tradeId = randomHex32();
 
@@ -183,6 +184,7 @@ export async function cashRoutes(app: FastifyInstance) {
           amountStroops: BigInt(amount_stroops),
           secretHashHex: secret_hash,
           timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+          feeBump: fee_bump,
         });
       } catch (err) {
         req.log.error(err, "lockEscrow failed");

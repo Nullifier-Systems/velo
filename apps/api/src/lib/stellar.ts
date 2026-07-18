@@ -49,15 +49,29 @@ function hexToBytesScVal(hex: string) {
 }
 
 /**
+ * Options for contract invocation
+ */
+export interface InvokeOptions {
+    /** Whether to wrap the transaction in a fee-bump for zero-XLM users */
+    feeBump?: boolean;
+    /** Account address for fee sponsorship logging */
+    userAccount?: string;
+}
+
+/**
  * Builds, simulates, signs, submits, and polls a Soroban contract
  * invocation to completion. Throws if the transaction fails at any
  * stage. Returns the decoded native return value on success.
+ *
+ * When `feeBump` is true, the transaction is wrapped in a fee-bump transaction
+ * so a user with zero XLM balance can still submit the call.
  */
 async function invokeContract(
     contractId: string,
     functionName: string,
     args: xdr.ScVal[],
-    signer: Keypair
+    signer: Keypair,
+    options?: InvokeOptions
 ): Promise<unknown> {
     const account = await server.getAccount(signer.publicKey());
 
@@ -83,7 +97,32 @@ async function invokeContract(
     const prepared = assembleTransaction(tx, sim).build();
     prepared.sign(signer);
 
-    const sendResult = await server.sendTransaction(prepared);
+    let txToSend = prepared;
+    let feeBumpInfo: { innerTxHash: string; feeSponsorPublicKey: string; feePaid: string } | null = null;
+
+    if (options?.feeBump) {
+        const feeBumpResult = wrapWithFeeBump(prepared);
+        // Submit the fee-bump XDR directly
+        const feeBumpEnvelope = xdr.TransactionEnvelope.fromXDR(feeBumpResult.feeBumpXdr, "base64");
+        txToSend = feeBumpEnvelope as any;
+        feeBumpInfo = {
+            innerTxHash: feeBumpResult.innerTxHash,
+            feeSponsorPublicKey: feeBumpResult.feeSponsorPublicKey,
+            feePaid: feeBumpResult.feePaid,
+        };
+
+        // Log the fee sponsorship for cost tracking
+        logFeeSponsorship({
+            timestamp: new Date().toISOString(),
+            innerTxHash: feeBumpResult.innerTxHash,
+            feeSponsorPublicKey: feeBumpResult.feeSponsorPublicKey,
+            feePaidStroops: feeBumpResult.feePaid,
+            userAccount: options.userAccount ?? "unknown",
+            operationType: functionName,
+        });
+    }
+
+    const sendResult = await server.sendTransaction(txToSend);
     if (sendResult.status === "ERROR") {
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
@@ -113,6 +152,8 @@ export interface LockParams {
     amountStroops: bigint;
     secretHashHex: string;
     timeoutLedgers: number;
+    /** Whether to wrap the transaction in a fee-bump for zero-XLM users */
+    feeBump?: boolean;
 }
 
 /** Calls escrow's lock(id, seller, buyer, amount, secret_hash, timeout_ledgers). */
@@ -129,7 +170,11 @@ export async function lockEscrow(params: LockParams) {
             hexToBytesScVal(params.secretHashHex),
             nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
-        signer
+        signer,
+        {
+            feeBump: params.feeBump,
+            userAccount: params.buyer,
+        }
     );
 }
 
