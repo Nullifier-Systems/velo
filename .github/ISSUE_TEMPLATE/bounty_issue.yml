@@ -1,0 +1,48 @@
+name: Bounty issue
+description: Structured template for bounty issues
+labels: [bounty]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to be done?
+      placeholder: Describe the task clearly and concisely.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this issue to be considered complete?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+  - type: dropdown
+    id: reward
+    attributes:
+      label: Reward tier
+      description: How large is the bounty?
+      options:
+        - small
+        - medium
+        - large
+    validations:
+      required: true
+  - type: textarea
+    id: timebox
+    attributes:
+      label: Time-box
+      description: Estimated time commitment (optional).
+      placeholder: e.g. 2 days, 1 week
+    validations:
+      required: false
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Technical requirements
+      description: Any languages, frameworks, or constraints to be aware of.
+    validations:
+      required: false
