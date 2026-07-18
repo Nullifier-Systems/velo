@@ -6,6 +6,7 @@ import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
+import { parsePagination, paginate } from "../lib/pagination.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -81,7 +82,7 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
  *                                    embedded in the scanned QR (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
-  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string } }>(
+  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string; cursor?: string; limit?: string } }>(
     "/cash/agents",
     {
       config: {
@@ -93,6 +94,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!paid) return;
 
       const { lat, lng, radius } = req.query;
+      const { cursor, limit } = parsePagination(req.query);
       const providers = getProviders().filter(p => p.status === "available");
       
       if (lat && lng) {
@@ -124,11 +126,13 @@ export async function cashRoutes(app: FastifyInstance) {
           .filter(p => p.distance_km <= searchRadiusKm);
         
         withDistance.sort((a, b) => a.distance_km - b.distance_km);
-        return { agents: withDistance };
+        const page = paginate(withDistance, cursor, limit);
+        return { agents: page.data, nextCursor: page.nextCursor, hasMore: page.hasMore };
       }
 
       // Default if no coordinates are provided
-      return { agents: providers };
+      const page = paginate(providers, cursor, limit);
+      return { agents: page.data, nextCursor: page.nextCursor, hasMore: page.hasMore };
     }
   );
 
