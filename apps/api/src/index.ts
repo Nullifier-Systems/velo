@@ -1,6 +1,7 @@
 import { app } from "./app.js";
 import { cashRoutes } from "./routes/cash.js";
 import { adminRoutes } from "./routes/admin.js";
+import { exportRoutes } from "./routes/export.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -12,6 +13,9 @@ async function startServer() {
 
     // Register Admin/Ops monitoring & intervention routes (with /api/v1 prefix)
     await app.register(adminRoutes, { prefix: "/api/v1" });
+
+    // Register Export routes (with /api/v1 prefix)
+    await app.register(exportRoutes, { prefix: "/api/v1" });
 
     // Start listening
     await app.listen({ port, host: "0.0.0.0" });
