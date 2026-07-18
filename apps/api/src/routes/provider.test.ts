@@ -68,7 +68,7 @@ describe("providerRoutes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/csv");
-    expect(response.headers["content-disposition"]).toContain("completed_trades_G_PROVI.csv");
+    expect(response.headers["content-disposition"]).toContain("completed_trades_G_PROVID.csv");
     expect(response.body).toContain("Trade ID,Buyer Address,Amount (Stroops),Amount (USDC),Status,Created At");
     expect(response.body).toContain("abc123csv");
     expect(response.body).toContain("buyer123");
@@ -110,7 +110,7 @@ describe("providerRoutes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("application/json");
-    expect(response.headers["content-disposition"]).toContain("completed_trades_G_PROVI.json");
+    expect(response.headers["content-disposition"]).toContain("completed_trades_G_PROVID.json");
     
     const payload = response.json();
     expect(payload).toHaveLength(1);
