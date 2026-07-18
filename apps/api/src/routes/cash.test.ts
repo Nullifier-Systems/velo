@@ -234,14 +234,10 @@ describe("cashRoutes", () => {
   });
 
   it("validates mode parameter in cash request", async () => {
-    const app: any = Fastify();
-
-    app.decorate("requirePayment", async () => true);
-    app.register(cashRoutes, { prefix: "/api/v1" });
-
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -255,19 +251,13 @@ describe("cashRoutes", () => {
     expect(response.json()).toMatchObject({
       error: "mode must be either 'custodial' or 'non_custodial'",
     });
-
-    await app.close();
   });
 
   it("returns unsigned XDR in non-custodial mode", async () => {
-    const app: any = Fastify();
-
-    app.decorate("requirePayment", async () => true);
-    app.register(cashRoutes, { prefix: "/api/v1" });
-
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -281,16 +271,9 @@ describe("cashRoutes", () => {
     expect(response.json()).toHaveProperty("unsigned_xdr");
     expect(response.json()).toHaveProperty("submit_url");
     expect(response.json().unsigned_xdr).toBe("dummy_unsigned_xdr");
-
-    await app.close();
   });
 
   it("rejects submit without signed_xdr", async () => {
-    const app: any = Fastify();
-
-    app.decorate("requirePayment", async () => true);
-    app.register(cashRoutes, { prefix: "/api/v1" });
-
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/cash/request/test123/submit",
@@ -298,20 +281,14 @@ describe("cashRoutes", () => {
     });
 
     expect(response.statusCode).toBe(404); // Request not found
-
-    await app.close();
   });
 
   it("submits signed XDR successfully", async () => {
-    const app: any = Fastify();
-
-    app.decorate("requirePayment", async () => true);
-    app.register(cashRoutes, { prefix: "/api/v1" });
-
     // First create a pending_signature request
     const createRes = await app.inject({
       method: "POST",
       url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
       payload: {
         seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -336,8 +313,6 @@ describe("cashRoutes", () => {
       status: "locked",
       transaction_hash: "dummy_hash",
     });
-
-    await app.close();
   });
 
   it("POST /cash/request persists qrPayload and GET /cash/request/:id returns it matching the POST response", async () => {
