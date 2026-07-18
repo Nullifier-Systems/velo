@@ -8,6 +8,8 @@ import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
+import { bazaarRoutes } from "./routes/bazaar.js";
+
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
@@ -145,6 +147,8 @@ app.get(
 app.register(openapiRoutes, { prefix: "/api/v1" });
 app.register(servicesRoutes, { prefix: "/api/v1" });
 app.register(cashRoutes, { prefix: "/api/v1" });
+app.register(reputationRoutes, { prefix: "/api/v1" });
+app.register(bazaarRoutes, { prefix: "/api/v1" });
 app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
