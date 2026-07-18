@@ -6,6 +6,7 @@ import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
+import { checkAndRecord, getFlaggedAddresses } from "../lib/fraud.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -207,6 +208,14 @@ export async function cashRoutes(app: FastifyInstance) {
         createdAt: new Date().toISOString(),
       });
 
+      const fraudResult = checkAndRecord(buyer);
+      if (fraudResult.flagged) {
+        req.log.warn(
+          { buyer, tradeId, reason: fraudResult.reason },
+          "fraud detection: flagged cash request"
+        );
+      }
+
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       reply.code(201).send({
         // The secret is held client-side and is NOT returned by the API
@@ -323,4 +332,9 @@ export async function cashRoutes(app: FastifyInstance) {
       return { id: record.id, status: "refunded" };
     }
   );
+
+  // Internal endpoint — view flagged addresses (admin / debugging)
+  app.get("/cash/flagged", async (_req, reply) => {
+    return { flagged: getFlaggedAddresses() };
+  });
 }
