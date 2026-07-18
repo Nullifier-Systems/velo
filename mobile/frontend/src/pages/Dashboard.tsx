@@ -52,6 +52,33 @@ export default function Dashboard() {
     }
   };
 
+  const exportData = async (format: 'csv' | 'json') => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const res = await fetch(`${apiUrl}/api/v1/provider/export?format=${format}`, {
+        headers: {
+          'x-provider-address': address
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `completed_trades_${address.substring(0, 8)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (address.trim()) {
@@ -121,8 +148,22 @@ export default function Dashboard() {
         </div>
 
         <div className="bg-white shadow overflow-hidden sm:rounded-md border border-gray-100">
-          <div className="px-4 py-5 border-b border-gray-200 sm:px-6">
+          <div className="px-4 py-5 border-b border-gray-200 sm:px-6 flex items-center justify-between">
             <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Trades</h3>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => exportData('csv')}
+                className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Export CSV
+              </button>
+              <button
+                onClick={() => exportData('json')}
+                className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Export JSON
+              </button>
+            </div>
           </div>
           <ul role="list" className="divide-y divide-gray-200">
             {data?.trades.length === 0 ? (

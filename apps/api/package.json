@@ -2,12 +2,14 @@
   "name": "@velo/api",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
+    "post-deploy-check": "tsx scripts/post-deploy-check.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

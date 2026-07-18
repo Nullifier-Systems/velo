@@ -16,6 +16,8 @@ export interface CashRequestRecord {
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
     status: "locked" | "released" | "refunded" | "pending_signature";
     createdAt: string;
+    notificationType?: "email" | "sms" | "none";
+    contactInfo?: string;
 }
 
 export interface ProviderRecord {
