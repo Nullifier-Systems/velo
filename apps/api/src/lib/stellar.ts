@@ -200,7 +200,7 @@ export async function resolveEscrow(params: ResolveParams) {
         "resolve",
         [
             hexToBytesScVal(params.tradeId),
-            nativeToScVal(params.resolveToBuyer, { type: "bool" }),
+            nativeToScVal(params.resolveToBuyer),
         ],
         signer
     );

@@ -343,7 +343,8 @@ mod test {
     #[test]
     fn test_lock_and_release() {
         let f = setup(1_000, 100); // 100 bps = 1%
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         assert_eq!(f.token.balance(&f.buyer), 500);
         assert_eq!(f.token.balance(&f.contract_id), 500);
@@ -362,7 +363,8 @@ mod test {
     #[test]
     fn test_lock_and_refund() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.env.ledger().with_mut(|li| li.sequence_number += 101);
         f.client.refund(&f.id);
@@ -377,7 +379,8 @@ mod test {
     #[test]
     fn test_dispute_by_buyer_and_resolve_to_buyer() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.client.dispute(&f.buyer, &f.id);
 
@@ -397,7 +400,8 @@ mod test {
     #[test]
     fn test_dispute_by_seller_and_resolve_to_seller() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.client.dispute(&f.seller, &f.id);
 
@@ -419,7 +423,8 @@ mod test {
     #[should_panic]
     fn test_dispute_after_timeout_fails() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.env.ledger().with_mut(|li| li.sequence_number += 101);
         f.client.dispute(&f.buyer, &f.id);
@@ -429,7 +434,8 @@ mod test {
     #[should_panic]
     fn test_dispute_unauthorized_fails() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         let random_addr = Address::generate(&f.env);
         f.client.dispute(&random_addr, &f.id);
@@ -439,7 +445,8 @@ mod test {
     #[should_panic]
     fn test_dispute_blocks_refund() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.client.dispute(&f.buyer, &f.id);
 
@@ -451,7 +458,8 @@ mod test {
     #[should_panic]
     fn test_dispute_blocks_release() {
         let f = setup(1_000, 100);
-        f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
         f.client.dispute(&f.buyer, &f.id);
 

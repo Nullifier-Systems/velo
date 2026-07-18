@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { randomHex32, generateSecretPair } from './crypto';
+import { randomHex32, generateSecretPair } from './crypto.js';
 import { createHash } from 'node:crypto';
 
 describe('randomHex32', () => {
