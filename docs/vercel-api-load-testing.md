@@ -77,6 +77,10 @@ http.response_time p95:     596 ms
 
 This proves that Artillery executed the capped scenario against the live deployment and enforced the expected protection response. It does **not** prove `/health` application latency or availability because the request stopped at Vercel Authentication. A true API proof requires an authorized bypass secret or a public staging endpoint and must expect HTTP 200 with `{ "ok": true }`.
 
+## Load Test Findings & Scaling Strategy
+
+See the [Velo API Load Testing & Scaling Plan](scaling-plan.md) for actual metrics tables, identified event-loop/rate-limiting bottlenecks, and the structural horizontal scaling strategy.
+
 ## Sources
 
 - [Artillery test script and phase reference](https://www.artillery.io/docs/reference/test-script)
