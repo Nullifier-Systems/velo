@@ -10,6 +10,8 @@ vi.mock("../lib/stellar.js", () => ({
   lockEscrow: vi.fn().mockResolvedValue(undefined),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
+  buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
+  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
 
@@ -230,6 +232,7 @@ describe("cashRoutes", () => {
       error: "invalid_request",
     });
   });
+
 
   it("POST /cash/request persists qrPayload and GET /cash/request/:id returns it matching the POST response", async () => {
     const secretHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
