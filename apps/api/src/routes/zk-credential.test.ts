@@ -35,7 +35,7 @@ class VerifierRegistryContract {
   
   constructor() {
     // Register the empty tree root as a valid initial root
-    const initialRoot = this.calculateRoot(this.filledSubtrees, 0);
+    const initialRoot = this.calculateRoot(this.filledSubtrees, 0, ZERO_VALUE);
     this.validRoots.add(initialRoot.toString("hex"));
   }
 
