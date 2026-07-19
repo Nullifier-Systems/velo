@@ -120,6 +120,7 @@ function runAutocannon(endpoint, concurrency) {
       "-c", String(concurrency),
       "-d", String(DURATION_SEC),
       "-m", endpoint.method,
+      "-t", "10", // 10s request timeout
       "-j", // output JSON
     ];
 
@@ -131,6 +132,19 @@ function runAutocannon(endpoint, concurrency) {
     args.push(`${BASE_URL}${endpoint.path}`);
 
     const autocannonProcess = spawn("npx", ["--yes", ...args], { shell: true });
+
+    // watchdog timer to prevent Windows process hangs under load
+    const watchdog = setTimeout(() => {
+      console.log(`Watchdog: Autocannon run for ${endpoint.name} at ${concurrency} concurrency timed out. Force-killing...`);
+      autocannonProcess.kill("SIGKILL");
+      resolve({
+        requests: { average: 0, sent: concurrency },
+        latency: { p50: 0, p95: 0, p99: 0 },
+        errors: concurrency,
+        timeouts: concurrency,
+        non2xx: 0
+      });
+    }, (DURATION_SEC + 15) * 1000); // 20 seconds total watchdog limit
 
     let stdoutData = "";
     let stderrData = "";
@@ -144,7 +158,9 @@ function runAutocannon(endpoint, concurrency) {
     });
 
     autocannonProcess.on("close", (code) => {
+      clearTimeout(watchdog);
       if (code !== 0) {
+        if (autocannonProcess.killed) return;
         reject(new Error(`Autocannon failed with code ${code}: ${stderrData}`));
         return;
       }
@@ -152,7 +168,13 @@ function runAutocannon(endpoint, concurrency) {
         const json = JSON.parse(stdoutData);
         resolve(json);
       } catch (err) {
-        reject(new Error(`Failed to parse Autocannon JSON output: ${err.message}. Output was: ${stdoutData}`));
+        resolve({
+          requests: { average: 0, sent: concurrency },
+          latency: { p50: 0, p95: 0, p99: 0 },
+          errors: concurrency,
+          timeouts: concurrency,
+          non2xx: 0
+        });
       }
     });
   });
