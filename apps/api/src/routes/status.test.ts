@@ -13,6 +13,7 @@ describe("GET /api/v1/status", () => {
       amountStroops: "10000000",
       secretHex: "deadbeef",
       secretHashHex: "cafebabe",
+      qrPayload: "velo://claim?request_id=aaaabbbbccccddddeeeeffff00001111aaaabbbbccccddddeeeeffff00001111&contract=C...TEST",
       status: "locked",
       createdAt: new Date().toISOString(),
     });
