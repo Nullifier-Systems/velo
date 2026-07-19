@@ -126,6 +126,9 @@ async function invokeContract(
     args: xdr.ScVal[],
     signer: Keypair,
 ): Promise<unknown> {
+    const stageLog = log.child({ contract: contractId, fn: functionName });
+
+    stageLog.info({ stage: "build", signer: signer.publicKey() }, "building contract invocation");
     const account = await server.getAccount(signer.publicKey());
     const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -141,33 +144,57 @@ async function invokeContract(
         .setTimeout(30)
         .build();
 
+    stageLog.info({ stage: "simulate" }, "simulating transaction");
     const sim = await server.simulateTransaction(tx);
     if (Api.isSimulationError(sim)) {
+        stageLog.error({ stage: "simulate", error: sim.error }, "simulation failed");
         throw new Error(`simulation failed: ${sim.error}`);
     }
 
     const prepared = assembleTransaction(tx, sim).build();
     prepared.sign(signer);
+    const txHash = prepared.hash().toString("hex");
+    stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
+    stageLog.info({ stage: "submit", txHash }, "submitting transaction");
     const sendResult = await server.sendTransaction(prepared);
     if (sendResult.status === "ERROR") {
+        stageLog.error(
+            { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
+            "submission failed"
+        );
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
+    stageLog.info({ stage: "submit", txHash, status: sendResult.status }, "transaction accepted");
 
     let getResult = await server.getTransaction(sendResult.hash);
     const start = Date.now();
+    let attempts = 1;
     while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
         if (Date.now() - start > 30_000) {
+            stageLog.error(
+                { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
+                "timed out waiting for confirmation"
+            );
             throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
         }
         await new Promise((r) => setTimeout(r, 1500));
         getResult = await server.getTransaction(sendResult.hash);
+        attempts += 1;
     }
 
     if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+        stageLog.error(
+            { stage: "poll", txHash, attempts, status: getResult.status },
+            "transaction failed on-chain"
+        );
         throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
     }
 
+    stageLog.info(
+        { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
+        "transaction confirmed"
+    );
     return getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
 }
 

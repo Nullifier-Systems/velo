@@ -16,7 +16,44 @@ import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/st
 
 const usedPayments = new Set<string>();
 
-export const app = Fastify({ logger: true });
+/**
+ * Request ID correlation — every request gets a stable ID that Fastify
+ * binds to `req.log` (as `reqId`), so every log line emitted during the
+ * request carries it, including the escrow lifecycle stages logged from
+ * lib/stellar.ts (simulate → sign → submit → poll).
+ *
+ * Inbound `x-request-id` headers are honored so retrying clients and
+ * upstream proxies can supply their own ID. On Vercel we fall back to
+ * `x-vercel-id` (set by Vercel's edge on every invocation), which makes
+ * our `reqId` match the ID Vercel's log viewer groups function logs by.
+ * Otherwise a UUID is generated. See docs/request-tracing.md.
+ */
+const REQUEST_ID_MAX_LENGTH = 128;
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export const app = Fastify({
+  logger: true,
+  genReqId: (req) => {
+    const inbound =
+      firstHeaderValue(req.headers["x-request-id"]) ??
+      firstHeaderValue(req.headers["x-vercel-id"]);
+    // Reject oversized inbound IDs so a hostile header can't bloat every
+    // log line for the request.
+    if (inbound && inbound.length > 0 && inbound.length <= REQUEST_ID_MAX_LENGTH) {
+      return inbound;
+    }
+    return randomUUID();
+  },
+});
+
+// Echo the request ID back to the client so a failed call can be traced
+// in the logs — see docs/request-tracing.md.
+app.addHook("onRequest", async (req, reply) => {
+  reply.header("x-request-id", req.id);
+});
 
 // Allow the mobile frontend (and other trusted origins) to call this API
 // from the browser. Locked to specific origins rather than "*" since
