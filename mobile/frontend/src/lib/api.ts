@@ -57,3 +57,30 @@ export function formatStroops(stroops: string): string {
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
 }
+
+export interface StatusResponse {
+  api: {
+    status: "ok";
+    uptime_seconds: number;
+    timestamp: string;
+  };
+  chain: {
+    network: string;
+    status: string;
+    latest_ledger: number | null;
+    oldest_ledger: number | null;
+  };
+  recent_activity: {
+    id: string;
+    status: "locked" | "released" | "refunded" | "pending_signature";
+    createdAt: string;
+  }[];
+}
+
+export async function fetchStatus(): Promise<StatusResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/status`);
+  if (!res.ok) {
+    throw new Error(`status check failed (${res.status})`);
+  }
+  return res.json();
+}
