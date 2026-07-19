@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { refundEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
-import { getCashRequest, updateStatus } from "../lib/store.js";
+import { getCashRequest, updateStatus, getStoreStats } from "../lib/store.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -188,15 +188,7 @@ export async function adminRoutes(app: FastifyInstance) {
       }
     }
   );
-}
-import type { FastifyInstance } from "fastify";
-import { requireAdminAuth } from "../lib/admin-auth.js";
-import { getStoreStats } from "../lib/store.js";
-
-export async function adminRoutes(app: FastifyInstance) {
   app.get("/admin/status", async (req, reply) => {
-    if (!requireAdminAuth(req, reply)) return;
-
     return {
       ok: true,
       version: "0.1.0",
