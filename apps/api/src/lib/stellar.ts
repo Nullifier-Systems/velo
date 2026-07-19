@@ -51,6 +51,25 @@ function hexToBytesScVal(hex: string) {
     return nativeToScVal(Buffer.from(hex, "hex"), { type: "bytes" });
 }
 
+/**
+ * Minimal structural logger, satisfied by Fastify's request-scoped
+ * `req.log` (pino). Routes pass their request logger down so every
+ * lifecycle stage logged here carries the request's `reqId` and can be
+ * correlated in the log viewer — see docs/request-tracing.md.
+ */
+export interface StellarLogger {
+    info: (obj: Record<string, unknown>, msg?: string) => void;
+    error: (obj: Record<string, unknown>, msg?: string) => void;
+    child: (bindings: Record<string, unknown>) => StellarLogger;
+}
+
+/** Fallback for callers without a request context (scripts, tests). */
+const noopLogger: StellarLogger = {
+    info: () => { },
+    error: () => { },
+    child: () => noopLogger,
+};
+
 // ---------------------------------------------------------------------------
 // Build helpers — return unsigned, simulated XDR (non-custodial flow)
 // ---------------------------------------------------------------------------
@@ -125,6 +144,7 @@ async function invokeContract(
     functionName: string,
     args: xdr.ScVal[],
     signer: Keypair,
+    log: StellarLogger = noopLogger,
 ): Promise<unknown> {
     const stageLog = log.child({ contract: contractId, fn: functionName });
 
@@ -236,7 +256,7 @@ export async function submitLockTx(signedXdr: string): Promise<{ hash: string }>
 }
 
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
-export async function lockEscrow(params: LockParams) {
+export async function lockEscrow(params: LockParams, log: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
@@ -250,6 +270,7 @@ export async function lockEscrow(params: LockParams) {
             nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
         signer,
+        log,
     );
 }
 
@@ -313,13 +334,14 @@ export async function submitReleaseTx(signedXdr: string): Promise<{ hash: string
 }
 
 /** Testnet-only: custodial release (API signs). */
-export async function releaseEscrow(params: ReleaseParams) {
+export async function releaseEscrow(params: ReleaseParams, log: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
         "release",
         [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
         signer,
+        log,
     );
 }
 
@@ -375,13 +397,14 @@ export async function submitRefundTx(signedXdr: string): Promise<{ hash: string 
 }
 
 /** Testnet-only: custodial refund (API signs). */
-export async function refundEscrow(params: RefundParams) {
+export async function refundEscrow(params: RefundParams, log: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
         "refund",
         [hexToBytesScVal(params.tradeId)],
         signer,
+        log,
     );
 }
 
