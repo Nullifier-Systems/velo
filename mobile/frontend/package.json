@@ -2,6 +2,7 @@
   "name": "@velo/frontend",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5181",
@@ -11,6 +12,7 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
+    "html5-qrcode": "^2.3.8",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

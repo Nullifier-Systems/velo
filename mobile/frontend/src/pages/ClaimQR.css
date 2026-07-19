@@ -11,6 +11,17 @@
   --stamp-red: #8f2a1b;
 }
 
+html.dark {
+  --paper: #121b16;
+  --card: #1c2720;
+  --ink: #edf1e7;
+  --ink-muted: #8da092;
+  --line: #384d3f;
+  --stamp-blue: #5294e2;
+  --stamp-green: #52b788;
+  --stamp-red: #e63946;
+}
+
 .claim-page {
   min-height: 100vh;
   background: var(--paper);
@@ -20,6 +31,33 @@
   padding: 32px 16px;
   font-family: "IBM Plex Sans", sans-serif;
   color: var(--ink);
+  position: relative;
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.theme-toggle:hover {
+  background: rgba(141, 160, 146, 0.1);
+  transform: scale(1.05);
+}
+
+.theme-toggle:active {
+  transform: scale(0.95);
 }
 
 .claim-ticket {
@@ -168,6 +206,30 @@
   color: var(--stamp-red);
 }
 
+.claim-ticket__actions {
+  padding: 0 24px 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.claim-ticket__chat-link {
+  display: inline-block;
+  padding: 10px 24px;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--card, #f7f9f4);
+  background: var(--ink, #1b2a22);
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.claim-ticket__chat-link:hover {
+  opacity: 0.85;
+}
+
 .claim-ticket__debug {
   margin: 0 24px 24px;
   padding-top: 16px;
@@ -281,6 +343,14 @@
 .claim-ticket__skeleton-line,
 .claim-ticket__skeleton-value {
   background: linear-gradient(90deg, #dfe6d8 25%, #f4f7ef 37%, #dfe6d8 63%);
+  background-size: 400% 100%;
+}
+
+html.dark .claim-ticket__stamp--skeleton,
+html.dark .claim-ticket__skeleton-qr,
+html.dark .claim-ticket__skeleton-line,
+html.dark .claim-ticket__skeleton-value {
+  background: linear-gradient(90deg, #25332a 25%, #304237 37%, #25332a 63%);
   background-size: 400% 100%;
 }
 
