@@ -73,3 +73,28 @@ export function getStoreStats() {
         },
     };
 }
+
+export interface RecentActivityItem {
+    id: string;
+    status: CashRequestRecord["status"];
+    createdAt: string;
+}
+
+/**
+ * Sanitized feed of the most recent trades for the public status page.
+ *
+ * Deliberately omits seller/buyer addresses, amounts, and secret material —
+ * only the trade id (already public via /claim/:id links), its status, and
+ * its timestamp. This gives a rough sense of on-chain activity without
+ * letting anyone enumerate counterparty addresses or trade sizes.
+ *
+ * Kept separate from getStoreStats() above: that one is for internal/admin
+ * metrics (aggregate counts, behind ADMIN_API_KEY), this one is the public
+ * transparency feed with no auth and no aggregate/sensitive fields.
+ */
+export function getRecentActivity(limit = 10): RecentActivityItem[] {
+    return Array.from(store.values())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, limit)
+        .map(({ id, status, createdAt }) => ({ id, status, createdAt }));
+}

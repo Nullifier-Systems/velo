@@ -10,6 +10,7 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
+import { statusRoutes } from "./routes/status.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 
@@ -40,6 +41,8 @@ app.register(cors, {
  *   GET /api/v1/cash/request/:id|  60 req/min     (free — polling)
  *   POST /api/v1/cash/request/:id/release | 20 req/min (free — state transition)
  *   GET /api/v1/reputation/:addr|  30 req/min     (paid — on-chain reputation)
+ *   GET /api/v1/status           |  60 req/min     (public transparency page data, free)
+ *   /api/v1/admin/*              |  n/a            (internal, behind ADMIN_API_KEY)
  *
  * Responses exceeding the limit get a 429 + Retry-After header.
  *
@@ -149,3 +152,4 @@ app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
+app.register(statusRoutes, { prefix: "/api/v1" });

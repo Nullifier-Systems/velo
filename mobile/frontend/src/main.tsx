@@ -17,6 +17,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/" element={<Home />} />
           <Route path="/register-provider" element={<RegisterProvider />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          {/* Public transparency page: API/chain health + recent sanitized
+              activity. No auth, no sensitive data — safe to link publicly. */}
+          <Route path="/status" element={<Status />} />
           {/* Standalone QR page — this is the link the API's cash_request
               endpoint returns, and it must work with no app install and
               no login, since agents (Claude, Telegram, WhatsApp) paste it
@@ -28,4 +31,3 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ErrorBoundary>
   </React.StrictMode>
 );
-
