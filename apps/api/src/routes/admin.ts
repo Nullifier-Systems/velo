@@ -1,9 +1,16 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { refundEscrow, submitRefundTx, buildRefundTx } from "../lib/stellar.js";
+import { refundEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
 import { getCashRequest, updateStatus, getStoreStats } from "../lib/store.js";
-import { notifyTradeStatus } from "./chat.js";
-import { z } from "zod";
-import { parseBody } from "../lib/validation.js";
+
+// Basic schema for body validation
+interface FlagRequestBody {
+  suspicious: boolean;
+  notes?: string;
+}
+
+interface OverrideHeader {
+  'x-admin-api-key': string;
+}
 
 // Basic schema for body validation
 interface FlagRequestBody {
