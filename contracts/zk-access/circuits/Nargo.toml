@@ -1,0 +1,8 @@
+[package]
+name = "zk_access"
+type = "bin"
+authors = ["Nullifier Systems"]
+compiler_version = ">=0.30.0"
+
+[dependencies]
+std = { git = "https://github.com/noir-lang/noir", tag = "v0.30.0", directory = "crates/std" }

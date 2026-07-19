@@ -4,6 +4,7 @@ members = [
     "htlc-core",
     "escrow",
     "atomic-swap",
+    "zk-access",
 ]
 
 [workspace.dependencies]
