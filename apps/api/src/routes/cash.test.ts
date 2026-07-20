@@ -272,4 +272,77 @@ describe("cashRoutes", () => {
     expect(getBody.qrPayload).toBe(qrPayload);
     expect(getBody).not.toHaveProperty("secretHex");
   });
+it("paginates agents list", async () => {
+  const app: any = Fastify();
+  registerApp(app);
+
+  // Get initial providers count
+  const initialRes = await app.inject({
+    method: "GET",
+    url: "/api/v1/cash/agents",
+    headers: { "x-payment": "test-tx-hash" },
+  });
+  expect(initialRes.statusCode).toBe(200);
+  const initialAgents = initialRes.json().agents ?? [];
+  const initialCount = initialAgents.length;
+
+  // Register 5 providers
+  const names = ["Agent A", "Agent B", "Agent C", "Agent D", "Agent E"];
+  for (let i = 0; i < names.length; i++) {
+    const regResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/agents",
+      payload: {
+        name: names[i],
+        lat: 10 + i,
+        lng: 20 + i,
+        rate: "1.0",
+      },
+    });
+    expect(regResponse.statusCode).toBe(201);
+  }
+
+  // Query with limit=2, offset=initialCount + 1
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/cash/agents",
+    headers: { "x-payment": "test-tx-hash" },
+    query: {
+      limit: "2",
+      offset: String(initialCount + 1),
+    },
+  });
+
+  expect(response.statusCode).toBe(200);
+  const body = response.json();
+  expect(body.agents.length).toBe(2);
+  expect(body.agents[0].name).toBe("Agent B");
+  expect(body.agents[1].name).toBe("Agent C");
+  expect(body.pagination).toEqual({
+    limit: 2,
+    offset: initialCount + 1,
+    total: initialCount + 5,
+  });
+
+  // Invalid limit
+  const resInvalidLimit = await app.inject({
+    method: "GET",
+    url: "/api/v1/cash/agents",
+    headers: { "x-payment": "test-tx-hash" },
+    query: { limit: "-1" },
+  });
+  expect(resInvalidLimit.statusCode).toBe(400);
+
+  // Invalid offset
+  const resInvalidOffset = await app.inject({
+    method: "GET",
+    url: "/api/v1/cash/agents",
+    headers: { "x-payment": "test-tx-hash" },
+    query: { offset: "invalid" },
+  });
+  expect(resInvalidOffset.statusCode).toBe(400);
+
+  await app.close();
+});
+
 });

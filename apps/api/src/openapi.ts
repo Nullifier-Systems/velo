@@ -273,6 +273,43 @@ export const openApiDocument = {
         security: [{ x402Payment: [] }],
         "x-price-usdc": "0.001",
         "x-rate-limit": { max: 30, timeWindow: "1 minute" },
+        parameters: [
+          {
+            name: "lat",
+            in: "query",
+            required: false,
+            description: "Latitude coordinates of the user.",
+            schema: { type: "string" },
+          },
+          {
+            name: "lng",
+            in: "query",
+            required: false,
+            description: "Longitude coordinates of the user.",
+            schema: { type: "string" },
+          },
+          {
+            name: "radius",
+            in: "query",
+            required: false,
+            description: "Search radius in kilometers (defaults to 5.0).",
+            schema: { type: "string" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            description: "Maximum number of items to return (defaults to 20, max 100).",
+            schema: { type: "integer", minimum: 1 },
+          },
+          {
+            name: "offset",
+            in: "query",
+            required: false,
+            description: "Number of items to skip (defaults to 0).",
+            schema: { type: "integer", minimum: 0 },
+          },
+        ],
         responses: {
           "200": {
             description: "Nearby cash providers.",
@@ -280,11 +317,14 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["agents"],
+                  required: ["agents", "pagination"],
                   properties: {
                     agents: {
                       type: "array",
                       items: { $ref: "#/components/schemas/CashAgent" },
+                    },
+                    pagination: {
+                      $ref: "#/components/schemas/PaginationMetadata",
                     },
                   },
                 },
@@ -706,6 +746,27 @@ export const openApiDocument = {
           completion_rate: { type: ["number", "null"] },
           trades: { type: ["integer", "null"] },
           trusted: { type: ["boolean", "null"] },
+        },
+      },
+      PaginationMetadata: {
+        type: "object",
+        required: ["limit", "offset", "total"],
+        properties: {
+          limit: {
+            type: "integer",
+            description: "The maximum number of items requested/returned.",
+            examples: [20],
+          },
+          offset: {
+            type: "integer",
+            description: "The number of items skipped.",
+            examples: [0],
+          },
+          total: {
+            type: "integer",
+            description: "The total number of items matching the query.",
+            examples: [15],
+          },
         },
       },
     },

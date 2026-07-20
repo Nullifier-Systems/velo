@@ -109,7 +109,7 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
  *                                    if the trade times out or fails (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
-  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string } }>(
+  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string; limit?: string; offset?: string } }>(
     "/cash/agents",
     {
       config: {
@@ -120,7 +120,30 @@ export async function cashRoutes(app: FastifyInstance) {
       const paid = await (app as any).requirePayment(req, reply, "0.001");
       if (!paid) return;
 
-      const { lat, lng, radius } = req.query;
+      const { lat, lng, radius, limit, offset } = req.query;
+
+      let limitNum = 20;
+      let offsetNum = 0;
+
+      if (limit !== undefined) {
+        limitNum = parseInt(limit, 10);
+        if (isNaN(limitNum) || limitNum <= 0) {
+          reply.code(400).send({ error: "Invalid pagination limit supplied" });
+          return;
+        }
+        if (limitNum > 100) {
+          limitNum = 100;
+        }
+      }
+
+      if (offset !== undefined) {
+        offsetNum = parseInt(offset, 10);
+        if (isNaN(offsetNum) || offsetNum < 0) {
+          reply.code(400).send({ error: "Invalid pagination offset supplied" });
+          return;
+        }
+      }
+
       const providers = getProviders().filter(p => p.status === "available");
 
       if (lat && lng) {
@@ -152,11 +175,23 @@ export async function cashRoutes(app: FastifyInstance) {
           .filter(p => p.distance_km <= searchRadiusKm);
 
         withDistance.sort((a, b) => a.distance_km - b.distance_km);
-        return { agents: withDistance };
+        resultAgents = withDistance;
+      } else {
+        // Default if no coordinates are provided
+        resultAgents = providers;
       }
 
-      // Default if no coordinates are provided
-      return { agents: providers };
+      const total = resultAgents.length;
+      const paginatedAgents = resultAgents.slice(offsetNum, offsetNum + limitNum);
+
+      return {
+        agents: paginatedAgents,
+        pagination: {
+          limit: limitNum,
+          offset: offsetNum,
+          total
+        }
+      };
     }
   );
 

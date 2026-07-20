@@ -21,6 +21,41 @@ The API is implemented with Fastify and is intended to expose payment-aware rout
 | GET    | `/api/v1/reputation/:address` | 0.0005       | On-chain reputation lookup      |
 | GET    | `/api/v1/admin/status`        | Admin auth   | System status & store metrics   |
 
+## Pagination
+
+Endpoints that return growing lists (such as `/api/v1/cash/agents`) support offset-based pagination. 
+
+### Query Parameters
+
+- `limit` (integer, optional): The maximum number of items to return. Defaults to `20`. The maximum allowed limit is `100`.
+- `offset` (integer, optional): The number of items to skip. Defaults to `0`.
+
+### Response Structure
+
+Paginated endpoints return the list of items wrapped in a response object containing a `pagination` metadata object.
+
+```json
+{
+  "agents": [
+    {
+      "id": "...",
+      "name": "Farmacia Guadalupe",
+      "lat": 12.34,
+      "lng": 56.78,
+      "rate": "1.0",
+      "tier": "Standard",
+      "status": "available",
+      "createdAt": "2026-07-17T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "total": 1
+  }
+}
+```
+
 ## Rate Limiting
 
 All API endpoints are rate-limited per IP address to prevent abuse. The following limits are enforced:
