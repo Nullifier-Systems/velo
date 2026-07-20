@@ -1,6 +1,7 @@
-import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
-import { CONTRACTS } from '@velo/shared';
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { CONTRACTS } from "@velo/shared";
+import { lockEscrow, releaseEscrow, refundEscrow, disputeEscrow } from "../lib/stellar.js";
 import {
   lockEscrow,
   releaseEscrow,
@@ -691,4 +692,86 @@ export async function cashRoutes(app: FastifyInstance) {
       return { id: record.id, status: 'refunded' };
     },
   );
+
+  app.post<{ Params: { id: string }; Body: { caller: string; reason?: string } }>(
+    "/cash/request/:id/dispute",
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        reply.code(404).send({ error: "request not found" });
+        return;
+      }
+      if (record.status !== "locked") {
+        reply.code(409).send({ error: `request is already ${record.status}` });
+        return;
+      }
+
+      const disputeBody = parseBody(
+        z.object({
+          caller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+          reason: z.string().trim().optional(),
+        }),
+        req.body,
+        reply
+      );
+      if (!disputeBody) return;
+
+      const { caller, reason } = disputeBody;
+
+      if (caller !== record.buyer && caller !== record.seller) {
+        reply.code(403).send({ error: "Only trade participants can dispute a trade" });
+        return;
+      }
+
+      try {
+        await disputeEscrow({
+          contractId: record.contractId,
+          tradeId: record.id,
+          caller,
+        });
+      } catch (err) {
+        req.log.error(err, "disputeEscrow failed");
+        reply.code(502).send({ error: "escrow dispute failed", detail: String(err) });
+        return;
+      }
+
+      const disputedAt = new Date().toISOString();
+      updateStatus(record.id, "disputed");
+      record.disputedAt = disputedAt;
+      record.disputedBy = caller;
+      record.disputeReason = reason || "";
+
+      try {
+        if ((app as any).pg) {
+          const query = `
+            UPDATE cash_requests
+            SET 
+              status = 'disputed',
+              disputed_at = $1,
+              disputed_by = $2,
+              dispute_reason = $3,
+              updated_at = NOW()
+            WHERE id = $4;
+          `;
+          await (app as any).pg.query(query, [disputedAt, caller, reason || null, record.id]);
+        }
+      } catch (dbErr) {
+        req.log.error(dbErr, "failed to update database status to disputed");
+      }
+
+      return {
+        id: record.id,
+        status: "disputed",
+        disputedAt,
+        disputedBy: caller,
+        disputeReason: reason || "",
+      };
+    }
+  );
+}
 }

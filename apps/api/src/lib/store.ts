@@ -6,18 +6,25 @@
  * only to prove the lock -> release flow end-to-end over HTTP.
  */
 export interface CashRequestRecord {
-  id: string; // trade id, hex
-  contractId: string;
-  seller: string;
-  buyer: string;
-  amountStroops: string; // bigint as string, JSON-safe
-  secretHex: string; // TODO: don't store server-side long-term — see note below
-  secretHashHex: string;
-  qrPayload: string; // safe to persist — contains no secret, only request_id + contract
-  status: 'locked' | 'released' | 'refunded' | 'pending_signature';
-  createdAt: string;
-  notificationType?: 'email' | 'sms' | 'none';
-  contactInfo?: string;
+    id: string; // trade id, hex
+    contractId: string;
+    seller: string;
+    buyer: string;
+    amountStroops: string; // bigint as string, JSON-safe
+    secretHex: string; // TODO: don't store server-side long-term — see note below
+    secretHashHex: string;
+    qrPayload: string; // safe to persist — contains no secret, only request_id + contract
+    status: "locked" | "released" | "refunded" | "disputed";
+    status: "locked" | "released" | "refunded" | "pending_signature";
+    createdAt: string;
+    disputedAt?: string;
+    disputedBy?: string;
+    disputeReason?: string;
+    resolvedAt?: string;
+    resolvedBy?: string;
+    resolution?: string;
+    notificationType?: "email" | "sms" | "none";
+    contactInfo?: string;
 }
 
 export interface ProviderRecord {
@@ -66,9 +73,13 @@ export function getCashRequest(id: string): CashRequestRecord | undefined {
   return store.get(id);
 }
 
-export function updateStatus(id: string, status: CashRequestRecord['status']) {
-  const record = store.get(id);
-  if (record) record.status = status;
+export function getAllCashRequests(): CashRequestRecord[] {
+    return Array.from(store.values());
+}
+
+export function updateStatus(id: string, status: CashRequestRecord["status"]) {
+    const record = store.get(id);
+    if (record) record.status = status;
 }
 
 export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
@@ -76,17 +87,18 @@ export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
 }
 
 export function getStoreStats() {
-  const requests = Array.from(store.values());
-  return {
-    total_cash_requests: store.size,
-    total_providers: providersStore.size,
-    cash_requests_by_status: {
-      locked: requests.filter((r) => r.status === 'locked').length,
-      released: requests.filter((r) => r.status === 'released').length,
-      refunded: requests.filter((r) => r.status === 'refunded').length,
-      pending_signature: requests.filter((r) => r.status === 'pending_signature').length,
-    },
-  };
+    const requests = Array.from(store.values());
+    return {
+        total_cash_requests: store.size,
+        total_providers: providersStore.size,
+        cash_requests_by_status: {
+            locked: requests.filter(r => r.status === "locked").length,
+            released: requests.filter(r => r.status === "released").length,
+            refunded: requests.filter(r => r.status === "refunded").length,
+            disputed: requests.filter(r => r.status === "disputed").length,
+            pending_signature: requests.filter(r => r.status === "pending_signature").length,
+        },
+    };
 }
 
 export interface RecentActivityItem {

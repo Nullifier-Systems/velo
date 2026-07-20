@@ -1003,12 +1003,33 @@
             "enum": [
               "locked",
               "released",
-              "refunded"
+              "refunded",
+              "disputed"
             ]
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "disputedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disputedBy": {
+            "type": "string"
+          },
+          "disputeReason": {
+            "type": "string"
+          },
+          "resolvedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
           }
         }
       },

@@ -59,14 +59,27 @@ export function formatStroops(stroops: string): string {
 }
 
 export interface StatusResponse {
-  api: { status: string; uptime_seconds: number; timestamp: string };
-  chain: { network: string; status: string; latest_ledger: number | null };
-  recent_activity: { id: string; status: string; createdAt: string }[];
+  api: {
+    status: string;
+    uptime_seconds: number;
+    timestamp: string;
+  };
+  chain: {
+    network: string;
+    status: string;
+    latest_ledger: number | null;
+    oldest_ledger: number | null;
+  };
+  recent_activity: {
+    id: string;
+    status: string;
+    createdAt: string;
+  }[];
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {
   const res = await fetch(`${API_BASE}/api/v1/status`);
-  if (!res.ok) throw new Error('status check failed');
+  if (!res.ok) throw new Error("status failed");
   return res.json();
 }
 

@@ -10,9 +10,11 @@ vi.mock('../lib/stellar.js', () => ({
   lockEscrow: vi.fn().mockResolvedValue(undefined),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
-  buildLockEscrowTransaction: vi.fn().mockResolvedValue('dummy_unsigned_xdr'),
-  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: 'dummy_hash', status: 'SUCCESS' }),
-  CONTRACTS: { testnet: { escrow: 'dummy_contract' } },
+  disputeEscrow: vi.fn().mockResolvedValue(undefined),
+  resolveEscrow: vi.fn().mockResolvedValue(undefined),
+  buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
+  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
+  CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
 
 // Mock the webhook/refund alert function
@@ -271,4 +273,59 @@ describe('cashRoutes', () => {
     expect(getBody.qrPayload).toBe(qrPayload);
     expect(getBody).not.toHaveProperty('secretHex');
   });
+
+  it("POST /cash/request/:id/dispute transitions status to disputed, and resolving it via admin route works", async () => {
+    const app: any = Fastify();
+    registerApp(app);
+    const { adminRoutes } = await import("./admin.js");
+    app.register(adminRoutes);
+
+    const postResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      },
+    });
+    expect(postResponse.statusCode).toBe(201);
+    const postBody = postResponse.json();
+    const tradeId = postBody.qr_payload.match(/request_id=([^&]+)/)?.[1];
+    expect(tradeId).toBeTruthy();
+
+    const disputeResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/dispute`,
+      payload: {
+        caller: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        reason: "Seller never arrived with cash",
+      },
+    });
+    expect(disputeResponse.statusCode).toBe(200);
+    const disputeBody = disputeResponse.json();
+    expect(disputeBody.status).toBe("disputed");
+    expect(disputeBody.disputedBy).toBe("GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+
+    process.env.ADMIN_API_KEY = "test-api-key";
+    
+    const resolveResponse = await app.inject({
+      method: "POST",
+      url: `/admin/trades/${tradeId}/resolve`,
+      headers: {
+        "x-admin-api-key": "test-api-key",
+      },
+      payload: {
+        resolve_to_buyer: true,
+        notes: "Buyer provided proof of no-show",
+      },
+    });
+    expect(resolveResponse.statusCode).toBe(200);
+    expect(resolveResponse.json().new_status).toBe("refunded");
+
+    await app.close();
+  });
+});
 });

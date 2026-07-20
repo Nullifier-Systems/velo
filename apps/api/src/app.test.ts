@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { app } from './app.js';
-import { server } from './lib/stellar.js';
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { app } from "./app.js";
+import { server } from "./lib/stellar.js";
 
 // Mock the Stellar server to avoid real network calls
 vi.mock('./lib/stellar.js', () => ({
