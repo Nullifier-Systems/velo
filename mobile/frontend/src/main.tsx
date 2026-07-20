@@ -1,18 +1,18 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import "./index.css";
-import Home from "./pages/Home.js";
-import ClaimQR from "./pages/ClaimQR.js";
-import RegisterProvider from "./pages/RegisterProvider.js";
-import Dashboard from "./pages/Dashboard.js";
-import Status from "./pages/Status.js";
-import Chat from "./pages/Chat.js";
-import MerchantScan from "./pages/MerchantScan.js";
-import Status from "./pages/Status.js";
-import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import './index.css';
+import Home from './pages/Home.js';
+import ClaimQR from './pages/ClaimQR.js';
+import RegisterProvider from './pages/RegisterProvider.js';
+import Dashboard from './pages/Dashboard.js';
+import Status from './pages/Status.js';
+import Chat from './pages/Chat.js';
+import MerchantScan from './pages/MerchantScan.js';
+import Status from './pages/Status.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
@@ -33,5 +33,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

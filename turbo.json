@@ -23,6 +23,8 @@
       "outputs": ["dist/**", ".next/**", "public/**"]
     },
     "lint": {},
+    "format": {},
+    "format:check": {},
     "test": {
       "dependsOn": ["^build"]
     }

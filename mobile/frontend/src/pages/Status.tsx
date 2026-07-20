@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { fetchStatus, type StatusResponse } from "../lib/api.js";
+import { useEffect, useState } from 'react';
+import { fetchStatus, type StatusResponse } from '../lib/api.js';
 
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -10,10 +10,10 @@ function formatUptime(seconds: number): string {
   return `${minutes}m`;
 }
 
-function healthyBadge(status: string): "status-locked" | "status-released" | "status-refunded" {
-  if (status === "ok" || status === "healthy") return "status-released";
-  if (status === "unreachable") return "status-refunded";
-  return "status-locked";
+function healthyBadge(status: string): 'status-locked' | 'status-released' | 'status-refunded' {
+  if (status === 'ok' || status === 'healthy') return 'status-released';
+  if (status === 'unreachable') return 'status-refunded';
+  return 'status-locked';
 }
 
 export default function Status() {
@@ -31,7 +31,7 @@ export default function Status() {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load status");
+        if (!cancelled) setError(err instanceof Error ? err.message : 'failed to load status');
       }
     }
 
@@ -66,21 +66,25 @@ export default function Status() {
       <div className="status-card">
         <h1 className="home-title">Velo Status</h1>
         <p className="home-subtitle">
-          Live API and on-chain health, for transparency with users and
-          partners. No trade details, balances, or addresses shown here.
+          Live API and on-chain health, for transparency with users and partners. No trade details,
+          balances, or addresses shown here.
         </p>
 
         <div className="status-grid">
           <div className="status-tile">
             <span className="detail-label">API</span>
-            <span className={`status-pill ${healthyBadge(data.api.status)}`}>{data.api.status}</span>
+            <span className={`status-pill ${healthyBadge(data.api.status)}`}>
+              {data.api.status}
+            </span>
             <span className="detail-value">up {formatUptime(data.api.uptime_seconds)}</span>
           </div>
           <div className="status-tile">
             <span className="detail-label">Chain ({data.chain.network})</span>
-            <span className={`status-pill ${healthyBadge(data.chain.status)}`}>{data.chain.status}</span>
+            <span className={`status-pill ${healthyBadge(data.chain.status)}`}>
+              {data.chain.status}
+            </span>
             <span className="detail-value">
-              {data.chain.latest_ledger !== null ? `ledger #${data.chain.latest_ledger}` : "n/a"}
+              {data.chain.latest_ledger !== null ? `ledger #${data.chain.latest_ledger}` : 'n/a'}
             </span>
           </div>
         </div>
@@ -93,15 +97,20 @@ export default function Status() {
             {data.recent_activity.map((item) => (
               <li key={item.id} className="activity-row">
                 <span className="detail-value activity-id">{item.id.slice(0, 10)}…</span>
-                <span className={`status-pill status-pill-sm status-${item.status}`}>{item.status}</span>
+                <span className={`status-pill status-pill-sm status-${item.status}`}>
+                  {item.status}
+                </span>
                 <span className="detail-label">{new Date(item.createdAt).toLocaleString()}</span>
               </li>
             ))}
           </ul>
         )}
 
-        <p className="instructions">Auto-refreshes every 30s · last updated {new Date(data.api.timestamp).toLocaleTimeString()}</p>
+        <p className="instructions">
+          Auto-refreshes every 30s · last updated{' '}
+          {new Date(data.api.timestamp).toLocaleTimeString()}
+        </p>
       </div>
     </main>
   );
-      }
+}

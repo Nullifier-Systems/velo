@@ -19,7 +19,7 @@ export default function RegisterProvider() {
         },
         (error) => {
           alert('Could not detect location: ' + error.message);
-        }
+        },
       );
     } else {
       alert('Geolocation is not supported by your browser');
@@ -33,7 +33,7 @@ export default function RegisterProvider() {
     try {
       // Use the API URL from environment or default to localhost
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
-      
+
       const response = await fetch(`${apiUrl}/api/v1/cash/agents`, {
         method: 'POST',
         headers: {
@@ -48,7 +48,7 @@ export default function RegisterProvider() {
       });
 
       if (!response.ok) {
-        throw new Error('Registration failed: ' + await response.text());
+        throw new Error('Registration failed: ' + (await response.text()));
       }
 
       setSuccess(true);
@@ -85,7 +85,9 @@ export default function RegisterProvider() {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4 rounded-md shadow-sm">
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">Business/Provider Name</label>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                Business/Provider Name
+              </label>
               <input
                 id="name"
                 name="name"
@@ -100,7 +102,9 @@ export default function RegisterProvider() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="lat" className="block text-sm font-medium text-gray-700">Latitude</label>
+                <label htmlFor="lat" className="block text-sm font-medium text-gray-700">
+                  Latitude
+                </label>
                 <input
                   id="lat"
                   name="lat"
@@ -113,7 +117,9 @@ export default function RegisterProvider() {
                 />
               </div>
               <div>
-                <label htmlFor="lng" className="block text-sm font-medium text-gray-700">Longitude</label>
+                <label htmlFor="lng" className="block text-sm font-medium text-gray-700">
+                  Longitude
+                </label>
                 <input
                   id="lng"
                   name="lng"
@@ -126,7 +132,7 @@ export default function RegisterProvider() {
                 />
               </div>
             </div>
-            
+
             <button
               type="button"
               onClick={handleLocationDetect}
@@ -136,7 +142,9 @@ export default function RegisterProvider() {
             </button>
 
             <div>
-              <label htmlFor="rate" className="block text-sm font-medium text-gray-700">Exchange Rate (USD to Cash)</label>
+              <label htmlFor="rate" className="block text-sm font-medium text-gray-700">
+                Exchange Rate (USD to Cash)
+              </label>
               <input
                 id="rate"
                 name="rate"

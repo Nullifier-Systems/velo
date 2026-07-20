@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
 export interface CashRequestStatus {
   id: string;
@@ -7,22 +7,22 @@ export interface CashRequestStatus {
   buyer: string;
   amountStroops: string;
   secretHashHex: string;
-  status: "locked" | "released" | "refunded";
+  status: 'locked' | 'released' | 'refunded';
   createdAt: string;
 }
 
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
   if (!res.ok) {
-    throw new Error(res.status === 404 ? "not-found" : `request failed (${res.status})`);
+    throw new Error(res.status === 404 ? 'not-found' : `request failed (${res.status})`);
   }
   return res.json();
 }
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ secret }),
   });
   if (!res.ok) {
@@ -39,9 +39,14 @@ export interface ChatMessage {
   createdAt: string;
 }
 
-export async function fetchChatHistory(tradeId: string, participant: string): Promise<{ messages: ChatMessage[] }> {
-  const res = await fetch(`${API_BASE}/api/v1/chat/${tradeId}/history?participant=${encodeURIComponent(participant)}`);
-  if (!res.ok) throw new Error("chat history failed");
+export async function fetchChatHistory(
+  tradeId: string,
+  participant: string,
+): Promise<{ messages: ChatMessage[] }> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/chat/${tradeId}/history?participant=${encodeURIComponent(participant)}`,
+  );
+  if (!res.ok) throw new Error('chat history failed');
   return res.json();
 }
 
@@ -49,7 +54,7 @@ export async function fetchChatHistory(tradeId: string, participant: string): Pr
 export function formatStroops(stroops: string): string {
   const n = BigInt(stroops);
   const whole = n / 10_000_000n;
-  const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
+  const frac = (n % 10_000_000n).toString().padStart(7, '0').slice(0, 2);
   return `${whole}.${frac}`;
 }
 
@@ -61,7 +66,7 @@ export interface StatusResponse {
 
 export async function fetchStatus(): Promise<StatusResponse> {
   const res = await fetch(`${API_BASE}/api/v1/status`);
-  if (!res.ok) throw new Error("status check failed");
+  if (!res.ok) throw new Error('status check failed');
   return res.json();
 }
 
@@ -91,6 +96,6 @@ export interface StatusResponse {
 
 export async function fetchStatus(): Promise<StatusResponse> {
   const res = await fetch(`${API_BASE}/api/v1/status`);
-  if (!res.ok) throw new Error("status failed");
+  if (!res.ok) throw new Error('status failed');
   return res.json();
 }

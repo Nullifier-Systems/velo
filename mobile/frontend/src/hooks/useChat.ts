@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { fetchChatHistory, type ChatMessage } from "../lib/api";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { fetchChatHistory, type ChatMessage } from '../lib/api';
 
 const WS_BASE = import.meta.env.VITE_WS_URL ?? `ws://${location.hostname}:5181`;
 
@@ -31,9 +31,9 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
         return;
       }
 
-      if (payload.type === "message") {
+      if (payload.type === 'message') {
         setMessages((prev) => [...prev, payload.data]);
-      } else if (payload.type === "closed") {
+      } else if (payload.type === 'closed') {
         setClosed(true);
         ws.close();
       }
@@ -44,9 +44,11 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
       wsRef.current = null;
     };
 
-    fetchChatHistory(tradeId, participant).then((res) => {
-      if (res.messages) setMessages(res.messages);
-    }).catch(() => {});
+    fetchChatHistory(tradeId, participant)
+      .then((res) => {
+        if (res.messages) setMessages(res.messages);
+      })
+      .catch(() => {});
 
     return () => {
       ws.close();
@@ -56,7 +58,7 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
   const send = useCallback((text: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "message", data: { text } }));
+    ws.send(JSON.stringify({ type: 'message', data: { text } }));
   }, []);
 
   return { messages, send, connected, closed };
