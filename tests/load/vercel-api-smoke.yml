@@ -1,0 +1,28 @@
+config:
+  target: "{{ $processEnvironment.BASE_URL }}"
+  http:
+    timeout: 10
+  phases:
+    - name: cost-capped-proof
+      duration: 3
+      arrivalCount: 3
+      maxVusers: 3
+  plugins:
+    expect: {}
+  ensure:
+    thresholds:
+      - http.response_time.p95: 1500
+    conditions:
+      - expression: "http.request_rate <= 1.5"
+  defaults:
+    headers:
+      user-agent: velo-cost-capped-artillery-smoke/1.0
+
+scenarios:
+  - name: GET health only
+    flow:
+      - get:
+          url: /health
+          followRedirect: false
+          expect:
+            - statusCode: "{{ $processEnvironment.EXPECTED_STATUS }}"

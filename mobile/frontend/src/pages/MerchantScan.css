@@ -1,0 +1,459 @@
+.merchant-scan-page {
+  min-height: 100vh;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px;
+  font-family: "IBM Plex Sans", sans-serif;
+  color: var(--ink);
+  position: relative;
+}
+
+.merchant-scan-header {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.merchant-scan-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", monospace;
+  text-align: center;
+}
+
+.back-button {
+  position: absolute;
+  left: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back-button:hover {
+  background: rgba(141, 160, 146, 0.1);
+}
+
+.merchant-scan-content {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.merchant-scan-alert {
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.merchant-scan-alert.error {
+  background: rgba(143, 42, 27, 0.08);
+  border-color: var(--stamp-red);
+  color: var(--ink);
+}
+
+.merchant-scan-alert.success {
+  background: rgba(31, 107, 74, 0.08);
+  border-color: var(--stamp-green);
+  color: var(--ink);
+}
+
+.alert-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.scan-retry-button {
+  margin-top: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.scan-retry-button:hover {
+  opacity: 0.9;
+}
+
+/* Scanner viewport and overlay */
+.scanner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.scanner-viewfinder {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.scanner-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scanner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Viewfinder corner brackets */
+.scanner-border-corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border: 4px solid var(--stamp-green);
+}
+
+.scanner-border-corner.top-left {
+  top: 15%;
+  left: 15%;
+  border-right: none;
+  border-bottom: none;
+}
+
+.scanner-border-corner.top-right {
+  top: 15%;
+  right: 15%;
+  border-left: none;
+  border-bottom: none;
+}
+
+.scanner-border-corner.bottom-left {
+  bottom: 15%;
+  left: 15%;
+  border-right: none;
+  border-top: none;
+}
+
+.scanner-border-corner.bottom-right {
+  bottom: 15%;
+  right: 15%;
+  border-left: none;
+  border-top: none;
+}
+
+/* Laser scan line animation */
+.scanner-laser-line {
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: var(--stamp-green);
+  box-shadow: 0 0 8px var(--stamp-green);
+  animation: laser-bounce 2s infinite ease-in-out;
+}
+
+@keyframes laser-bounce {
+  0%, 100% {
+    top: 15%;
+  }
+  50% {
+    top: 85%;
+  }
+}
+
+.scanner-hint {
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: center;
+  margin: 0;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* Spinner */
+.loading-details-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px;
+  gap: 12px;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--line);
+  border-top-color: var(--stamp-green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-details-spinner p {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* Claim details ticket card */
+.claim-details-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(27, 42, 34, 0.05);
+}
+
+.claim-details-card h2 {
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: "IBM Plex Mono", monospace;
+  margin: 0 0 20px 0;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.details-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.details-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.details-label {
+  color: var(--ink-muted);
+}
+
+.details-value {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.details-value.amount {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.details-value.address {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+}
+
+.status-badge {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+
+.status-badge.status-locked {
+  color: var(--stamp-blue);
+  background: rgba(82, 148, 226, 0.08);
+}
+
+.status-badge.status-released {
+  color: var(--stamp-green);
+  background: rgba(82, 183, 136, 0.08);
+}
+
+.status-badge.status-refunded {
+  color: var(--stamp-red);
+  background: rgba(230, 57, 70, 0.08);
+}
+
+/* Actions styling */
+.details-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.release-action-button {
+  background: var(--stamp-green);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity 0.2s;
+  box-shadow: 0 2px 6px rgba(31, 107, 74, 0.2);
+}
+
+.release-action-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.release-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.scan-next-button {
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 4px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity 0.2s;
+}
+
+.scan-next-button:hover {
+  opacity: 0.9;
+}
+
+/* Fallback section styles */
+.scanner-fallback-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.fallback-divider {
+  font-size: 11px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  position: relative;
+  width: 100%;
+  text-align: center;
+}
+
+.fallback-divider::before,
+.fallback-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: var(--line);
+}
+
+.fallback-divider::before {
+  left: 0;
+}
+
+.fallback-divider::after {
+  right: 0;
+}
+
+.fallback-actions {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 10px;
+}
+
+.fallback-file-button {
+  display: inline-block;
+  text-align: center;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--ink);
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fallback-file-button:hover {
+  background: rgba(141, 160, 146, 0.08);
+  border-color: var(--ink);
+}
+
+.manual-entry-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.manual-entry-input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: "IBM Plex Sans", sans-serif;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.manual-entry-input:focus {
+  border-color: var(--ink);
+}
+
+.manual-entry-button {
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.manual-entry-button:hover {
+  opacity: 0.9;
+}

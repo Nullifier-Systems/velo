@@ -1,5 +1,7 @@
 # Velo
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Velo is an open-source payment and liquidity platform for privacy-preserving cash access on Stellar. It combines Soroban smart contracts, a lightweight API layer, and a mobile-first experience to make cash-like settlement practical for real-world use cases such as agent-assisted payments, local commerce, and programmable escrow.
 
 ## Why Velo Exists
@@ -35,6 +37,8 @@ The system is organized around a simple trust model:
 - sellers or claimants receive funds only when the correct condition is satisfied,
 - the API layer exposes the flow to clients and agents,
 - the mobile experience provides a lightweight path for users to complete or claim transactions.
+
+For a detailed step-by-step visual sequence of the end-to-end payment and cash request flow, see the [End-to-End Request Flow Diagram](docs/request-flow.md).
 
 ```mermaid
 flowchart LR
@@ -87,6 +91,15 @@ The API layer provides the integration surface for clients and agents. It expose
 - cash request orchestration,
 - payment challenge responses,
 - reputation and provider discovery concepts.
+
+### Agent Integration & Worked Examples
+
+Velo is designed for direct consumption by autonomous AI agents, Telegram bots, and automated client applications. Agents interact with the API layer to discover local liquidity providers, lock cash requests in Soroban escrow, and receive a user-facing claim link.
+
+For a complete end-to-end worked example, see [examples/telegram_bot.js](examples/telegram_bot.js). This minimal runnable Telegram bot script demonstrates how an agent can:
+1. Query available cash providers via `GET /api/v1/cash/agents`
+2. Create an escrow cash request via `POST /api/v1/cash/request`
+3. Retrieve and present the resulting `claim_url` to the end user
 
 ## Mobile Application
 
@@ -157,11 +170,13 @@ docs/                contributor and architecture documentation
 
 ## Documentation Links
 
+- [docs/request-flow.md](docs/request-flow.md) (End-to-End Request Flow Diagram)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/smart-contracts.md](docs/smart-contracts.md)
 - [docs/api.md](docs/api.md)
 - [docs/development.md](docs/development.md)
 - [docs/testing.md](docs/testing.md)
+- [examples/telegram_bot.js](examples/telegram_bot.js) (Telegram Bot Agent Worked Example)
 
 ## Security
 
@@ -183,7 +198,7 @@ Velo is an actively evolving platform. The core contracts and integrations are p
 
 ### Is the repository open source?
 
-Yes. The project is intended for open collaboration and public review.
+Yes. Velo is released under the [Apache License 2.0](LICENSE) and is intended for open collaboration and public review.
 
 ### Where should I start?
 
