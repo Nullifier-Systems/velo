@@ -197,163 +197,26 @@ export async function cashRoutes(app: FastifyInstance) {
       reply.code(201).send(provider);
   });
 
-  const requestSchema = z.object({
-    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
-    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
-  });
+const requestSchema = z.object({
+  ...
+});
 
-  const prepareLockSchema = z.object({
-    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
-    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
-    // Validated manually below (rather than via z.enum) so we can return the
-    // specific "mode must be either..." error message callers depend on.
-    mode: z.string().trim().optional(),
-    notification_type: z.enum(["email", "sms", "none"]).optional(),
-    contact_info: z.string().optional(),
-  });
+const prepareLockSchema = z.object({
+  ...
+});
 
-  app.post<{ Body: z.infer<typeof prepareLockSchema> }>(
-    "/cash/request/prepare",
-    {
-      config: {
-        rateLimit: { max: 20, timeWindow: "1 minute" },
-      },
-    },
-    async (req, reply) => {
-      const paid = await (app as any).requirePayment(req, reply, "0.01");
-      if (!paid) return;
+app.post<{ Body: z.infer<typeof prepareLockSchema> }>(
+  "/cash/request/prepare",
+  ...
+);
 
-      const body = parseBody(prepareLockSchema, req.body, reply);
-      if (!body) return;
-
-      const { seller, buyer, amount_stroops, secret_hash, mode: rawMode, notification_type, contact_info } = body;
-      const mode = rawMode ?? "custodial";
-      if (mode !== "custodial" && mode !== "non_custodial") {
-        reply.code(400).send({ error: "mode must be either 'custodial' or 'non_custodial'" });
-        return;
-      }
-
-      if (notification_type && notification_type !== "none") {
-        if (!contact_info) {
-          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
-          return;
-        }
-        if (notification_type === "email") {
-          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          if (!emailRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid email address format for contact_info" });
-            return;
-          }
-        } else if (notification_type === "sms") {
-          const phoneRegex = /^\+?[1-9]\d{5,14}$/;
-          if (!phoneRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
-            return;
-          }
-        }
-      }
-
-      const tradeId = randomHex32();
-      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
-      const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
-
-      if (mode === "custodial") {
-        try {
-          await lockEscrow({
-            contractId: ESCROW_CONTRACT_ID,
-            tradeId,
-            seller,
-            buyer,
-            amountStroops: BigInt(amount_stroops),
-            secretHashHex: secret_hash,
-            timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
-          });
-        } catch (err) {
-          req.log.error(err, "lockEscrow failed");
-          reply.code(502).send({
-            error: "escrow lock failed",
-            detail: String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-          return;
-        }
-
-        saveCashRequest({
-          id: tradeId,
-          contractId: ESCROW_CONTRACT_ID,
-          seller,
-          buyer,
-          amountStroops: amount_stroops,
-          secretHex: "", // The API no longer knows the secret
-          secretHashHex: secret_hash,
-          qrPayload,
-          status: "locked",
-          createdAt: new Date().toISOString(),
-          notificationType: notification_type,
-          contactInfo: contact_info,
-        });
-
-        reply.code(201).send({
-          // The secret is held client-side and is NOT returned by the API
-          claim_url: `${baseUrl}/claim/${tradeId}`,
-          qr_payload: qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
-        });
-      } else {
-        try {
-          const unsignedXdr = await buildLockEscrowTransaction({
-            contractId: ESCROW_CONTRACT_ID,
-            tradeId,
-            seller,
-            buyer,
-            amountStroops: BigInt(amount_stroops),
-            secretHashHex: secret_hash,
-            timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
-            signerPublicKey: buyer,
-          });
-
-          saveCashRequest({
-            id: tradeId,
-            contractId: ESCROW_CONTRACT_ID,
-            seller,
-            buyer,
-            amountStroops: amount_stroops,
-            secretHex: "",
-            secretHashHex: secret_hash,
-            qrPayload,
-            status: "pending_signature",
-            createdAt: new Date().toISOString(),
-            notificationType: notification_type,
-            contactInfo: contact_info,
-          });
-
-          reply.code(201).send({
-            request_id: tradeId,
-            unsigned_xdr: unsignedXdr,
-            network_passphrase: NETWORK_PASSPHRASE,
-            submit_url: `/api/v1/cash/request/${tradeId}/submit`,
-            claim_url: `${baseUrl}/claim/${tradeId}`,
-            qr_payload: qrPayload,
-            instructions: "Sign the transaction with your wallet and submit to the provided endpoint.",
-          });
-        } catch (err) {
-          req.log.error(err, "buildLockEscrowTransaction failed");
-          reply.code(502).send({
-            error: "failed to build transaction",
-            detail: String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-          return;
-        }
-      }
-    }
-  );
-
-  app.post<{ Body: z.infer<typeof cashRequestSchema> }>(
+app.post<{
+  Body: z.infer<typeof cashRequestSchema>;
+  Querystring: { lang?: string };
+}>(
+  "/cash/request",
+  ...
+);
     "/cash/request",
     {
       config: {
@@ -432,11 +295,25 @@ export async function cashRoutes(app: FastifyInstance) {
         contactInfo: contact_info,
       });
 
+      const langParam = req.query.lang || (req.body as any)?.lang;
+      const isSpanish = typeof langParam === "string" && langParam.toLowerCase().startsWith("es");
+      const instructions = isSpanish
+        ? "Muestra este QR al proveedor de efectivo para recibir tu efectivo."
+        : "Show this QR to the cash provider to receive your cash.";
+
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       reply.code(201).send({
         claim_url: `${baseUrl}/claim/${tradeId}`,
-        qr_payload: qrPayload,
-        instructions: "Show this QR to the cash provider to receive your cash.",
+        const instructions =
+          req.query.lang === "es"
+            ? "Muestra este QR al proveedor de efectivo para recibir tu efectivo."
+            : "Show this QR to the cash provider to receive your cash.";
+
+        reply.code(201).send({
+          trade_id: tradeId,
+          qr_payload: qrPayload,
+          instructions,
+        });
       });
     }
   );

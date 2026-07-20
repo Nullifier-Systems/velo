@@ -7,23 +7,54 @@ import {
   formatStroops,
   shortAddress,
   type CashRequestStatus,
-} from '../lib/api';
-import './ClaimQR.css';
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
 
 const POLL_INTERVAL_MS = 4000;
 
 const CheckIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: "text-bottom"}}><polyline points="20 6 9 17 4 12"></polyline></svg>
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
 );
 
 const LockIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 8}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
 );
 
-function statusLabel(status: CashRequestStatus["status"]): string {
-  if (status === "locked") return "Ready to get cash";
-  if (status === "released") return "Completed";
-  return "Refunded";
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es"
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
 }
 
 export default function ClaimQR() {
@@ -34,6 +65,8 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const { lang } = useLanguage();
+  const t = translations[lang];
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -115,9 +148,11 @@ export default function ClaimQR() {
   if (!id) {
     return (
       <div className="claim-page">
-        {renderThemeToggle()}
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import Language
         <p className="claim-page__state claim-page__state--error">
-          This link is missing a claim ID.
+          {t.missingId}
         </p>
       </div>
     );
@@ -126,9 +161,54 @@ export default function ClaimQR() {
   if (error === 'not-found') {
     return (
       <div className="claim-page">
-        {renderThemeToggle()}
-        <p className="claim-page__state claim-page__state--error">
-          We couldn't find this claim. It may have expired or the link may be incorrect.
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
         </p>
       </div>
     );
@@ -137,9 +217,54 @@ export default function ClaimQR() {
   if (error) {
     return (
       <div className="claim-page">
-        {renderThemeToggle()}
-        <p className="claim-page__state claim-page__state--error">
-          Couldn't load this claim right now. Check your connection and try again.
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
         </p>
       </div>
     );
@@ -148,8 +273,54 @@ export default function ClaimQR() {
   if (!status) {
     return (
       <div className="claim-page" aria-busy="true" aria-live="polite">
-        {renderThemeToggle()}
-        <div className="claim-ticket claim-ticket--loading" aria-label="Loading your claim">
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es"
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
           <div className="claim-ticket__header">
             <span className="claim-ticket__brand">VELO</span>
             <span className="claim-ticket__stamp claim-ticket__stamp--skeleton" aria-label="Loading status" />
@@ -166,7 +337,56 @@ export default function ClaimQR() {
           </div>
           <div className="claim-ticket__perforation" />
           <div className="claim-ticket__details">
-            {["Amount", "Agent", "Receipt #"].map((label, index) => (
+import {
+  // existing API imports
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
               <div className="claim-ticket__row" key={label}>
                 <span className="claim-ticket__label">{label}</span>
                 <span className={index === 0 ? 'claim-ticket__skeleton-value claim-ticket__skeleton-value--amount' : 'claim-ticket__skeleton-value'} />
@@ -184,7 +404,54 @@ export default function ClaimQR() {
 
   return (
     <div className="claim-page">
-      {renderThemeToggle()}
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
       <div className="claim-ticket">
         <div className="claim-ticket__header">
           <span className="claim-ticket__brand">VELO</span>
@@ -192,8 +459,14 @@ export default function ClaimQR() {
             className={`claim-ticket__stamp claim-ticket__stamp--${status.status}`}
             aria-label={`Status: ${statusLabel(status.status)}`}
           >
-            {status.status === "locked" && <CheckIcon />}
-            {statusLabel(status.status)}
+{renderThemeToggle()}
+
+<div
+  className={`claim-ticket__status claim-ticket__status--${status.status}`}
+>
+  {status.status === "locked" && <CheckIcon />}
+  {statusLabel(status.status, lang)}
+</div>
           </span>
         </div>
 
@@ -203,24 +476,69 @@ export default function ClaimQR() {
               <div className="claim-ticket__qr-box" aria-label="QR Code for agent to scan">
                 <QRCodeSVG value={qrPayload} size={200} level="M" />
               </div>
-              <p className="claim-ticket__instruction" aria-live="polite" style={{ fontSize: "1.1rem" }}>
-                <LockIcon /><br />
-                <strong>Show this to the cash agent.</strong>
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
                 <br />
-                They'll scan it to hand you your cash.
+                {t.instructionLockedSub}
               </p>
             </>
           ) : status.status === 'released' ? (
             <p className="claim-ticket__instruction">
-              <strong>This claim has been completed.</strong>
+              <strong>{t.instructionReleased}</strong>
               <br />
-              Funds were released to the provider.
+              {t.instructionReleasedSub}
             </p>
           ) : (
             <p className="claim-ticket__instruction">
-              <strong>This claim was refunded.</strong>
+              <strong>{t.instructionRefunded}</strong>
               <br />
-              Funds were returned to the sender.
+              {t.instructionRefundedSub}
             </p>
           )}
         </div>
@@ -229,19 +547,92 @@ export default function ClaimQR() {
 
         <div className="claim-ticket__details">
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Amount</span>
+            <span className="claim-ticket__label">{t.amount}</span>
             <span className="claim-ticket__amount">
               {formatStroops(status.amountStroops)}
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Agent</span>
+import {
+  // existing API imports
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
             <span className="claim-ticket__value">
               {shortAddress(status.seller)}
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Receipt #</span>
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: "text-bottom" }}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8 }}>
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(status: CashRequestStatus["status"], lang: "en" | "es"): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
             <span className="claim-ticket__value">
               {shortAddress(status.id)}
             </span>
@@ -269,7 +660,7 @@ export default function ClaimQR() {
 
         {import.meta.env.DEV && status.status === 'locked' && secret && (
           <details className="claim-ticket__debug">
-            <summary>Testnet: simulate provider scan</summary>
+            <summary>{t.debugTitle}</summary>
             <button
               className="claim-ticket__debug-button"
               disabled={releasing}
@@ -285,7 +676,54 @@ export default function ClaimQR() {
                 }
               }}
             >
-              {releasing ? 'Releasing...' : 'Confirm hand-off (release funds)'}
+} from "../lib/api";
+import { useLanguage, translations } from "../lib/lang";
+import LanguageToggle from "../components/LanguageToggle";
+import "./ClaimQR.css";
+
+const POLL_INTERVAL_MS = 4000;
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginRight: 6, verticalAlign: "text-bottom" }}
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ marginBottom: 8 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+function statusLabel(
+  status: CashRequestStatus["status"],
+  lang: "en" | "es",
+): string {
+  if (status === "locked") return translations[lang].statusReady;
+  if (status === "released") return translations[lang].statusReleased;
+  return translations[lang].statusRefunded;
+}
             </button>
           </details>
         )}
@@ -293,3 +731,4 @@ export default function ClaimQR() {
     </div>
   );
 }
+
