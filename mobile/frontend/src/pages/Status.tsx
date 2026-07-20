@@ -26,7 +26,7 @@ export default function Status() {
     async function load() {
       try {
         // Calls the health check status endpoint
-        const result = await fetchStatus(""); 
+        const result = await fetchStatus(); 
         if (!cancelled) {
           setData(result);
           setError(null);

@@ -466,6 +466,8 @@ export async function resolveEscrow(params: ResolveParams) {
         ],
         signer
     );
+}
+
 /**
  * Builds an unsigned transaction for the escrow refund operation.
  * Returns the unsigned XDR transaction base64 string for client-side signing.

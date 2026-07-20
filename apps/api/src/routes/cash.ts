@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { CONTRACTS } from "@velo/shared";
-import { lockEscrow, releaseEscrow, refundEscrow, disputeEscrow } from "../lib/stellar.js";
 import {
   lockEscrow,
   releaseEscrow,
   refundEscrow,
+  disputeEscrow,
   buildLockEscrowTransaction,
   submitSignedTransaction,
   submitReleaseTx,
@@ -15,6 +15,7 @@ import {
 import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork } from "../lib/store.js";
+import { notifyTradeStatus } from "./chat.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 
@@ -708,5 +709,4 @@ export async function cashRoutes(app: FastifyInstance) {
       };
     }
   );
-}
 }

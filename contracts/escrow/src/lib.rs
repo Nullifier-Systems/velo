@@ -42,9 +42,9 @@ pub enum Error {
     Unauthorized = 10,
     TimeoutReached = 11,
     TradeNotDisputed = 12,
-    InvalidFee = 10,
-    NotAuthorized = 11,
-    ContractPaused = 12,
+    InvalidFee = 15,
+    NotAuthorized = 16,
+    ContractPaused = 17,
     InvalidSigners = 13,
     AlreadyMigrated = 14,
 }
@@ -167,6 +167,8 @@ impl EscrowContract {
             (symbol_short(&env, "resolved"), id),
             (resolve_to_buyer, state.amount),
         );
+    }
+
     /// Migrate from single-admin to N-of-M multisig governance.
     /// Requires the current single admin to authorize.  Once called,
     /// all privileged actions (set_platform_fee, pause, etc.) require
@@ -260,12 +262,6 @@ impl EscrowContract {
         require_multisig(&env, &signers)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         Ok(())
-    }
-
-    /// Read-only accessor for a trade's current state. Returns `None` if
-    /// the id was never locked.
-    pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
-        env.storage().persistent().get(&DataKey::Trade(id))
     }
 }
 

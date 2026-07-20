@@ -85,14 +85,14 @@ export default function MerchantScan() {
     if (scanning && !scannedData && videoRef.current) {
       const qrScanner = new QrScanner(
         videoRef.current,
-        (result) => {
+        (result: QrScanner.ScanResult) => {
           processDecodedText(result.data);
         },
         {
           preferredCamera: "environment",
           maxScansPerSecond: 8, // Throttled to conserve CPU & battery on low-end devices
           highlightScanRegion: false, // We use our own custom stylesheet guide box overlay
-          calculateScanRegion: (video) => {
+          calculateScanRegion: (video: HTMLVideoElement) => {
             // Restrict scanning area to center 70% viewfinder box
             const minDim = Math.min(video.videoWidth, video.videoHeight);
             const size = Math.round(minDim * 0.7);

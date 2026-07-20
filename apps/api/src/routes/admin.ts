@@ -1,8 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { refundEscrow, resolveEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
-import { getCashRequest, updateStatus, getAllCashRequests } from "../lib/store.js";
-import { refundEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
-import { getCashRequest, updateStatus, getStoreStats } from "../lib/store.js";
+import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
+import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats } from "../lib/store.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -232,15 +230,13 @@ export async function adminRoutes(app: FastifyInstance) {
           trade_id: id,
           new_status: "refunded"
         });
-      updateStatus(id, "refunded");
-      notifyTradeStatus(id, "refunded");
-
-      return reply.status(200).send({
-        status: "success",
-        message: "Manual refund processed successfully.",
-        trade_id: id,
-        new_status: "refunded",
-      });
+      } catch (error) {
+        return reply.status(500).send({
+          status: "error",
+          message: "Failed to process manual refund",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   );
 

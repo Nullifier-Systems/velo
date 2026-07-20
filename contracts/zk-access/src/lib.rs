@@ -69,14 +69,14 @@ impl ZkAccessContract {
             filled.push_back(current_zero.clone());
             // compute next level's zero value: hash(current_zero, current_zero)
             let mut hash_input = [0u8; 64];
-            current_zero.copy_into_slice(&mut hash_input[0..32]);
-            current_zero.copy_into_slice(&mut hash_input[32..64]);
-            current_zero = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(&env, &hash_input));
+            hash_input[0..32].copy_from_slice(&current_zero.to_array());
+            hash_input[32..64].copy_from_slice(&current_zero.to_array());
+            current_zero = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(&env, &hash_input)).into();
         }
         env.storage().instance().set(&DataKey::FilledSubtrees, &filled);
 
         // Register the initial empty tree root as a valid historical root
-        let empty_root = Self::calculate_root(&env, &filled, 0);
+        let empty_root = Self::calculate_root(&env, &filled, 0, BytesN::from_array(&env, &ZERO_VALUE));
         env.storage().persistent().set(&DataKey::RootExists(empty_root), &true);
 
         Ok(())
@@ -116,9 +116,9 @@ impl ZkAccessContract {
             } else {
                 let left = filled.get(i as u32).unwrap();
                 let mut hash_input = [0u8; 64];
-                left.copy_into_slice(&mut hash_input[0..32]);
-                current.copy_into_slice(&mut hash_input[32..64]);
-                current = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(&env, &hash_input));
+                hash_input[0..32].copy_from_slice(&left.to_array());
+                hash_input[32..64].copy_from_slice(&current.to_array());
+                current = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(&env, &hash_input)).into();
             }
             index /= 2;
         }
@@ -128,7 +128,7 @@ impl ZkAccessContract {
         env.storage().instance().set(&DataKey::FilledSubtrees, &filled);
 
         // Recalculate root and register it
-        let new_root = Self::calculate_root(&env, &filled, next_index, commitment);
+        let new_root = Self::calculate_root(&env, &filled, next_index, commitment.clone());
         env.storage().persistent().set(&DataKey::RootExists(new_root.clone()), &true);
         env.storage().persistent().extend_ttl(&DataKey::RootExists(new_root.clone()), 100_000, 100_000);
 
@@ -193,9 +193,9 @@ impl ZkAccessContract {
         for _ in 0..TREE_DEPTH {
             zeroes.push_back(temp_zero.clone());
             let mut hash_input = [0u8; 64];
-            temp_zero.copy_into_slice(&mut hash_input[0..32]);
-            temp_zero.copy_into_slice(&mut hash_input[32..64]);
-            temp_zero = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(env, &hash_input));
+            hash_input[0..32].copy_from_slice(&temp_zero.to_array());
+            hash_input[32..64].copy_from_slice(&temp_zero.to_array());
+            temp_zero = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(env, &hash_input)).into();
         }
 
         if next_index == 0 {
@@ -203,20 +203,20 @@ impl ZkAccessContract {
         }
 
         let mut current = leaf;
-        let mut index = next_index - 1;
+        let index = next_index - 1;
 
         for i in 0..TREE_DEPTH {
             let mut hash_input = [0u8; 64];
             if (index >> i) % 2 == 1 {
                 let left = filled.get(i as u32).unwrap();
-                left.copy_into_slice(&mut hash_input[0..32]);
-                current.copy_into_slice(&mut hash_input[32..64]);
+                hash_input[0..32].copy_from_slice(&left.to_array());
+                hash_input[32..64].copy_from_slice(&current.to_array());
             } else {
                 let right = zeroes.get(i as u32).unwrap();
-                current.copy_into_slice(&mut hash_input[0..32]);
-                right.copy_into_slice(&mut hash_input[32..64]);
+                hash_input[0..32].copy_from_slice(&current.to_array());
+                hash_input[32..64].copy_from_slice(&right.to_array());
             }
-            current = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(env, &hash_input));
+            current = env.crypto().sha256(&soroban_sdk::Bytes::from_slice(env, &hash_input)).into();
         }
 
         current

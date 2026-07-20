@@ -329,4 +329,3 @@ describe("cashRoutes", () => {
     await app.close();
   });
 });
-});
