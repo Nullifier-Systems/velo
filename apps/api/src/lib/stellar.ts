@@ -1,5 +1,6 @@
 import {
     BASE_FEE,
+    FeeBumpTransaction,
     Keypair,
     Networks,
     Operation,
@@ -59,11 +60,9 @@ function loadSignerKeypair(): Keypair {
 /**
  * Loads the platform treasury keypair used to sponsor user transactions
  * via fee-bumps. Defaults to BUYER_SECRET_KEY if SPONSOR_SECRET_KEY is omitted.
+ * Works on both testnet and mainnet when SPONSOR_SECRET_KEY is configured.
  */
 function loadSponsorKeypair(): Keypair {
-    if (process.env.STELLAR_NETWORK === "PUBLIC") {
-        throw new Error("Custodial sponsor cannot be used on mainnet.");
-    }
     const secret = process.env.SPONSOR_SECRET_KEY || process.env.BUYER_SECRET_KEY;
     if (!secret) {
         throw new Error(
@@ -84,6 +83,28 @@ function hexToBytesScVal(hex: string) {
 // ---------------------------------------------------------------------------
 // Build helpers — return unsigned, simulated XDR (non-custodial flow)
 // ---------------------------------------------------------------------------
+
+function wrapWithFeeBumpIfPossible(tx: Transaction | FeeBumpTransaction): Transaction | FeeBumpTransaction {
+    if (tx instanceof FeeBumpTransaction) {
+        return tx;
+    }
+
+    try {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(tx.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            tx,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        return feeBumpTx;
+    } catch {
+        return tx;
+    }
+}
 
 interface BuildTxResult {
     /** Unsigned transaction XDR (base64) ready for client-side signing. */
@@ -127,7 +148,8 @@ async function buildUnsignedTx(
  */
 async function submitSignedEnvelope(signedXdr: string): Promise<{ hash: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const hash = (await server.sendTransaction(tx)).hash;
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const hash = (await server.sendTransaction(txToSubmit)).hash;
 
     const start = Date.now();
     for (;;) {
@@ -187,19 +209,25 @@ async function invokeContract(
     const txHash = prepared.hash().toString("hex");
     stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
-    const sponsor = loadSponsorKeypair();
-    const innerFee = parseInt(prepared.fee, 10);
-    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+    // Conditionally use fee-bump if sponsor is configured
+    let txToSubmit = prepared;
+    if (process.env.SPONSOR_SECRET_KEY) {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(prepared.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
 
-    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
-        sponsor,
-        bumpFee.toString(),
-        prepared,
-        NETWORK_PASSPHRASE
-    );
-    feeBumpTx.sign(sponsor);
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            prepared,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        txToSubmit = feeBumpTx;
+        stageLog.info({ stage: "fee_bump", sponsor: sponsor.publicKey() }, "transaction fee-bumped");
+    }
 
-    const sendResult = await server.sendTransaction(feeBumpTx);
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         stageLog.error(
             { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
@@ -474,7 +502,8 @@ export async function resolveEscrow(params: ResolveParams) {
  */
 export async function submitSignedTransaction(signedXdr: string): Promise<{ hash: string; status: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const sendResult = await server.sendTransaction(tx);
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
