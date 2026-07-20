@@ -13,6 +13,8 @@ export async function servicesRoutes(app: FastifyInstance) {
       services: [
         { endpoint: "GET /api/v1/cash/agents", price_usdc: "0.001" },
         { endpoint: "POST /api/v1/cash/request", price_usdc: "0.01" },
+        { endpoint: "POST /api/v1/cash/request/prepare", price_usdc: "0.01" },
+        { endpoint: "POST /api/v1/cash/request/submit", price_usdc: "0.01" },
         { endpoint: "GET /api/v1/reputation/:address", price_usdc: "0.0005" },
       ],
     })
