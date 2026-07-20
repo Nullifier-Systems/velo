@@ -92,6 +92,15 @@ The API layer provides the integration surface for clients and agents. It expose
 - payment challenge responses,
 - reputation and provider discovery concepts.
 
+### Agent Integration & Worked Examples
+
+Velo is designed for direct consumption by autonomous AI agents, Telegram bots, and automated client applications. Agents interact with the API layer to discover local liquidity providers, lock cash requests in Soroban escrow, and receive a user-facing claim link.
+
+For a complete end-to-end worked example, see [examples/telegram_bot.js](examples/telegram_bot.js). This minimal runnable Telegram bot script demonstrates how an agent can:
+1. Query available cash providers via `GET /api/v1/cash/agents`
+2. Create an escrow cash request via `POST /api/v1/cash/request`
+3. Retrieve and present the resulting `claim_url` to the end user
+
 ## Mobile Application
 
 The mobile experience is intentionally lightweight and QR-centric. It allows a user to claim or complete a payment flow without requiring a full wallet-native experience at the first step.
@@ -167,6 +176,7 @@ docs/                contributor and architecture documentation
 - [docs/api.md](docs/api.md)
 - [docs/development.md](docs/development.md)
 - [docs/testing.md](docs/testing.md)
+- [examples/telegram_bot.js](examples/telegram_bot.js) (Telegram Bot Agent Worked Example)
 
 ## Security
 
