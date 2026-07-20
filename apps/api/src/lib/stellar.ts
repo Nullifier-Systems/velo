@@ -466,35 +466,6 @@ export async function resolveEscrow(params: ResolveParams) {
         ],
         signer
     );
-/**
- * Builds an unsigned transaction for the escrow refund operation.
- * Returns the unsigned XDR transaction base64 string for client-side signing.
- */
-export async function buildRefundEscrowTransaction(params: RefundParams & { signerPublicKey?: string }): Promise<string> {
-    const signerPublicKey = params.signerPublicKey || loadSignerKeypair().publicKey();
-    const account = await server.getAccount(signerPublicKey);
-
-    const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: params.contractId,
-                function: "refund",
-                args: [hexToBytesScVal(params.tradeId)],
-            })
-        )
-        .setTimeout(30)
-        .build();
-
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
-
-    const prepared = assembleTransaction(tx, sim).build();
-    return prepared.toXDR();
 }
 
 /**

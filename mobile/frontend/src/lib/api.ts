@@ -11,8 +11,6 @@ export interface CashRequestStatus {
   createdAt: string;
 }
 
-// Alias export to resolve: Module has no exported member 'StatusResponse'
-export type StatusResponse = CashRequestStatus;
 
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
@@ -22,8 +20,6 @@ export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   return res.json();
 }
 
-// Alias export to resolve: Module has no exported member 'fetchStatus'
-export const fetchStatus = fetchCashRequest;
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
@@ -74,32 +70,5 @@ export async function fetchStatus(): Promise<StatusResponse> {
 /** Truncates a long address/ID to its first and last 5 characters. */
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
-
-}
-}
-
-export interface StatusResponse {
-  api: {
-    status: string;
-    uptime_seconds: number;
-    timestamp: string;
-  };
-  chain: {
-    network: string;
-    status: string;
-    latest_ledger: number | null;
-    oldest_ledger: number | null;
-  };
-  recent_activity: {
-    id: string;
-    status: string;
-    createdAt: string;
-  }[];
-}
-
-export async function fetchStatus(): Promise<StatusResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/status`);
-  if (!res.ok) throw new Error("status failed");
-  return res.json();
 }
 

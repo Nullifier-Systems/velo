@@ -1,8 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { refundEscrow, resolveEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
-import { getCashRequest, updateStatus, getAllCashRequests } from "../lib/store.js";
-import { refundEscrow } from "../lib/stellar.js"; // Assuming stellar.ts exports refundEscrow
-import { getCashRequest, updateStatus, getStoreStats } from "../lib/store.js";
+import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
+import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats } from "../lib/store.js";
+import { notifyTradeStatus } from "./chat.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -14,15 +13,7 @@ interface OverrideHeader {
   'x-admin-api-key': string;
 }
 
-// Basic schema for body validation
-interface FlagRequestBody {
-  suspicious: boolean;
-  notes?: string;
-}
 
-interface OverrideHeader {
-  'x-admin-api-key': string;
-}
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -225,22 +216,21 @@ export async function adminRoutes(app: FastifyInstance) {
         
         // Keep memory/store helper synced 
         updateStatus(id, "refunded");
+        notifyTradeStatus(id, "refunded");
 
         return reply.status(200).send({
           status: "success",
           message: "Manual refund processed successfully.",
           trade_id: id,
-          new_status: "refunded"
+          new_status: "refunded",
         });
-      updateStatus(id, "refunded");
-      notifyTradeStatus(id, "refunded");
-
-      return reply.status(200).send({
-        status: "success",
-        message: "Manual refund processed successfully.",
-        trade_id: id,
-        new_status: "refunded",
-      });
+      } catch (err) {
+        req.log.error(err, "DB update failed during admin override");
+        return reply.status(500).send({
+          error: "Database update failed",
+          detail: String(err),
+        });
+      }
     }
   );
 

@@ -14,8 +14,7 @@ export interface CashRequestRecord {
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
-    status: "locked" | "released" | "refunded" | "disputed";
-    status: "locked" | "released" | "refunded" | "pending_signature";
+    status: "locked" | "released" | "refunded" | "disputed" | "pending_signature";
     createdAt: string;
     disputedAt?: string;
     disputedBy?: string;
