@@ -32,6 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/claim/:id" element={<ClaimQR />} />
           <Route path="/chat/:tradeId" element={<Chat />} />
           <Route path="/merchant/scan" element={<MerchantScan />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

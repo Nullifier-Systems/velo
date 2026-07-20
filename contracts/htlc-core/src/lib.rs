@@ -13,6 +13,7 @@ pub enum TradeStatus {
     Locked,
     Released,
     Refunded,
+    Disputed,
 }
 
 #[derive(Clone)]
