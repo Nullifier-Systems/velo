@@ -11,6 +11,9 @@ export interface CashRequestStatus {
   createdAt: string;
 }
 
+// Alias export to resolve: Module has no exported member 'StatusResponse'
+export type StatusResponse = CashRequestStatus;
+
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
   if (!res.ok) {
@@ -18,6 +21,9 @@ export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   }
   return res.json();
 }
+
+// Alias export to resolve: Module has no exported member 'fetchStatus'
+export const fetchStatus = fetchCashRequest;
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {

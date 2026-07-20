@@ -15,6 +15,7 @@ describe("GET /api/v1/status", () => {
       secretHashHex: "cafebabe",
       status: "locked",
       createdAt: new Date().toISOString(),
+      qrPayload: "v1:cash:request:aaaabbbbccccddddeeeeffff00001111aaaabbbbccccddddeeeeffff00001111", // Added to satisfy CashRequestRecord type requirement
     });
 
     const app = Fastify();
@@ -43,6 +44,7 @@ describe("GET /api/v1/status", () => {
     expect(entry.amountStroops).toBeUndefined();
     expect(entry.secretHex).toBeUndefined();
     expect(entry.secretHashHex).toBeUndefined();
+    expect(entry.qrPayload).toBeUndefined();
 
     await app.close();
   });
