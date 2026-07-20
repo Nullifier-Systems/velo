@@ -57,7 +57,8 @@ export async function chatRoutes(app: FastifyInstance) {
   app.get<{ Params: { tradeId: string }; Querystring: { participant?: string } }>(
     "/chat/:tradeId",
     { websocket: true },
-    (socket, req) => {
+    (connection: any, req) => {
+      const socket = connection.socket;
       const { tradeId } = req.params;
       const participant = (req.query as any).participant ?? "";
 

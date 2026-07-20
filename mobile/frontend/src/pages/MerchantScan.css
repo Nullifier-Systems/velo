@@ -120,15 +120,10 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
-#scanner-video-container {
+.scanner-video {
   width: 100%;
   height: 100%;
-}
-
-#scanner-video-container video {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
+  object-fit: cover;
 }
 
 .scanner-overlay {
@@ -356,5 +351,109 @@
 }
 
 .scan-next-button:hover {
+  opacity: 0.9;
+}
+
+/* Fallback section styles */
+.scanner-fallback-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.fallback-divider {
+  font-size: 11px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  position: relative;
+  width: 100%;
+  text-align: center;
+}
+
+.fallback-divider::before,
+.fallback-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: var(--line);
+}
+
+.fallback-divider::before {
+  left: 0;
+}
+
+.fallback-divider::after {
+  right: 0;
+}
+
+.fallback-actions {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 10px;
+}
+
+.fallback-file-button {
+  display: inline-block;
+  text-align: center;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--ink);
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fallback-file-button:hover {
+  background: rgba(141, 160, 146, 0.08);
+  border-color: var(--ink);
+}
+
+.manual-entry-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.manual-entry-input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: "IBM Plex Sans", sans-serif;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.manual-entry-input:focus {
+  border-color: var(--ink);
+}
+
+.manual-entry-button {
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.manual-entry-button:hover {
   opacity: 0.9;
 }

@@ -25,9 +25,12 @@ export interface ProviderRecord {
     name: string;
     lat: number;
     lng: number;
-    tier: string;
+    tier: "Probationary" | "Standard" | "Trusted";
     rate: string;
     status: "available" | "unavailable";
+    kycStatus: "pending" | "approved" | "rejected";
+    ipAddress?: string;
+    deviceId?: string;
     createdAt: string;
 }
 
@@ -44,6 +47,17 @@ export function saveProvider(record: ProviderRecord) {
 
 export function getProviders(): ProviderRecord[] {
     return Array.from(providersStore.values());
+}
+
+export function countProvidersByNetwork(ipAddress?: string, deviceId?: string): number {
+    let count = 0;
+    for (const record of providersStore.values()) {
+        if ((ipAddress && record.ipAddress === ipAddress) || 
+            (deviceId && record.deviceId === deviceId)) {
+            count++;
+        }
+    }
+    return count;
 }
 
 export function getCashRequest(id: string): CashRequestRecord | undefined {

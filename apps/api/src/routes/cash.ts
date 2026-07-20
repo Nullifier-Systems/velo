@@ -13,8 +13,7 @@ import {
 } from "../lib/stellar.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { randomHex32 } from "../lib/crypto.js";
-import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders } from "../lib/store.js";
-import { notifyTradeStatus } from "./chat.js";
+import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 
@@ -41,6 +40,7 @@ interface RegisterProviderBody {
   lat: number;
   lng: number;
   rate?: string;
+  device_id?: string;
 }
 
 interface BoundingBox {
@@ -161,10 +161,20 @@ export async function cashRoutes(app: FastifyInstance) {
   );
 
   app.post<{ Body: RegisterProviderBody }>("/cash/agents", async (req, reply) => {
-      // Registration is free in this implementation
-      const { name, lat, lng, rate } = req.body ?? ({} as RegisterProviderBody);
+      // Economic hurdle: require 5.000 USDC payment to register
+      const paid = await (app as any).requirePayment(req, reply, "5.000");
+      if (!paid) return;
+
+      const { name, lat, lng, rate, device_id } = req.body ?? ({} as RegisterProviderBody);
       if (!name || typeof lat !== "number" || typeof lng !== "number") {
           reply.code(400).send({ error: "name, lat (number), and lng (number) are required" });
+          return;
+      }
+      
+      // Network Fingerprinting
+      const networkCount = countProvidersByNetwork(req.ip, device_id);
+      if (networkCount >= 2) {
+          reply.code(403).send({ error: "Registration limit exceeded for this network or device" });
           return;
       }
 
@@ -175,8 +185,11 @@ export async function cashRoutes(app: FastifyInstance) {
           lat,
           lng,
           rate: rate || "1.0",
-          tier: "Standard",
+          tier: "Probationary" as const,
           status: "available" as const,
+          kycStatus: "pending" as const,
+          ipAddress: req.ip,
+          deviceId: device_id,
           createdAt: new Date().toISOString()
       };
 

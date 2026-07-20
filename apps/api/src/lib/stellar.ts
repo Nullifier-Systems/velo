@@ -3,12 +3,25 @@ import {
     Keypair,
     Networks,
     Operation,
+    Transaction,
     TransactionBuilder,
     nativeToScVal,
     scValToNative,
     xdr,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
+
+export interface StellarLogger {
+    info: (obj: Record<string, unknown>, msg?: string) => void;
+    error: (obj: Record<string, unknown>, msg?: string) => void;
+    child: (bindings: Record<string, unknown>) => StellarLogger;
+}
+
+const noopLogger: StellarLogger = {
+    info: () => {},
+    error: () => {},
+    child: () => noopLogger,
+};
 
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const IS_PUBLIC = process.env.STELLAR_NETWORK === "PUBLIC";
@@ -38,6 +51,23 @@ function loadSignerKeypair(): Keypair {
         throw new Error(
             "BUYER_SECRET_KEY not set — see apps/api/.env.example. " +
             "This is a testnet-only signer."
+        );
+    }
+    return Keypair.fromSecret(secret);
+}
+
+/**
+ * Loads the platform treasury keypair used to sponsor user transactions
+ * via fee-bumps. Defaults to BUYER_SECRET_KEY if SPONSOR_SECRET_KEY is omitted.
+ */
+function loadSponsorKeypair(): Keypair {
+    if (process.env.STELLAR_NETWORK === "PUBLIC") {
+        throw new Error("Custodial sponsor cannot be used on mainnet.");
+    }
+    const secret = process.env.SPONSOR_SECRET_KEY || process.env.BUYER_SECRET_KEY;
+    if (!secret) {
+        throw new Error(
+            "SPONSOR_SECRET_KEY or BUYER_SECRET_KEY not set — see apps/api/.env.example."
         );
     }
     return Keypair.fromSecret(secret);
@@ -125,7 +155,11 @@ async function invokeContract(
     functionName: string,
     args: xdr.ScVal[],
     signer: Keypair,
+    logger: StellarLogger = noopLogger,
 ): Promise<unknown> {
+    const stageLog = logger.child({ contract: contractId, fn: functionName });
+
+    stageLog.info({ stage: "build", signer: signer.publicKey() }, "building contract invocation");
     const account = await server.getAccount(signer.publicKey());
     const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -141,33 +175,68 @@ async function invokeContract(
         .setTimeout(30)
         .build();
 
+    stageLog.info({ stage: "simulate" }, "simulating transaction");
     const sim = await server.simulateTransaction(tx);
     if (Api.isSimulationError(sim)) {
+        stageLog.error({ stage: "simulate", error: sim.error }, "simulation failed");
         throw new Error(`simulation failed: ${sim.error}`);
     }
 
-    const prepared = assembleTransaction(tx, sim).build();
+    const prepared = assembleTransaction(tx, sim).build() as Transaction;
     prepared.sign(signer);
+    const txHash = prepared.hash().toString("hex");
+    stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
-    const sendResult = await server.sendTransaction(prepared);
+    const sponsor = loadSponsorKeypair();
+    const innerFee = parseInt(prepared.fee, 10);
+    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+
+    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+        sponsor,
+        bumpFee.toString(),
+        prepared,
+        NETWORK_PASSPHRASE
+    );
+    feeBumpTx.sign(sponsor);
+
+    const sendResult = await server.sendTransaction(feeBumpTx);
     if (sendResult.status === "ERROR") {
+        stageLog.error(
+            { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
+            "submission failed"
+        );
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
+    stageLog.info({ stage: "submit", txHash, status: sendResult.status }, "transaction accepted");
 
     let getResult = await server.getTransaction(sendResult.hash);
     const start = Date.now();
+    let attempts = 1;
     while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
         if (Date.now() - start > 30_000) {
+            stageLog.error(
+                { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
+                "timed out waiting for confirmation"
+            );
             throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
         }
         await new Promise((r) => setTimeout(r, 1500));
         getResult = await server.getTransaction(sendResult.hash);
+        attempts += 1;
     }
 
     if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+        stageLog.error(
+            { stage: "poll", txHash, attempts, status: getResult.status },
+            "transaction failed on-chain"
+        );
         throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
     }
 
+    stageLog.info(
+        { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
+        "transaction confirmed"
+    );
     return getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
 }
 
@@ -209,7 +278,7 @@ export async function submitLockTx(signedXdr: string): Promise<{ hash: string }>
 }
 
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
-export async function lockEscrow(params: LockParams) {
+export async function lockEscrow(params: LockParams, logger: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
@@ -223,6 +292,7 @@ export async function lockEscrow(params: LockParams) {
             nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
         signer,
+        logger,
     );
 }
 
