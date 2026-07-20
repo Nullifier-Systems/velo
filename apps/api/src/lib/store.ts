@@ -14,8 +14,15 @@ export interface CashRequestRecord {
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
+    status: "locked" | "released" | "refunded" | "disputed";
     status: "locked" | "released" | "refunded" | "pending_signature";
     createdAt: string;
+    disputedAt?: string;
+    disputedBy?: string;
+    disputeReason?: string;
+    resolvedAt?: string;
+    resolvedBy?: string;
+    resolution?: string;
     notificationType?: "email" | "sms" | "none";
     contactInfo?: string;
 }
@@ -25,9 +32,12 @@ export interface ProviderRecord {
     name: string;
     lat: number;
     lng: number;
-    tier: string;
+    tier: "Probationary" | "Standard" | "Trusted";
     rate: string;
     status: "available" | "unavailable";
+    kycStatus: "pending" | "approved" | "rejected";
+    ipAddress?: string;
+    deviceId?: string;
     createdAt: string;
 }
 
@@ -46,8 +56,23 @@ export function getProviders(): ProviderRecord[] {
     return Array.from(providersStore.values());
 }
 
+export function countProvidersByNetwork(ipAddress?: string, deviceId?: string): number {
+    let count = 0;
+    for (const record of providersStore.values()) {
+        if ((ipAddress && record.ipAddress === ipAddress) || 
+            (deviceId && record.deviceId === deviceId)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 export function getCashRequest(id: string): CashRequestRecord | undefined {
     return store.get(id);
+}
+
+export function getAllCashRequests(): CashRequestRecord[] {
+    return Array.from(store.values());
 }
 
 export function updateStatus(id: string, status: CashRequestRecord["status"]) {
@@ -70,6 +95,7 @@ export function getStoreStats() {
             locked: requests.filter(r => r.status === "locked").length,
             released: requests.filter(r => r.status === "released").length,
             refunded: requests.filter(r => r.status === "refunded").length,
+            disputed: requests.filter(r => r.status === "disputed").length,
             pending_signature: requests.filter(r => r.status === "pending_signature").length,
         },
     };

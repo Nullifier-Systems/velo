@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
+import { randomUUID } from "crypto";
 import "dotenv/config";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
@@ -180,6 +181,19 @@ app.get(
     },
   },
   async () => ({ ok: true })
+);
+
+app.get(
+  "/version",
+  {
+    config: {
+      rateLimit: { max: 100, timeWindow: "1 minute" },
+    },
+  },
+  async () => ({
+    commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+    timestamp: process.env.DEPLOY_TIMESTAMP || "unknown",
+  })
 );
 
 app.register(openapiRoutes, { prefix: "/api/v1" });

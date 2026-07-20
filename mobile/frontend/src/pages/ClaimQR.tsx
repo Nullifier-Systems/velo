@@ -12,10 +12,18 @@ import './ClaimQR.css';
 
 const POLL_INTERVAL_MS = 4000;
 
-function statusLabel(status: CashRequestStatus['status']): string {
-  if (status === 'locked') return 'Ready to claim';
-  if (status === 'released') return 'Released';
-  return 'Refunded';
+const CheckIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: "text-bottom"}}><polyline points="20 6 9 17 4 12"></polyline></svg>
+);
+
+const LockIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 8}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+);
+
+function statusLabel(status: CashRequestStatus["status"]): string {
+  if (status === "locked") return "Ready to get cash";
+  if (status === "released") return "Completed";
+  return "Refunded";
 }
 
 export default function ClaimQR() {
@@ -158,7 +166,7 @@ export default function ClaimQR() {
           </div>
           <div className="claim-ticket__perforation" />
           <div className="claim-ticket__details">
-            {['Amount', 'Provider', 'Claim ID'].map((label, index) => (
+            {["Amount", "Agent", "Receipt #"].map((label, index) => (
               <div className="claim-ticket__row" key={label}>
                 <span className="claim-ticket__label">{label}</span>
                 <span className={index === 0 ? 'claim-ticket__skeleton-value claim-ticket__skeleton-value--amount' : 'claim-ticket__skeleton-value'} />
@@ -181,9 +189,10 @@ export default function ClaimQR() {
         <div className="claim-ticket__header">
           <span className="claim-ticket__brand">VELO</span>
           <span
-            className={'claim-ticket__stamp claim-ticket__stamp--' + status.status}
-            aria-label={'Claim status: ' + statusLabel(status.status)}
+            className={`claim-ticket__stamp claim-ticket__stamp--${status.status}`}
+            aria-label={`Status: ${statusLabel(status.status)}`}
           >
+            {status.status === "locked" && <CheckIcon />}
             {statusLabel(status.status)}
           </span>
         </div>
@@ -191,11 +200,12 @@ export default function ClaimQR() {
         <div className="claim-ticket__qr-window">
           {status.status === 'locked' && qrPayload ? (
             <>
-              <div className="claim-ticket__qr-box" aria-label="QR code for cash provider to scan and release funds">
+              <div className="claim-ticket__qr-box" aria-label="QR Code for agent to scan">
                 <QRCodeSVG value={qrPayload} size={200} level="M" />
               </div>
-              <p className="claim-ticket__instruction">
-                <strong>Show this to the cash provider.</strong>
+              <p className="claim-ticket__instruction" aria-live="polite" style={{ fontSize: "1.1rem" }}>
+                <LockIcon /><br />
+                <strong>Show this to the cash agent.</strong>
                 <br />
                 They'll scan it to hand you your cash.
               </p>
@@ -225,13 +235,13 @@ export default function ClaimQR() {
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Provider</span>
+            <span className="claim-ticket__label">Agent</span>
             <span className="claim-ticket__value">
               {shortAddress(status.seller)}
             </span>
           </div>
           <div className="claim-ticket__row">
-            <span className="claim-ticket__label">Claim ID</span>
+            <span className="claim-ticket__label">Receipt #</span>
             <span className="claim-ticket__value">
               {shortAddress(status.id)}
             </span>

@@ -24,20 +24,25 @@ html.dark {
 
 .claim-page {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--paper);
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 32px 16px;
+  padding: calc(32px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
   font-family: "IBM Plex Sans", sans-serif;
   color: var(--ink);
   position: relative;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .theme-toggle {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  min-width: 44px;
+  min-height: 44px;
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -49,6 +54,9 @@ html.dark {
   justify-content: center;
   transition: all 0.2s ease;
   z-index: 10;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .theme-toggle:hover {
@@ -66,7 +74,6 @@ html.dark {
   background: var(--card);
   border-radius: 4px;
   box-shadow: 0 1px 2px rgba(27, 42, 34, 0.06), 0 8px 24px rgba(27, 42, 34, 0.08);
-  overflow: hidden;
 }
 
 .claim-ticket__header {
@@ -94,6 +101,7 @@ html.dark {
   border-radius: 3px;
   transform: rotate(-4deg);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .claim-ticket__stamp--locked {
@@ -119,6 +127,14 @@ html.dark {
   background: #ffffff;
   border-radius: 6px;
   border: 1px solid var(--line);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.claim-ticket__qr-box svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
 }
 
 .claim-ticket__instruction {
@@ -127,6 +143,7 @@ html.dark {
   line-height: 1.5;
   color: var(--ink);
   max-width: 260px;
+  word-break: break-word;
 }
 
 .claim-ticket__instruction strong {
@@ -149,6 +166,7 @@ html.dark {
   height: 20px;
   background: var(--paper);
   border-radius: 50%;
+  z-index: 2;
 }
 .claim-ticket__perforation::before {
   left: -10px;
@@ -169,6 +187,7 @@ html.dark {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .claim-ticket__label {
@@ -178,6 +197,7 @@ html.dark {
   text-transform: uppercase;
   color: var(--ink-muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .claim-ticket__value {
@@ -186,6 +206,7 @@ html.dark {
   text-align: right;
   word-break: break-all;
   color: var(--ink);
+  min-width: 0;
 }
 
 .claim-ticket__amount {
@@ -193,6 +214,8 @@ html.dark {
   font-size: 28px;
   font-weight: 600;
   color: var(--ink);
+  text-align: right;
+  word-break: break-word;
 }
 
 .claim-page__state {
@@ -213,7 +236,10 @@ html.dark {
 }
 
 .claim-ticket__chat-link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   padding: 10px 24px;
   font-family: "IBM Plex Sans", sans-serif;
   font-size: 13px;
@@ -224,6 +250,7 @@ html.dark {
   text-decoration: none;
   cursor: pointer;
   transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .claim-ticket__chat-link:hover {
@@ -240,11 +267,13 @@ html.dark {
   font-size: 12px;
   color: var(--ink-muted);
   cursor: pointer;
+  padding: 6px 0;
 }
 
 .claim-ticket__debug-button {
   margin-top: 10px;
   width: 100%;
+  min-height: 44px;
   padding: 10px;
   font-family: "IBM Plex Sans", sans-serif;
   font-size: 13px;
@@ -254,6 +283,9 @@ html.dark {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .claim-ticket__debug-button:disabled {
@@ -291,6 +323,7 @@ html.dark {
 
 .claim-ticket__qr-box--skeleton {
   width: 200px;
+  max-width: 100%;
   height: 200px;
   display: grid;
   place-items: center;
@@ -298,6 +331,7 @@ html.dark {
 
 .claim-ticket__skeleton-qr {
   width: 168px;
+  max-width: 90%;
   height: 168px;
   border-radius: 4px;
 }
@@ -344,6 +378,7 @@ html.dark {
 .claim-ticket__skeleton-value {
   background: linear-gradient(90deg, #dfe6d8 25%, #f4f7ef 37%, #dfe6d8 63%);
   background-size: 400% 100%;
+  will-change: background-position;
 }
 
 html.dark .claim-ticket__stamp--skeleton,
@@ -352,6 +387,7 @@ html.dark .claim-ticket__skeleton-line,
 html.dark .claim-ticket__skeleton-value {
   background: linear-gradient(90deg, #25332a 25%, #304237 37%, #25332a 63%);
   background-size: 400% 100%;
+  will-change: background-position;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -371,3 +407,33 @@ html.dark .claim-ticket__skeleton-value {
     background-position: 0 0;
   }
 }
+
+@media (max-width: 360px) {
+  .claim-page {
+    padding: calc(16px + env(safe-area-inset-top, 0px)) calc(10px + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px));
+  }
+  .claim-ticket__header {
+    padding: 16px 16px 0;
+  }
+  .claim-ticket__qr-window {
+    padding: 20px 16px 16px;
+    gap: 12px;
+  }
+  .claim-ticket__qr-box {
+    padding: 12px;
+  }
+  .claim-ticket__details {
+    padding: 16px;
+    gap: 10px;
+  }
+  .claim-ticket__amount {
+    font-size: 22px;
+  }
+  .claim-ticket__instruction {
+    font-size: 14px;
+  }
+  .claim-ticket__value {
+    font-size: 12px;
+  }
+}
+

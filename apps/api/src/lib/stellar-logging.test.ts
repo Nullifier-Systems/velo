@@ -47,9 +47,9 @@ interface CapturedLine {
 function makeCapturingLogger() {
   const lines: CapturedLine[] = [];
   const make = (bindings: Record<string, unknown>): StellarLogger => ({
-    info: (obj, msg) => lines.push({ level: "info", obj, msg, bindings }),
-    error: (obj, msg) => lines.push({ level: "error", obj, msg, bindings }),
-    child: (b) => make({ ...bindings, ...b }),
+    info: (obj: Record<string, unknown>, msg?: string) => lines.push({ level: "info", obj, msg, bindings }),
+    error: (obj: Record<string, unknown>, msg?: string) => lines.push({ level: "error", obj, msg, bindings }),
+    child: (b: Record<string, unknown>) => make({ ...bindings, ...b }),
   });
   return { lines, log: make({}) };
 }

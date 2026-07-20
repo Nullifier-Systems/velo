@@ -3,12 +3,25 @@ import {
     Keypair,
     Networks,
     Operation,
+    Transaction,
     TransactionBuilder,
     nativeToScVal,
     scValToNative,
     xdr,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
+
+export interface StellarLogger {
+    info: (obj: Record<string, unknown>, msg?: string) => void;
+    error: (obj: Record<string, unknown>, msg?: string) => void;
+    child: (bindings: Record<string, unknown>) => StellarLogger;
+}
+
+const noopLogger: StellarLogger = {
+    info: () => {},
+    error: () => {},
+    child: () => noopLogger,
+};
 
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const IS_PUBLIC = process.env.STELLAR_NETWORK === "PUBLIC";
@@ -38,6 +51,23 @@ function loadSignerKeypair(): Keypair {
         throw new Error(
             "BUYER_SECRET_KEY not set — see apps/api/.env.example. " +
             "This is a testnet-only signer."
+        );
+    }
+    return Keypair.fromSecret(secret);
+}
+
+/**
+ * Loads the platform treasury keypair used to sponsor user transactions
+ * via fee-bumps. Defaults to BUYER_SECRET_KEY if SPONSOR_SECRET_KEY is omitted.
+ */
+function loadSponsorKeypair(): Keypair {
+    if (process.env.STELLAR_NETWORK === "PUBLIC") {
+        throw new Error("Custodial sponsor cannot be used on mainnet.");
+    }
+    const secret = process.env.SPONSOR_SECRET_KEY || process.env.BUYER_SECRET_KEY;
+    if (!secret) {
+        throw new Error(
+            "SPONSOR_SECRET_KEY or BUYER_SECRET_KEY not set — see apps/api/.env.example."
         );
     }
     return Keypair.fromSecret(secret);
@@ -125,8 +155,9 @@ async function invokeContract(
     functionName: string,
     args: xdr.ScVal[],
     signer: Keypair,
+    logger: StellarLogger = noopLogger,
 ): Promise<unknown> {
-    const stageLog = log.child({ contract: contractId, fn: functionName });
+    const stageLog = logger.child({ contract: contractId, fn: functionName });
 
     stageLog.info({ stage: "build", signer: signer.publicKey() }, "building contract invocation");
     const account = await server.getAccount(signer.publicKey());
@@ -151,13 +182,24 @@ async function invokeContract(
         throw new Error(`simulation failed: ${sim.error}`);
     }
 
-    const prepared = assembleTransaction(tx, sim).build();
+    const prepared = assembleTransaction(tx, sim).build() as Transaction;
     prepared.sign(signer);
     const txHash = prepared.hash().toString("hex");
     stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
-    stageLog.info({ stage: "submit", txHash }, "submitting transaction");
-    const sendResult = await server.sendTransaction(prepared);
+    const sponsor = loadSponsorKeypair();
+    const innerFee = parseInt(prepared.fee, 10);
+    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+
+    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+        sponsor,
+        bumpFee.toString(),
+        prepared,
+        NETWORK_PASSPHRASE
+    );
+    feeBumpTx.sign(sponsor);
+
+    const sendResult = await server.sendTransaction(feeBumpTx);
     if (sendResult.status === "ERROR") {
         stageLog.error(
             { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
@@ -236,7 +278,7 @@ export async function submitLockTx(signedXdr: string): Promise<{ hash: string }>
 }
 
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
-export async function lockEscrow(params: LockParams) {
+export async function lockEscrow(params: LockParams, logger: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
@@ -250,6 +292,7 @@ export async function lockEscrow(params: LockParams) {
             nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
         signer,
+        logger,
     );
 }
 
@@ -385,6 +428,44 @@ export async function refundEscrow(params: RefundParams) {
     );
 }
 
+export interface DisputeParams {
+    contractId: string;
+    tradeId: string;
+    caller: string;
+}
+
+/** Calls escrow's dispute(caller, id). Flagged by either buyer or seller. */
+export async function disputeEscrow(params: DisputeParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "dispute",
+        [
+            nativeToScVal(params.caller, { type: "address" }),
+            hexToBytesScVal(params.tradeId),
+        ],
+        signer
+    );
+}
+
+export interface ResolveParams {
+    contractId: string;
+    tradeId: string;
+    resolveToBuyer: boolean;
+}
+
+/** Calls escrow's resolve(id, resolve_to_buyer). Admin-only. */
+export async function resolveEscrow(params: ResolveParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.resolveToBuyer),
+        ],
+        signer
+    );
 /**
  * Builds an unsigned transaction for the escrow refund operation.
  * Returns the unsigned XDR transaction base64 string for client-side signing.
