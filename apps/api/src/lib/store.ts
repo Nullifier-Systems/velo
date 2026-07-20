@@ -28,12 +28,14 @@ export interface CashRequestRecord {
 
 export interface ProviderRecord {
     id: string;
+    stellarAddress?: string;
     name: string;
     lat: number;
     lng: number;
     tier: "Probationary" | "Standard" | "Trusted";
     rate: string;
     status: "available" | "unavailable";
+    availability?: "available" | "unavailable";
     kycStatus: "pending" | "approved" | "rejected";
     ipAddress?: string;
     deviceId?: string;
@@ -53,6 +55,15 @@ export function saveProvider(record: ProviderRecord) {
 
 export function getProviders(): ProviderRecord[] {
     return Array.from(providersStore.values());
+}
+
+export function getProviderByAddress(stellarAddress: string): ProviderRecord | undefined {
+    for (const record of providersStore.values()) {
+        if (record.stellarAddress === stellarAddress) {
+            return record;
+        }
+    }
+    return undefined;
 }
 
 export function countProvidersByNetwork(ipAddress?: string, deviceId?: string): number {

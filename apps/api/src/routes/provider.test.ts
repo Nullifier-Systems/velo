@@ -124,4 +124,75 @@ describe("providerRoutes", () => {
 
     await app.close();
   });
+
+  it("registers a new provider with valid inputs", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const validAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: validAddress,
+        name: "Test Provider Shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 1.05,
+        availability: "available"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.id).toBeDefined();
+    expect(body.stellar_address).toBe(validAddress);
+    expect(body.name).toBe("Test Provider Shop");
+    expect(body.rate).toBe(1.05);
+    expect(body.availability).toBe("available");
+
+    await app.close();
+  });
+
+  it("rejects provider registration with invalid Stellar address", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: "INVALID_STELLAR_ADDRESS",
+        name: "Invalid Shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 1.0
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("Validation failed");
+    await app.close();
+  });
+
+  it("rejects provider registration with out-of-range rate", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH",
+        name: "Out of range rate shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 150.0 // Exceeds max rate 100.0
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("Validation failed");
+    await app.close();
+  });
 });
