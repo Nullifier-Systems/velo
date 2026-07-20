@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Html5Qrcode } from "html5-qrcode";
+import QrScanner from "qr-scanner";
 import {
   fetchCashRequest,
   releaseCashRequest,
@@ -19,7 +19,10 @@ export default function MerchantScan() {
   const [releasing, setReleasing] = useState(false);
   const [scannedData, setScannedData] = useState<{ id: string; secret: string } | null>(null);
   const [claimDetails, setClaimDetails] = useState<CashRequestStatus | null>(null);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [manualCode, setManualCode] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerRef = useRef<QrScanner | null>(null);
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -38,69 +41,83 @@ export default function MerchantScan() {
     localStorage.setItem("velo-theme", nextTheme);
   };
 
+  const processDecodedText = (decodedText: string) => {
+    try {
+      // Parse the QR payload
+      // format: velo://claim?request_id=xxx&secret=yyy or http://.../claim/xxx?secret=yyy
+      let urlObj: URL;
+      if (decodedText.startsWith("velo://")) {
+        urlObj = new URL(decodedText.replace("velo://", "https://"));
+      } else if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
+        urlObj = new URL(decodedText);
+      } else {
+        throw new Error("Invalid Velo QR payload format");
+      }
+
+      let requestId = urlObj.searchParams.get("request_id");
+      if (!requestId) {
+        // Try to extract from path (e.g. /claim/:id)
+        const pathParts = urlObj.pathname.split("/");
+        requestId = pathParts[pathParts.length - 1];
+      }
+
+      const secret = urlObj.searchParams.get("secret");
+
+      if (!requestId || !secret) {
+        throw new Error("Missing Claim ID or Secret key in QR payload");
+      }
+
+      // Stop/destroy scanner on success
+      if (scannerRef.current) {
+        scannerRef.current.destroy();
+        scannerRef.current = null;
+      }
+      setScanning(false);
+      setScannedData({ id: requestId, secret });
+      fetchDetails(requestId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to parse QR code");
+    }
+  };
+
   useEffect(() => {
-    // Initialize html5-qrcode scanner
-    if (scanning && !scannedData) {
-      const html5QrCode = new Html5Qrcode("scanner-video-container");
-      scannerRef.current = html5QrCode;
-
-      html5QrCode
-        .start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: (width: number, height: number) => {
-              const size = Math.min(width, height) * 0.7;
-              return { width: size, height: size };
-            },
+    // Initialize Nimiq qr-scanner
+    if (scanning && !scannedData && videoRef.current) {
+      const qrScanner = new QrScanner(
+        videoRef.current,
+        (result) => {
+          processDecodedText(result.data);
+        },
+        {
+          preferredCamera: "environment",
+          maxScansPerSecond: 8, // Throttled to conserve CPU & battery on low-end devices
+          highlightScanRegion: false, // We use our own custom stylesheet guide box overlay
+          calculateScanRegion: (video) => {
+            // Restrict scanning area to center 70% viewfinder box
+            const minDim = Math.min(video.videoWidth, video.videoHeight);
+            const size = Math.round(minDim * 0.7);
+            return {
+              x: Math.round((video.videoWidth - size) / 2),
+              y: Math.round((video.videoHeight - size) / 2),
+              width: size,
+              height: size,
+              downScaledWidth: 400, // Downscale image representation to 400px before decoding
+              downScaledHeight: 400,
+            };
           },
-          async (decodedText: string) => {
-            try {
-              // Parse the QR payload
-              // format: velo://claim?request_id=xxx&secret=yyy or http://.../claim/xxx?secret=yyy
-              let urlObj: URL;
-              if (decodedText.startsWith("velo://")) {
-                urlObj = new URL(decodedText.replace("velo://", "https://"));
-              } else if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
-                urlObj = new URL(decodedText);
-              } else {
-                throw new Error("Invalid Velo QR payload format");
-              }
+        }
+      );
+      scannerRef.current = qrScanner;
 
-              let requestId = urlObj.searchParams.get("request_id");
-              if (!requestId) {
-                // Try to extract from path (e.g. /claim/:id)
-                const pathParts = urlObj.pathname.split("/");
-                requestId = pathParts[pathParts.length - 1];
-              }
-
-              const secret = urlObj.searchParams.get("secret");
-
-              if (!requestId || !secret) {
-                throw new Error("Missing Claim ID or Secret key in QR payload");
-              }
-
-              // Stop scanner on success
-              await html5QrCode.stop();
-              setScanning(false);
-              setScannedData({ id: requestId, secret });
-              fetchDetails(requestId);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Failed to parse QR code");
-            }
-          },
-          () => {
-            // silent fail on non-detected frame
-          }
-        )
-        .catch((err: unknown) => {
-          setError(`Camera access error: ${err instanceof Error ? err.message : String(err)}`);
-        });
+      qrScanner.start().catch((err: unknown) => {
+        setError(`Camera access error: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
 
     return () => {
-      if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current.stop().catch((e: unknown) => console.error("Error stopping scanner", e));
+      if (scannerRef.current) {
+        scannerRef.current.destroy();
+        scannerRef.current = null;
       }
     };
   }, [scanning, scannedData]);
@@ -140,7 +157,27 @@ export default function MerchantScan() {
     setClaimDetails(null);
     setSuccessMsg(null);
     setError(null);
+    setManualCode("");
     setScanning(true);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    try {
+      const result = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
+      processDecodedText(result.data);
+    } catch (err) {
+      setError("No valid QR code found in the uploaded image.");
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCode.trim()) return;
+    setError(null);
+    processDecodedText(manualCode.trim());
   };
 
   const renderThemeToggle = () => (
@@ -202,7 +239,7 @@ export default function MerchantScan() {
         {scanning && (
           <div className="scanner-container">
             <div className="scanner-viewfinder">
-              <div id="scanner-video-container" />
+              <video ref={videoRef} className="scanner-video" />
               <div className="scanner-overlay">
                 <div className="scanner-border-corner top-left"></div>
                 <div className="scanner-border-corner top-right"></div>
@@ -212,6 +249,33 @@ export default function MerchantScan() {
               </div>
             </div>
             <p className="scanner-hint">Align the buyer's claim QR code within the frame to scan</p>
+
+            <div className="scanner-fallback-section">
+              <span className="fallback-divider">OR</span>
+              <div className="fallback-actions">
+                <label className="fallback-file-button">
+                  Upload QR Image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                <form onSubmit={handleManualSubmit} className="manual-entry-group">
+                  <input
+                    type="text"
+                    placeholder="Enter claim URL or code..."
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value)}
+                    className="manual-entry-input"
+                  />
+                  <button type="submit" className="manual-entry-button">
+                    Submit
+                  </button>
+                </form>
+              </div>
+            </div>
           </div>
         )}
 
