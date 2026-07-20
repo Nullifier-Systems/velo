@@ -404,6 +404,15 @@ export const openApiDocument = {
         security: [{ x402Payment: [] }],
         "x-price-usdc": "0.01",
         "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        parameters: [
+          {
+            name: "lang",
+            in: "query",
+            required: false,
+            description: "Desired language for the instruction text (e.g. 'es' for Spanish).",
+            schema: { type: "string" },
+          },
+        ],
         requestBody: {
           required: true,
           content: {

@@ -7,7 +7,7 @@
   --ink-muted: #5c6b5f;
   --line: #c7d0be;
   --stamp-blue: #1b4b8f;
-  --stamp-green: #1f6b4a;
+  --stamp-green: #18583a;
   --stamp-red: #8f2a1b;
 }
 
@@ -267,7 +267,34 @@ html.dark {
   font-size: 12px;
   color: var(--ink-muted);
   cursor: pointer;
-  padding: 6px 0;
+const [apiLoading, setApiLoading] = useState(true);
+
+const queryClient = useQueryClient();
+const [project, setProjectState] = useState<ClimateProject | null>(null);
+
+const setProject = (p: ClimateProject | null) => {
+  setProjectState(p);
+  if (p) {
+    queryClient.setQueryData(["project", p.id], p);
+  }
+};
+
+const { data: projectQueryData, isLoading: projectQueryLoading } = useProjectQuery(
+  id as string,
+  undefined,
+  publicKey ?? undefined
+);
+
+useEffect(() => {
+  if (projectQueryData) {
+    setProjectState(projectQueryData);
+  }
+}, [projectQueryData]);
+
+const loading = projectQueryLoading || apiLoading;
+
+const isFollowing = project?.isFollowing ?? false;
+const followCount = project?.followCount ?? 0;
 }
 
 .claim-ticket__debug-button {
@@ -283,14 +310,25 @@ html.dark {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  appearance: none;
-  -webkit-appearance: none;
+.claim-ticket__debug-button {
+  outline: none;
+}
+
+.claim-ticket__debug-button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 }
 
 .claim-ticket__debug-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Lang toggle button overrides for visible focus rings */
+.lang-toggle-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
