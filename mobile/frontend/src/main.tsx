@@ -9,7 +9,9 @@ import Dashboard from "./pages/Dashboard.js";
 import Status from "./pages/Status.js";
 import Chat from "./pages/Chat.js";
 import MerchantScan from "./pages/MerchantScan.js";
-import NotFound from "./pages/NotFound.js";
+
+import Status from "./pages/Status.js"; // Import added to resolve the compilation error
+import Status from "./pages/Status.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
