@@ -12,6 +12,16 @@
   --font-mono: 'IBM Plex Mono', monospace;
 }
 
+html.dark {
+  --bg-sage: #1c2720;
+  --bg-backdrop: #121b16;
+  --ink-black: #edf1e7;
+  --status-locked: #5294e2;
+  --status-released: #52b788;
+  --status-refunded: #e63946;
+  --perforation: #384d3f;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

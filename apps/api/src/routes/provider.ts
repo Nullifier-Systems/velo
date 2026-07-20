@@ -45,4 +45,53 @@ export async function providerRoutes(app: FastifyInstance) {
       })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     };
   });
+
+  app.get("/provider/export", async (req, reply) => {
+    const providerAddress = req.headers["x-provider-address"];
+    
+    if (!providerAddress || typeof providerAddress !== "string") {
+      reply.code(401).send({ error: "Unauthorized: Missing x-provider-address header" });
+      return;
+    }
+
+    const allTrades = getProviderTrades(providerAddress);
+    const completedTrades = allTrades.filter(t => t.status === "released");
+    const format = (req.query as any).format;
+
+    if (format === "csv") {
+      const headers = ["Trade ID", "Buyer Address", "Amount (Stroops)", "Amount (USDC)", "Status", "Created At"];
+      const csvContent = [
+        headers.join(","),
+        ...completedTrades.map(t => [
+          t.id,
+          t.buyer,
+          t.amountStroops,
+          (Number(t.amountStroops) / 10000000).toFixed(2),
+          t.status,
+          t.createdAt
+        ].map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      reply
+        .header("Content-Type", "text/csv")
+        .header("Content-Disposition", `attachment; filename="completed_trades_${providerAddress.substring(0, 8)}.csv"`)
+        .send(csvContent);
+      return;
+    }
+
+    // Default or explicit JSON format
+    const jsonOutput = completedTrades.map(t => ({
+      id: t.id,
+      buyer: t.buyer,
+      amount_stroops: t.amountStroops,
+      amount_usdc: (Number(t.amountStroops) / 10000000).toFixed(2),
+      status: t.status,
+      created_at: t.createdAt
+    }));
+
+    reply
+      .header("Content-Type", "application/json")
+      .header("Content-Disposition", `attachment; filename="completed_trades_${providerAddress.substring(0, 8)}.json"`)
+      .send(jsonOutput);
+  });
 }

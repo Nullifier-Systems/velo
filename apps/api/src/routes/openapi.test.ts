@@ -33,8 +33,11 @@ describe("GET /api/v1/openapi.json", () => {
       "/health",
       "/api/v1/openapi.json",
       "/api/v1/services",
+      "/api/v1/status",
       "/api/v1/cash/agents",
       "/api/v1/cash/request",
+      "/api/v1/cash/request/prepare",
+      "/api/v1/cash/request/submit",
       "/api/v1/cash/request/{id}",
       "/api/v1/cash/request/{id}/release",
       "/api/v1/reputation/{address}",
@@ -49,6 +52,8 @@ describe("GET /api/v1/openapi.json", () => {
     const paid: Array<[string, string, string]> = [
       ["/api/v1/cash/agents", "get", "0.001"],
       ["/api/v1/cash/request", "post", "0.01"],
+      ["/api/v1/cash/request/prepare", "post", "0.01"],
+      ["/api/v1/cash/request/submit", "post", "0.01"],
       ["/api/v1/reputation/{address}", "get", "0.0005"],
     ];
 
