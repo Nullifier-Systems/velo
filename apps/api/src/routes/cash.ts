@@ -13,6 +13,7 @@ import {
   NETWORK_PASSPHRASE,
 } from "../lib/stellar.js";
 import { sendRefundAlert } from "../lib/webhook.js";
+import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
 import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";

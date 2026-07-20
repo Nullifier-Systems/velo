@@ -1,26 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
 import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats } from "../lib/store.js";
-
-// Basic schema for body validation
-interface FlagRequestBody {
-  suspicious: boolean;
-  notes?: string;
-}
-
-interface OverrideHeader {
-  'x-admin-api-key': string;
-}
-
-// Basic schema for body validation
-interface FlagRequestBody {
-  suspicious: boolean;
-  notes?: string;
-}
-
-interface OverrideHeader {
-  'x-admin-api-key': string;
-}
+import { notifyTradeStatus } from "./chat.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -223,18 +204,19 @@ export async function adminRoutes(app: FastifyInstance) {
         
         // Keep memory/store helper synced 
         updateStatus(id, "refunded");
+        notifyTradeStatus(id, "refunded");
 
         return reply.status(200).send({
           status: "success",
           message: "Manual refund processed successfully.",
           trade_id: id,
-          new_status: "refunded"
+          new_status: "refunded",
         });
-      } catch (error) {
+      } catch (err) {
+        req.log.error(err, "DB update failed during admin override");
         return reply.status(500).send({
-          status: "error",
-          message: "Failed to process manual refund",
-          error: error instanceof Error ? error.message : String(error),
+          error: "Database update failed",
+          detail: String(err),
         });
       }
     }
