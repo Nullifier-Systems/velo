@@ -428,6 +428,44 @@ export async function refundEscrow(params: RefundParams) {
     );
 }
 
+export interface DisputeParams {
+    contractId: string;
+    tradeId: string;
+    caller: string;
+}
+
+/** Calls escrow's dispute(caller, id). Flagged by either buyer or seller. */
+export async function disputeEscrow(params: DisputeParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "dispute",
+        [
+            nativeToScVal(params.caller, { type: "address" }),
+            hexToBytesScVal(params.tradeId),
+        ],
+        signer
+    );
+}
+
+export interface ResolveParams {
+    contractId: string;
+    tradeId: string;
+    resolveToBuyer: boolean;
+}
+
+/** Calls escrow's resolve(id, resolve_to_buyer). Admin-only. */
+export async function resolveEscrow(params: ResolveParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.resolveToBuyer),
+        ],
+        signer
+    );
 /**
  * Builds an unsigned transaction for the escrow refund operation.
  * Returns the unsigned XDR transaction base64 string for client-side signing.
