@@ -22,7 +22,7 @@ export default function MerchantScan() {
   const [manualCode, setManualCode] = useState('');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const scannerRef = useRef<QrScanner | null>(null);
+  const scannerRef = useRef<any | null>(null);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('velo-theme');
@@ -85,14 +85,14 @@ export default function MerchantScan() {
     if (scanning && !scannedData && videoRef.current) {
       const qrScanner = new QrScanner(
         videoRef.current,
-        (result) => {
+        (result: any) => {
           processDecodedText(result.data);
         },
         {
           preferredCamera: 'environment',
           maxScansPerSecond: 8, // Throttled to conserve CPU & battery on low-end devices
           highlightScanRegion: false, // We use our own custom stylesheet guide box overlay
-          calculateScanRegion: (video) => {
+          calculateScanRegion: (video: any) => {
             // Restrict scanning area to center 70% viewfinder box
             const minDim = Math.min(video.videoWidth, video.videoHeight);
             const size = Math.round(minDim * 0.7);

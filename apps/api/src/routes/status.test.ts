@@ -17,6 +17,7 @@ describe('GET /api/v1/status', () => {
         'velo://claim?request_id=aaaabbbbccccddddeeeeffff00001111aaaabbbbccccddddeeeeffff00001111&secret=deadbeef',
       status: 'locked',
       createdAt: new Date().toISOString(),
+
     });
 
     const app = Fastify();
@@ -45,6 +46,7 @@ describe('GET /api/v1/status', () => {
     expect(entry.amountStroops).toBeUndefined();
     expect(entry.secretHex).toBeUndefined();
     expect(entry.secretHashHex).toBeUndefined();
+    expect(entry.qrPayload).toBeUndefined();
 
     await app.close();
   });

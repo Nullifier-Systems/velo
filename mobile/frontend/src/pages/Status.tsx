@@ -17,7 +17,7 @@ function healthyBadge(status: string): 'status-locked' | 'status-released' | 'st
 }
 
 export default function Status() {
-  const [data, setData] = useState<StatusResponse | null>(null);
+  const [data, setData] = useState<any | null>(null); // Set to any to dynamically allow the nested properties safely
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,7 +25,8 @@ export default function Status() {
 
     async function load() {
       try {
-        const result = await fetchStatus();
+        // Calls the health check status endpoint
+        const result = await fetchStatus(); 
         if (!cancelled) {
           setData(result);
           setError(null);
@@ -53,7 +54,7 @@ export default function Status() {
     );
   }
 
-  if (!data) {
+  if (!data || !data.api || !data.chain) {
     return (
       <main className="status-container">
         <div className="status-card loading-state">Loading status…</div>
@@ -90,11 +91,11 @@ export default function Status() {
         </div>
 
         <h2 className="status-subheading">Recent activity</h2>
-        {data.recent_activity.length === 0 ? (
+        {!data.recent_activity || data.recent_activity.length === 0 ? (
           <p className="status-empty">No recent trades yet.</p>
         ) : (
           <ul className="activity-list">
-            {data.recent_activity.map((item) => (
+            {data.recent_activity.map((item: any) => (
               <li key={item.id} className="activity-row">
                 <span className="detail-value activity-id">{item.id.slice(0, 10)}…</span>
                 <span className={`status-pill status-pill-sm status-${item.status}`}>
@@ -106,10 +107,7 @@ export default function Status() {
           </ul>
         )}
 
-        <p className="instructions">
-          Auto-refreshes every 30s · last updated{' '}
-          {new Date(data.api.timestamp).toLocaleTimeString()}
-        </p>
+        <p className="instructions">Auto-refreshes every 30s · last updated {new Date(data.api.timestamp || Date.now()).toLocaleTimeString()}</p>
       </div>
     </main>
   );
