@@ -19,7 +19,7 @@ vi.mock('@stellar/stellar-sdk', async (importOriginal) => {
   return {
     ...actual,
     TransactionBuilder: class extends actual.TransactionBuilder {
-      static buildFeeBumpTransaction = () => h.preparedTx;
+      static buildFeeBumpTransaction = () => h.preparedTx as any;
     },
   };
 });
