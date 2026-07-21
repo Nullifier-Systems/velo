@@ -12,12 +12,14 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
+    "i18next": "^26.3.6",
+    "i18next-browser-languagedetector": "^8.2.1",
     "qr-scanner": "^1.4.2",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
-    "tweetnacl": "^1.0.3"
+    "react-i18next": "^17.0.10",
+    "react-router-dom": "^6.26.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
