@@ -42,11 +42,12 @@ pub enum Error {
     Unauthorized = 10,
     TimeoutReached = 11,
     TradeNotDisputed = 12,
-    InvalidFee = 10,
-    NotAuthorized = 11,
-    ContractPaused = 12,
-    InvalidSigners = 13,
-    AlreadyMigrated = 14,
+    InvalidFee = 13,
+    NotAuthorized = 14,
+    ContractPaused = 15,
+    InvalidSigners = 16,
+    AlreadyMigrated = 17,
+    DuplicateSigner = 18,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -120,7 +121,7 @@ impl EscrowContract {
     /// Resolve a disputed trade. Can only be called by the admin.
     /// If resolve_to_buyer is true, funds are returned to the buyer in full.
     /// If resolve_to_buyer is false, funds are released to the seller minus the platform fee.
-    pub fn resolve(env: Env, id: BytesN<32>, resolve_to_buyer: bool) {
+    pub fn resolve(env: Env, id: BytesN<32>, resolve_to_buyer: bool, signers: Vec<Address>) {
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = env
             .storage()
@@ -137,7 +138,10 @@ impl EscrowContract {
             .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized));
-        admin.require_auth();
+        // Resolving a disputed trade moves escrowed funds, so it is a privileged
+        // action: gate it by the multisig (or the single admin in legacy mode),
+        // never by a lone admin key once multisig is active.
+        require_multisig(&env, &signers).unwrap_or_else(|e| panic_with_error(&env, e));
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
@@ -167,6 +171,8 @@ impl EscrowContract {
             (symbol_short(&env, "resolved"), id),
             (resolve_to_buyer, state.amount),
         );
+    }
+
     /// Migrate from single-admin to N-of-M multisig governance.
     /// Requires the current single admin to authorize.  Once called,
     /// all privileged actions (set_platform_fee, pause, etc.) require
@@ -260,12 +266,6 @@ impl EscrowContract {
         require_multisig(&env, &signers)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         Ok(())
-    }
-
-    /// Read-only accessor for a trade's current state. Returns `None` if
-    /// the id was never locked.
-    pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
-        env.storage().persistent().get(&DataKey::Trade(id))
     }
 }
 
@@ -433,10 +433,21 @@ fn validate_signers(
     if provided.len() < threshold {
         return Err(Error::NotAuthorized);
     }
+    // Count DISTINCT authorized signers. Without the duplicate check a single
+    // compromised key could satisfy any threshold by passing itself N times
+    // (e.g. [k, k, k] for a 3-of-M policy), since require_auth() on the same
+    // address succeeds with one signature. Deduplicating is what actually
+    // enforces "no single party can act alone".
     for i in 0..provided.len() {
         let signer = provided.get(i).unwrap();
         if !is_authorized(&signer, authorized) {
             return Err(Error::NotAuthorized);
+        }
+        // Reject any repeat of an earlier entry.
+        for j in 0..i {
+            if provided.get(j).unwrap() == signer {
+                return Err(Error::DuplicateSigner);
+            }
         }
         signer.require_auth();
     }
@@ -465,9 +476,8 @@ mod test {
     use super::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
-        token, Address, BytesN, Env,
+        token, vec, Address, BytesN, Env,
     };
-    use soroban_sdk::testutils::Address as _;
 
     struct Fixture {
         env: Env,
@@ -565,8 +575,9 @@ mod test {
         let trade = f.client.get_trade(&f.id).unwrap();
         assert_eq!(trade.status, TradeStatus::Disputed);
 
-        // Resolve to buyer (full refund)
-        f.client.resolve(&f.id, &true);
+        // Resolve to buyer (full refund). Single-admin mode: the signers vec is
+        // unused because require_multisig falls back to admin.require_auth().
+        f.client.resolve(&f.id, &true, &Vec::new(&f.env));
 
         assert_eq!(f.token.balance(&f.buyer), 1_000);
         assert_eq!(f.token.balance(&f.contract_id), 0);
@@ -586,8 +597,8 @@ mod test {
         let trade = f.client.get_trade(&f.id).unwrap();
         assert_eq!(trade.status, TradeStatus::Disputed);
 
-        // Resolve to seller (payout minus fee)
-        f.client.resolve(&f.id, &false);
+        // Resolve to seller (payout minus fee). Single-admin mode as above.
+        f.client.resolve(&f.id, &false, &Vec::new(&f.env));
 
         assert_eq!(f.token.balance(&f.seller), 495);
         assert_eq!(f.token.balance(&f.admin), 5);
@@ -673,5 +684,103 @@ mod test {
         // Large amount that exceeds i128::MAX / 10_000
         let overflow_amount = (i128::MAX / 10_000) + 1;
         client.lock(&id, &seller, &buyer, &overflow_amount, &secret_hash, &100);
+    }
+
+    // ------------------------------------------------------------------
+    // Threshold custody for admin authority (issue #215).
+    //
+    // These tests demonstrate the property the issue asks for: once N-of-M
+    // custody is active, no single key can exercise admin authority alone.
+    // Auth is mocked (`mock_all_auths`), which is precisely the adversary
+    // model for a *compromised* key: its signature always verifies, so the
+    // contract's own quorum logic is the only thing standing in the way.
+    // ------------------------------------------------------------------
+
+    struct Multisig {
+        f: Fixture,
+        s1: Address,
+        s2: Address,
+        s3: Address,
+    }
+
+    /// 2-of-3 custody over a freshly initialized contract.
+    fn setup_multisig() -> Multisig {
+        let f = setup(1_000, 100);
+        let s1 = Address::generate(&f.env);
+        let s2 = Address::generate(&f.env);
+        let s3 = Address::generate(&f.env);
+        f.client
+            .migrate_to_multisig(&vec![&f.env, s1.clone(), s2.clone(), s3.clone()], &2);
+        Multisig { f, s1, s2, s3 }
+    }
+
+    #[test]
+    fn multisig_rejects_a_single_key_repeated_to_meet_threshold() {
+        // The critical case: one compromised holder passing itself twice must
+        // NOT satisfy a 2-of-3 policy, even though require_auth() succeeds for
+        // it both times.
+        let m = setup_multisig();
+        let duplicated = vec![&m.f.env, m.s1.clone(), m.s1.clone()];
+        assert!(m.f.client.try_set_platform_fee(&250, &duplicated).is_err());
+    }
+
+    #[test]
+    fn multisig_rejects_below_threshold() {
+        let m = setup_multisig();
+        let single = vec![&m.f.env, m.s1.clone()];
+        assert!(m.f.client.try_set_platform_fee(&250, &single).is_err());
+    }
+
+    #[test]
+    fn multisig_rejects_an_unauthorized_signer() {
+        let m = setup_multisig();
+        let outsider = Address::generate(&m.f.env);
+        let mixed = vec![&m.f.env, m.s1.clone(), outsider];
+        assert!(m.f.client.try_set_platform_fee(&250, &mixed).is_err());
+    }
+
+    #[test]
+    fn multisig_accepts_distinct_threshold_signers() {
+        let m = setup_multisig();
+        let quorum = vec![&m.f.env, m.s1.clone(), m.s2.clone()];
+        assert!(m.f.client.try_set_platform_fee(&250, &quorum).is_ok());
+    }
+
+    #[test]
+    fn resolve_requires_a_quorum_once_multisig_is_active() {
+        // Dispute resolution moves escrowed funds, so it must not remain a
+        // single-key action after migration.
+        let m = setup_multisig();
+        m.f.client
+            .lock(&m.f.id, &m.f.seller, &m.f.buyer, &500, &m.f.secret_hash, &100);
+        m.f.client.dispute(&m.f.buyer, &m.f.id);
+
+        let single = vec![&m.f.env, m.s1.clone()];
+        assert!(m.f.client.try_resolve(&m.f.id, &true, &single).is_err());
+
+        let quorum = vec![&m.f.env, m.s1.clone(), m.s2.clone()];
+        assert!(m.f.client.try_resolve(&m.f.id, &true, &quorum).is_ok());
+        assert_eq!(m.f.token.balance(&m.f.buyer), 1_000);
+    }
+
+    #[test]
+    fn signer_rotation_requires_a_quorum_and_enables_recovery() {
+        // Recovery ceremony: a quorum of the remaining holders rotates out a
+        // lost or compromised key.
+        let m = setup_multisig();
+        let replacement = Address::generate(&m.f.env);
+        let new_set = vec![&m.f.env, m.s2.clone(), m.s3.clone(), replacement];
+
+        // A lone holder cannot rotate the signer set.
+        let single = vec![&m.f.env, m.s2.clone()];
+        assert!(m.f.client.try_set_signers(&new_set, &2, &single).is_err());
+
+        // A quorum can.
+        let quorum = vec![&m.f.env, m.s2.clone(), m.s3.clone()];
+        assert!(m.f.client.try_set_signers(&new_set, &2, &quorum).is_ok());
+
+        // The rotated-out key no longer counts toward a quorum.
+        let stale = vec![&m.f.env, m.s1.clone(), m.s2.clone()];
+        assert!(m.f.client.try_set_platform_fee(&300, &stale).is_err());
     }
 }
