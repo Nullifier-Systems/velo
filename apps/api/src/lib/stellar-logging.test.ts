@@ -4,6 +4,12 @@ const h = vi.hoisted(() => {
   const preparedTx = {
     sign: () => {},
     hash: () => Buffer.from('00'.repeat(32), 'hex'),
+    operations: [{}],
+    fee: '100',
+    toEnvelope: () => ({
+      switch: () => ({ value: 1 }),
+      v1: () => ({ tx: () => ({ ext: () => ({ value: () => undefined }) }) })
+    })
   };
   return {
     preparedTx,

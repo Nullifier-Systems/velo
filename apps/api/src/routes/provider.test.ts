@@ -131,7 +131,7 @@ describe('providerRoutes', () => {
     const app = Fastify();
     registerApp(app);
 
-    const validAddress = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH';
+    const validAddress = 'GBRPYH2L2C23FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTY2WCDH';
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/provider/register',
@@ -145,8 +145,10 @@ describe('providerRoutes', () => {
       },
     });
 
-    expect(response.statusCode).toBe(201);
     const body = response.json();
+    if (response.statusCode !== 201) console.log('ERROR:', body);
+    expect(response.statusCode).toBe(201);
+    if (response.statusCode !== 201) console.log(body);
     expect(body.id).toBeDefined();
     expect(body.stellar_address).toBe(validAddress);
     expect(body.name).toBe('Test Provider Shop');
