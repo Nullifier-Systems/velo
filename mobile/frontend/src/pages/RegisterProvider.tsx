@@ -38,7 +38,9 @@ export default function RegisterProvider() {
     // 1. Validate Stellar Address
     const trimmedAddress = stellarAddress.trim();
     if (!STELLAR_ADDRESS_REGEX.test(trimmedAddress)) {
-      setError('Please enter a valid Stellar public address (starts with G and is 56 characters long).');
+      setError(
+        'Please enter a valid Stellar public address (starts with G and is 56 characters long).'
+      );
       return;
     }
 
@@ -65,7 +67,7 @@ export default function RegisterProvider() {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
-      
+
       const response = await fetch(`${apiUrl}/api/v1/provider/register`, {
         method: 'POST',
         headers: {
@@ -87,7 +89,7 @@ export default function RegisterProvider() {
           const errData = await response.json();
           errMessage = errData.detail || errData.error || errMessage;
         } catch {
-          errMessage = await response.text() || errMessage;
+          errMessage = (await response.text()) || errMessage;
         }
         throw new Error(errMessage);
       }
@@ -106,7 +108,9 @@ export default function RegisterProvider() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="max-w-md w-full text-center space-y-4">
           <h2 className="text-2xl font-bold text-green-600">Registered Successfully!</h2>
-          <p className="text-gray-600">Your cash provision location is now active and ready in the table.</p>
+          <p className="text-gray-600">
+            Your cash provision location is now active and ready in the table.
+          </p>
         </div>
       </div>
     );
@@ -166,7 +170,9 @@ export default function RegisterProvider() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="lat" className="block text-sm font-medium text-gray-700">Latitude</label>
+                <label htmlFor="lat" className="block text-sm font-medium text-gray-700">
+                  Latitude
+                </label>
                 <input
                   id="lat"
                   name="lat"
@@ -179,7 +185,9 @@ export default function RegisterProvider() {
                 />
               </div>
               <div>
-                <label htmlFor="lng" className="block text-sm font-medium text-gray-700">Longitude</label>
+                <label htmlFor="lng" className="block text-sm font-medium text-gray-700">
+                  Longitude
+                </label>
                 <input
                   id="lng"
                   name="lng"
@@ -192,7 +200,7 @@ export default function RegisterProvider() {
                 />
               </div>
             </div>
-            
+
             <button
               type="button"
               onClick={handleLocationDetect}

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState } from 'react';
 
 export default function Home() {
   const [shouldCrash, setShouldCrash] = useState(false);
 
   if (shouldCrash) {
-    throw new Error("Simulated component crash");
+    throw new Error('Simulated component crash');
   }
 
   return (
@@ -16,10 +16,7 @@ export default function Home() {
             nearby-provider list from the backend, real wallet balance. */}
         <div className="home-placeholder">
           <p>Scan a Velo QR code to get started.</p>
-          <button 
-            className="home-crash-button"
-            onClick={() => setShouldCrash(true)}
-          >
+          <button className="home-crash-button" onClick={() => setShouldCrash(true)}>
             Simulate Crash
           </button>
         </div>
@@ -27,4 +24,3 @@ export default function Home() {
     </main>
   );
 }
-

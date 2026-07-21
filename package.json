@@ -13,6 +13,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "format": "turbo run format",
     "test": "turbo run test",
     "dev:api": "npm run dev -w apps/api",
     "dev:frontend": "npm run dev -w mobile/frontend",
@@ -20,6 +21,12 @@
     "post-deploy-check": "npm run post-deploy-check -w apps/api"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "prettier": "^3.9.6",
     "turbo": "^2.1.0"
   },
   "packageManager": "npm@10.0.0"

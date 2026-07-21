@@ -1,8 +1,8 @@
-import { CashRequestRecord } from "./store.js";
+import { CashRequestRecord } from './store.js';
 
 export interface SentNotification {
   recipient: string;
-  type: "email" | "sms";
+  type: 'email' | 'sms';
   subject?: string;
   message: string;
   timestamp: string;
@@ -16,17 +16,17 @@ export function clearNotificationQueue() {
 
 export async function sendNotification(
   record: CashRequestRecord,
-  newStatus: "released" | "refunded"
+  newStatus: 'released' | 'refunded'
 ): Promise<void> {
   const { notificationType, contactInfo, id, amountStroops } = record;
-  if (!notificationType || notificationType === "none" || !contactInfo) {
+  if (!notificationType || notificationType === 'none' || !contactInfo) {
     return;
   }
 
   // Formatting amount
   const n = BigInt(amountStroops);
   const whole = n / 10_000_000n;
-  const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
+  const frac = (n % 10_000_000n).toString().padStart(7, '0').slice(0, 2);
   const formattedAmount = `${whole}.${frac}`;
 
   const message = `Velo claim update: Your claim ${id} for ${formattedAmount} XLM/USDC has been ${newStatus}.`;
@@ -38,7 +38,7 @@ export async function sendNotification(
     timestamp: new Date().toISOString(),
   };
 
-  if (notificationType === "email") {
+  if (notificationType === 'email') {
     notification.subject = `Velo Claim Update: ${newStatus.toUpperCase()}`;
   }
 
@@ -47,6 +47,6 @@ export async function sendNotification(
   // In a production app, we would integrate Twilio / SendGrid here.
   // For development and testing, we log to stdout.
   console.log(`[Notification System] Sent ${notificationType} to ${contactInfo}:`);
-  console.log(`  Subject: ${notification.subject ?? "N/A"}`);
+  console.log(`  Subject: ${notification.subject ?? 'N/A'}`);
   console.log(`  Message: ${message}`);
 }

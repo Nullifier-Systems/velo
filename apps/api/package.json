@@ -10,7 +10,9 @@
     "start": "node dist/index.js",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "post-deploy-check": "tsx scripts/post-deploy-check.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write src"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
