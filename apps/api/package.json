@@ -18,7 +18,7 @@
     "@fastify/cors": "^9.0.1",
     "@fastify/rate-limit": "^9.1.0",
     "@fastify/websocket": "^8.0.0",
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-sdk": "16.0.1",
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",

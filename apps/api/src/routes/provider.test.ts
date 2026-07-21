@@ -145,10 +145,8 @@ describe('providerRoutes', () => {
       },
     });
 
-    const body = response.json();
-    if (response.statusCode !== 201) console.log('ERROR:', body);
     expect(response.statusCode).toBe(201);
-    if (response.statusCode !== 201) console.log(body);
+    const body = response.json();
     expect(body.id).toBeDefined();
     expect(body.stellar_address).toBe(validAddress);
     expect(body.name).toBe('Test Provider Shop');

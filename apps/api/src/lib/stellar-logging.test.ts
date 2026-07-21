@@ -4,12 +4,6 @@ const h = vi.hoisted(() => {
   const preparedTx = {
     sign: () => {},
     hash: () => Buffer.from('00'.repeat(32), 'hex'),
-    operations: [{}],
-    fee: '100',
-    toEnvelope: () => ({
-      switch: () => ({ value: 1 }),
-      v1: () => ({ tx: () => ({ ext: () => ({ value: () => undefined }) }) })
-    })
   };
   return {
     preparedTx,
@@ -17,6 +11,16 @@ const h = vi.hoisted(() => {
     simulateTransaction: vi.fn(),
     sendTransaction: vi.fn(),
     getTransaction: vi.fn(),
+  };
+});
+
+vi.mock('@stellar/stellar-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@stellar/stellar-sdk')>();
+  return {
+    ...actual,
+    TransactionBuilder: class extends actual.TransactionBuilder {
+      static buildFeeBumpTransaction = () => h.preparedTx;
+    },
   };
 });
 
