@@ -8,8 +8,8 @@ can actually infer.
 
 ## Technique: geohash-cell generalization with reveal-on-match
 
-Chosen over cryptographic range proofs because the requirement is a *coarse
-region until a match*, not a zero-knowledge predicate. Range proofs would add a
+Chosen over cryptographic range proofs because the requirement is a _coarse
+region until a match_, not a zero-knowledge predicate. Range proofs would add a
 proving system, latency, and a much larger correctness/verification burden for
 no additional benefit at this granularity. The mechanism has three parts.
 
@@ -53,7 +53,7 @@ is the intended, disclosed granularity.
 
 - **Binary-search / trilateration below a cell.** Because both the provider and
   the query are snapped to cell centroids and the distance is returned as a band,
-  moving the query point produces a *step function* that only changes at cell
+  moving the query point produces a _step function_ that only changes at cell
   boundaries. Within one query cell, every provider in a given cell returns an
   identical band. There is no continuous signal to gradient-descend, so repeated
   queries cannot localize the provider more precisely than one cell. (Tested in
@@ -74,7 +74,7 @@ is the intended, disclosed granularity.
   **k-anonymity** (`k` query param) suppresses any cell holding fewer than `k`
   available providers, so a single provider is never singled out.
 - **The server still stores raw coordinates.** Generalization protects the API
-  *responses*. Reducing trust in the server itself (e.g. storing only the cell,
+  _responses_. Reducing trust in the server itself (e.g. storing only the cell,
   or a client-side commitment) is a natural follow-up; the response contract
   here does not change if registration later stops persisting raw coordinates.
 

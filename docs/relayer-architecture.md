@@ -62,25 +62,25 @@ primarily across EVM chains.
 
 ## Comparison
 
-| Criterion | A. Custom | B. Wormhole | C. Axelar | D. LayerZero |
-|-----------|-----------|-------------|-----------|--------------|
-| Added trust assumption | **None** | Guardian set | Validator set | DVN/oracle set |
-| Solves *our* problem (secret relay) | **Exactly** | Overkill (general messaging) | Overkill | Overkill |
-| Stellar/Soroban support | Native (RPC) | Nascent | Emerging | Limited |
-| Integration effort | **Low** | High | High | High |
-| Ongoing cost | Gas + 1 process | Gas + protocol fees | Gas + protocol fees | Gas + protocol fees |
-| Funds-at-risk if relayer/bridge fails | No (timelock refund) | Adds bridge risk | Adds bridge risk | Adds bridge risk |
-| Contract changes on both legs | No | Yes | Yes | Yes |
+| Criterion                             | A. Custom            | B. Wormhole                  | C. Axelar           | D. LayerZero        |
+| ------------------------------------- | -------------------- | ---------------------------- | ------------------- | ------------------- |
+| Added trust assumption                | **None**             | Guardian set                 | Validator set       | DVN/oracle set      |
+| Solves _our_ problem (secret relay)   | **Exactly**          | Overkill (general messaging) | Overkill            | Overkill            |
+| Stellar/Soroban support               | Native (RPC)         | Nascent                      | Emerging            | Limited             |
+| Integration effort                    | **Low**              | High                         | High                | High                |
+| Ongoing cost                          | Gas + 1 process      | Gas + protocol fees          | Gas + protocol fees | Gas + protocol fees |
+| Funds-at-risk if relayer/bridge fails | No (timelock refund) | Adds bridge risk             | Adds bridge risk    | Adds bridge risk    |
+| Contract changes on both legs         | No                   | Yes                          | Yes                 | Yes                 |
 
 ## Recommendation
 
 **Build the custom relayer (Option A).** For HTLC secret-relay it is the correct
 tool: it adds no trust assumptions, requires no contract changes on either leg,
 supports Stellar and any EVM chain today, and is cheap to run. The general
-messaging bridges solve a *different* problem — trust-minimized delivery of
+messaging bridges solve a _different_ problem — trust-minimized delivery of
 arbitrary messages — and paying their trust, fee, and integration costs to move a
 32-byte secret that is already self-verifying is unjustified. Worse, routing the
-secret through a bridge would *reduce* the swap's security from "trustless HTLC"
+secret through a bridge would _reduce_ the swap's security from "trustless HTLC"
 to "trust the bridge's validator set."
 
 **Revisit this decision if** Velo needs generalized cross-chain state (not just

@@ -5,14 +5,14 @@ module.exports = {
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
-    'plugin:prettier/recommended'
+    'plugin:prettier/recommended',
   ],
   rules: {
     'prettier/prettier': 'error',
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     '@typescript-eslint/no-empty-function': 'warn',
     '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/no-non-null-assertion': 'warn'
+    '@typescript-eslint/no-non-null-assertion': 'warn',
   },
-  ignorePatterns: ['dist', 'node_modules', 'build']
+  ignorePatterns: ['dist', 'node_modules', 'build'],
 };

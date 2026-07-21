@@ -9,11 +9,11 @@ Choose a browser QR scanner for the merchant flow that remains usable on inexpen
 
 ## Candidates
 
-| Library tested | Version | Compatibility and implementation notes | Low-end suitability |
-| --- | --- | --- | --- |
-| [`qr-scanner`](https://github.com/nimiq/qr-scanner) | 1.4.2 | Uses native `BarcodeDetector` when present and otherwise decodes in a Web Worker. The normal build uses ES2017 features and dynamic imports; an ES2015 legacy UMD build is provided for older browsers. The library documents a 59.3 kB minified / 16.3 kB gzip fallback payload, or 15.3 kB / 5.6 kB gzip when native detection is available. Camera scanning, rear-camera preference, scan-region downscaling, scan-rate throttling, and torch controls are built in. | Best fit. Worker isolation keeps decoding off the UI thread, the payload is small, and `maxScansPerSecond` plus a downscaled scan region give direct battery/CPU controls. |
-| [`@zxing/browser`](https://github.com/zxing-js/browser) | 0.2.1 | Provides camera, stream, image, and video readers plus detailed media constraints and torch controls. It is lower-level and the QR reader decodes on the main thread by default. Its npm package unpacked size was 5.8 MB in the tested release, including sources/dependencies; production tree-shaking reduces the delivered bundle but must be measured after integration. | Fastest raw still-image decoder in this test, but continuous main-thread work risks visible frame drops on weak CPUs unless Velo adds its own worker, frame throttling, and scan-region pipeline. |
-| [`html5-qrcode`](https://github.com/mebjas/html5-qrcode) | 2.3.8 | Offers both a ready-made scanner UI and a lower-level API, supports camera and file input, and wraps ZXing-JS. Its published support table covers major Android browsers, but camera support still depends on browser media APIs. Native `BarcodeDetector` integration is explicitly experimental. The package supports many barcode formats that this flow does not need. | Easiest prototype, but the heaviest abstraction and slowest throttled results. Extra UI and multi-format behavior are poor tradeoffs for a QR-only flow on constrained phones. |
+| Library tested                                           | Version | Compatibility and implementation notes                                                                                                                                                                                                                                                                                                                                                                                                                                  | Low-end suitability                                                                                                                                                                               |
+| -------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`qr-scanner`](https://github.com/nimiq/qr-scanner)      | 1.4.2   | Uses native `BarcodeDetector` when present and otherwise decodes in a Web Worker. The normal build uses ES2017 features and dynamic imports; an ES2015 legacy UMD build is provided for older browsers. The library documents a 59.3 kB minified / 16.3 kB gzip fallback payload, or 15.3 kB / 5.6 kB gzip when native detection is available. Camera scanning, rear-camera preference, scan-region downscaling, scan-rate throttling, and torch controls are built in. | Best fit. Worker isolation keeps decoding off the UI thread, the payload is small, and `maxScansPerSecond` plus a downscaled scan region give direct battery/CPU controls.                        |
+| [`@zxing/browser`](https://github.com/zxing-js/browser)  | 0.2.1   | Provides camera, stream, image, and video readers plus detailed media constraints and torch controls. It is lower-level and the QR reader decodes on the main thread by default. Its npm package unpacked size was 5.8 MB in the tested release, including sources/dependencies; production tree-shaking reduces the delivered bundle but must be measured after integration.                                                                                           | Fastest raw still-image decoder in this test, but continuous main-thread work risks visible frame drops on weak CPUs unless Velo adds its own worker, frame throttling, and scan-region pipeline. |
+| [`html5-qrcode`](https://github.com/mebjas/html5-qrcode) | 2.3.8   | Offers both a ready-made scanner UI and a lower-level API, supports camera and file input, and wraps ZXing-JS. Its published support table covers major Android browsers, but camera support still depends on browser media APIs. Native `BarcodeDetector` integration is explicitly experimental. The package supports many barcode formats that this flow does not need.                                                                                              | Easiest prototype, but the heaviest abstraction and slowest throttled results. Extra UI and multi-format behavior are poor tradeoffs for a QR-only flow on constrained phones.                    |
 
 Package versions and unpacked sizes were read from npm on the test date. Unpacked package size is not the same as the browser transfer size; the final application bundle should be checked during implementation.
 
@@ -29,14 +29,14 @@ The three published packages were loaded through Vite in headless Chrome 150 wit
 
 After two warm-ups, each library decoded each fixture 15 times. The test was repeated with Chrome DevTools CPU throttling set to 6× as a repeatable proxy for low-end hardware. Times below are median milliseconds; every cell had 15/15 correct decodes.
 
-| CPU profile | Library | Normal | Small | Low contrast |
-| --- | --- | ---: | ---: | ---: |
-| Unthrottled | `qr-scanner` | 89.8 | 91.0 | 84.2 |
-| Unthrottled | `@zxing/browser` | **12.9** | **8.2** | **10.7** |
-| Unthrottled | `html5-qrcode` | 65.7 | 41.4 | 50.3 |
-| 6× throttle | `qr-scanner` | 95.1 | 80.9 | 155.6 |
-| 6× throttle | `@zxing/browser` | **31.7** | **14.4** | **26.2** |
-| 6× throttle | `html5-qrcode` | 169.7 | 109.4 | 412.0 |
+| CPU profile | Library          |   Normal |    Small | Low contrast |
+| ----------- | ---------------- | -------: | -------: | -----------: |
+| Unthrottled | `qr-scanner`     |     89.8 |     91.0 |         84.2 |
+| Unthrottled | `@zxing/browser` | **12.9** |  **8.2** |     **10.7** |
+| Unthrottled | `html5-qrcode`   |     65.7 |     41.4 |         50.3 |
+| 6× throttle | `qr-scanner`     |     95.1 |     80.9 |        155.6 |
+| 6× throttle | `@zxing/browser` | **31.7** | **14.4** |     **26.2** |
+| 6× throttle | `html5-qrcode`   |    169.7 |    109.4 |        412.0 |
 
 The result measures still-image decode latency, not camera acquisition. It does not reproduce autofocus, motion blur, poor sensors, thermal throttling, or vendor-specific camera drivers. No physical low-end Android device or camera was available in this environment, so a device acceptance matrix remains a release requirement.
 
@@ -80,4 +80,3 @@ Choose `@zxing/browser` instead only if physical-device testing shows materially
 - [`@zxing/browser` documentation](https://github.com/zxing-js/browser)
 - [`html5-qrcode` documentation and platform matrix](https://github.com/mebjas/html5-qrcode)
 - [MDN: `MediaDevices.getUserMedia()`](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
-

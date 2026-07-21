@@ -21,17 +21,18 @@ The most important recent development is **tapi's acquisition of Mastercard's Ar
 
 ### 1.1 OXXO (FEMSA)
 
-| Metric | Value |
-|--------|-------|
-| Parent | FEMSA (Fomento Económico Mexicano) |
-| Stores in Mexico (2025) | 24,297 (up from 23,206 in 2024) |
-| Total across Americas | 25,587 |
-| Daily customers | ~13-14 million |
-| Founded | 1978 |
-| Ownership structure | Publicly traded; FEMSA listed on BMV |
+| Metric                  | Value                                |
+| ----------------------- | ------------------------------------ |
+| Parent                  | FEMSA (Fomento Económico Mexicano)   |
+| Stores in Mexico (2025) | 24,297 (up from 23,206 in 2024)      |
+| Total across Americas   | 25,587                               |
+| Daily customers         | ~13-14 million                       |
+| Founded                 | 1978                                 |
+| Ownership structure     | Publicly traded; FEMSA listed on BMV |
 
 **Services Offered:**
-- **OXXO Pay:** Cash payment for e-commerce purchases. Customer receives a barcode/voucher code, pays in-store. Launched ~2017. Accounts for ~10% of Mexico's online transactions (~$6B in volume).
+
+- **OXXO Pay:** Cash payment for e-commerce purchases. Customer receives a barcode/voucher code, pays in-store. Launched ~2017. Accounts for ~~10% of Mexico's online transactions (~~$6B in volume).
 - **Bill payments:** Utilities, telecom, taxes, credit cards.
 - **Money transfers/remittances:** Partnerships with Western Union, MoneyGram, and others.
 - **Spin by OXXO:** FEMSA's own digital wallet and financial services platform. Part of FEMSA's "Ecosystem 2.0" strategy. Offers prepaid cards, transfers, and payments. Recently delayed banking license application.
@@ -50,14 +51,15 @@ OXXO is the single most important cash partner in Mexico. However, direct partne
 
 ### 1.2 7-Eleven Mexico
 
-| Metric | Value |
-|--------|-------|
-| Parent | Grupo Iconn (Mexico franchisee of 7-Eleven Inc.) |
-| Stores in Mexico | ~1,800+ across 14 states |
-| Operating hours | 6 AM - 10 PM (varies by region) |
+| Metric             | Value                                                |
+| ------------------ | ---------------------------------------------------- |
+| Parent             | Grupo Iconn (Mexico franchisee of 7-Eleven Inc.)     |
+| Stores in Mexico   | ~1,800+ across 14 states                             |
+| Operating hours    | 6 AM - 10 PM (varies by region)                      |
 | Key differentiator | First convenience store chain globally; strong brand |
 
 **Services Offered:**
+
 - **Bank deposits and payments:** Cash deposits to accounts at BBVA, Banorte, Santander, HSBC, Scotiabank, Banamex, Inbursa, and others. Limits: MX$3,000-5,000 per transaction depending on bank.
 - **Credit card payments:** Payments toward credit cards at major banks.
 - **Bill payments:** Utilities, services, government fees.
@@ -74,14 +76,15 @@ A secondary but important partner. Smaller footprint than OXXO but complementary
 
 ### 1.3 Walmart Mexico (Walmex / Walmart de México y Centroamérica)
 
-| Metric | Value |
-|--------|-------|
-| Parent | Walmart Inc. (NYSE: WMT) |
-| Stores in Mexico | ~3,000+ (includes Walmart, Walmart Express, Bodega Aurrera, Sam's Club) |
-| Annual revenue (Mexico) | ~$48B+ USD |
-| MVNO (BAIT) | 18.3M+ subscribers; fastest-growing telecom in Mexico |
+| Metric                  | Value                                                                   |
+| ----------------------- | ----------------------------------------------------------------------- |
+| Parent                  | Walmart Inc. (NYSE: WMT)                                                |
+| Stores in Mexico        | ~3,000+ (includes Walmart, Walmart Express, Bodega Aurrera, Sam's Club) |
+| Annual revenue (Mexico) | ~$48B+ USD                                                              |
+| MVNO (BAIT)             | 18.3M+ subscribers; fastest-growing telecom in Mexico                   |
 
 **Services Offered:**
+
 - **Cashi:** Walmart's own digital wallet/payment platform. 5M+ users. Enables in-store cash payments for online orders.
 - **Cash deposits/payments:** Customers can deposit cash and pay credit cards at 2,500+ Walmart/Bodega stores. Partnership with Banorte for deposits (since 2020).
 - **BAIT + Fintech:** Walmart operates Mexico's fastest-growing MVNO (BAIT), selling smartphones and telecom services. Has integrated MiMedia into BAIT smartphones. Potential future financial services play.
@@ -98,14 +101,15 @@ Important but harder to access directly. Walmart may eventually become a competi
 
 ### 1.4 Soriana
 
-| Metric | Value |
-|--------|-------|
-| Head office | Chihuahua, Mexico |
-| Stores | ~800+ nationwide |
-| Brands | Soriana Hiper, Soriana Mercado, Soriana Súper, Soriana Express |
-| Type | Mexican-owned, publicly traded |
+| Metric      | Value                                                          |
+| ----------- | -------------------------------------------------------------- |
+| Head office | Chihuahua, Mexico                                              |
+| Stores      | ~800+ nationwide                                               |
+| Brands      | Soriana Hiper, Soriana Mercado, Soriana Súper, Soriana Express |
+| Type        | Mexican-owned, publicly traded                                 |
 
 **Services Offered:**
+
 - **Cash deposits:** Direct partnership with Nu (via Arcus/Mastercard) since March 2024. Customers generate a code in the Nu app, present at Soriana checkout. Limit: MX$5,000 per transaction. No card needed.
 - **Ualá partnership:** October 2023. Free instant cash deposits at 1,000+ Soriana stores for Ualá customers.
 - **Bill payments:** Standard utility and service bill collection.
@@ -121,14 +125,15 @@ Soriana is one of the more accessible partners for cash deposit integration. It 
 
 ### 1.5 Chedraui
 
-| Metric | Value |
-|--------|-------|
-| Head office | Xalapa, Veracruz, Mexico |
-| Stores | 1,000+ (across Mexico and US Southwest) |
-| Store brands | Chedraui, Súper Chedraui, Súper Che, Supercitos |
-| Annual revenue | ~$263B MXN in 2023 |
+| Metric         | Value                                           |
+| -------------- | ----------------------------------------------- |
+| Head office    | Xalapa, Veracruz, Mexico                        |
+| Stores         | 1,000+ (across Mexico and US Southwest)         |
+| Store brands   | Chedraui, Súper Chedraui, Súper Che, Supercitos |
+| Annual revenue | ~$263B MXN in 2023                              |
 
 **Services Offered:**
+
 - **Cash deposits/withdrawals:** Available through Arcus/tapi network. Limit: MX$10,000 per transaction.
 - **Bill payments:** Standard services.
 - **Nu partnership:** Chedraui was part of Nu's initial cash network (alongside Soriana, Kiosko, Systienda, Yastás, and Financiera para el Bienestar).
@@ -143,13 +148,14 @@ Available through tapi aggregator. Likely an easier direct partnership than OXXO
 
 ### 1.6 Telecomm (Financiera para el Bienestar / Telecomunicaciones de México)
 
-| Metric | Value |
-|--------|-------|
-| Type | Government agency (Secretariat of Infrastructure, Communications and Transportation) |
-| Branches | ~1,200+ across Mexico |
-| Services | Cash pickups, bill payments, banking, satellite communications |
+| Metric   | Value                                                                                |
+| -------- | ------------------------------------------------------------------------------------ |
+| Type     | Government agency (Secretariat of Infrastructure, Communications and Transportation) |
+| Branches | ~1,200+ across Mexico                                                                |
+| Services | Cash pickups, bill payments, banking, satellite communications                       |
 
 **Services Offered:**
+
 - **Remittance cash pickup:** Major partner for international remittances (Western Union, MoneyGram, Félix Pago, Sharemoney, Remitbee).
 - **Bank deposits:** Deposits to BBVA, Banamex, Santander, Banorte, HSBC, Scotiabank, Inbursa. Commission: MX$15-50 depending on branch type.
 - **Social program disbursements:** Government welfare payments distributed through Telecomm branches.
@@ -165,13 +171,14 @@ Important for rural coverage. Partnership terms may be more flexible (government
 
 ### 1.7 Circle K / Extra
 
-| Metric | Value |
-|--------|-------|
-| Parent | Alimentation Couche-Tard (Canada) |
-| Stores in Mexico | ~750+ (Circle K + Extra brands) |
-| Notable | First major convenience chain to adopt CoDi (Banxico's QR payment system) |
+| Metric           | Value                                                                     |
+| ---------------- | ------------------------------------------------------------------------- |
+| Parent           | Alimentation Couche-Tard (Canada)                                         |
+| Stores in Mexico | ~750+ (Circle K + Extra brands)                                           |
+| Notable          | First major convenience chain to adopt CoDi (Banxico's QR payment system) |
 
 **Services Offered:**
+
 - **Cash deposits:** Bank deposits at Circle K and Extra stores.
 - **CoDi payments:** Adopted Banxico's CoDi QR payment system in June 2024 (via STP and dapp).
 - **Bill payments:** Standard utilities and services.
@@ -191,12 +198,12 @@ Smaller network but growing. Adoption of CoDi shows willingness to adopt modern 
 
 The most important technical reality is that **no major Mexican retailer runs custom integrations for each fintech partner**. Instead, they work through middleware aggregators:
 
-| Aggregator | Network Coverage | Key Clients |
-|-----------|-----------------|-------------|
-| **tapi** (post-Arcus acquisition) | OXXO, 7-Eleven, Chedraui, Soriana, Walmart, Telecomm, Circle K, + billers | Mercado Pago, Nubank, Stori, DollarApp |
-| **Rapyd** | 7-Eleven, OXXO, Walmart, Soriana, Chedraui, Circle K, Telecomm, Farmacias, +25 others | Global merchants, e-commerce |
-| **EBANX** | OXXO, 7-Eleven, Soriana, Walmart | International merchants |
-| **dLocal** | OXXO, 7-Eleven, banks | Cross-border merchants |
+| Aggregator                        | Network Coverage                                                                      | Key Clients                            |
+| --------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------- |
+| **tapi** (post-Arcus acquisition) | OXXO, 7-Eleven, Chedraui, Soriana, Walmart, Telecomm, Circle K, + billers             | Mercado Pago, Nubank, Stori, DollarApp |
+| **Rapyd**                         | 7-Eleven, OXXO, Walmart, Soriana, Chedraui, Circle K, Telecomm, Farmacias, +25 others | Global merchants, e-commerce           |
+| **EBANX**                         | OXXO, 7-Eleven, Soriana, Walmart                                                      | International merchants                |
+| **dLocal**                        | OXXO, 7-Eleven, banks                                                                 | Cross-border merchants                 |
 
 **Integration Architecture (tapi example):**
 
@@ -227,14 +234,14 @@ Velo API -> tapi API -> Retailer POS Systems
 
 **Fee Structures (Estimated):**
 
-| Partner | Typical Fee | Settlement |
-|---------|-------------|------------|
-| OXXO | 2-4% per transaction via aggregator | T+1 to T+3 |
-| 7-Eleven | 2-4% via aggregator | T+1 to T+3 |
-| Walmart | Varies; higher for direct deals | Negotiable |
-| Soriana | 1.5-3% via aggregator | T+1 to T+2 |
-| Chedraui | 1.5-3% via aggregator | T+1 to T+2 |
-| Telecomm | Lower fees (government mandate) | T+1 |
+| Partner  | Typical Fee                         | Settlement |
+| -------- | ----------------------------------- | ---------- |
+| OXXO     | 2-4% per transaction via aggregator | T+1 to T+3 |
+| 7-Eleven | 2-4% via aggregator                 | T+1 to T+3 |
+| Walmart  | Varies; higher for direct deals     | Negotiable |
+| Soriana  | 1.5-3% via aggregator               | T+1 to T+2 |
+| Chedraui | 1.5-3% via aggregator               | T+1 to T+2 |
+| Telecomm | Lower fees (government mandate)     | T+1        |
 
 **Indicative Aggregator Pricing:**
 
@@ -245,12 +252,12 @@ Velo API -> tapi API -> Retailer POS Systems
 
 **Business Model Considerations:**
 
-| Factor | Impact for Velo |
-|--------|-----------------|
-| Aggregator fees (2-4%) | Must be absorbed or passed to merchants |
-| Settlement time (2-3 days) | Velo may need to front liquidity for instant settlement promise |
-| Currency conversion (MXN → USDC) | Two spreads: aggregator's FX rate + Stellar conversion cost |
-| Minimum volumes | Likely negotiation point with tapi |
+| Factor                           | Impact for Velo                                                 |
+| -------------------------------- | --------------------------------------------------------------- |
+| Aggregator fees (2-4%)           | Must be absorbed or passed to merchants                         |
+| Settlement time (2-3 days)       | Velo may need to front liquidity for instant settlement promise |
+| Currency conversion (MXN → USDC) | Two spreads: aggregator's FX rate + Stellar conversion cost     |
+| Minimum volumes                  | Likely negotiation point with tapi                              |
 
 ### 2.3 Regulatory Requirements
 
@@ -258,25 +265,25 @@ Velo API -> tapi API -> Retailer POS Systems
 
 Enacted in 2018, significantly amended in 2024-2025 ("Fintech Law 2.0"). Key provisions:
 
-| Requirement | Details |
-|-------------|---------|
+| Requirement                                            | Details                                                                                                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **IFPE License** (Electronic Payment Fund Institution) | Required to issue or manage e-money in Mexico. Minimum capital requirements. Processing time: ~416-781 days (per Legal Paradox data). 89 authorized institutions as of 2026. |
-| **Registration with CNBV** | Comisión Nacional Bancaria y de Valores — primary fintech regulator |
-| **Registration with Banxico** | Central bank regulates payment systems (SPEI, CoDi) |
-| **AML Compliance** | Must comply with Mexico's anti-money laundering law (Ley Federal para la Prevención e Identificación de Operaciones con Recursos de Procedencia Ilícita) |
-| **Data Privacy** | Must comply with Ley Federal de Protección de Datos Personales |
-| **Open Banking APIs** | Fintech law mandates API sharing for account aggregation (if licensed) |
-| **Llave MX** | New national digital ID platform (2025 reforms) |
-| **Stablecoin rules** | 2025 reforms introduced stablecoin reserve requirements for MXN-pegged tokens |
+| **Registration with CNBV**                             | Comisión Nacional Bancaria y de Valores — primary fintech regulator                                                                                                          |
+| **Registration with Banxico**                          | Central bank regulates payment systems (SPEI, CoDi)                                                                                                                          |
+| **AML Compliance**                                     | Must comply with Mexico's anti-money laundering law (Ley Federal para la Prevención e Identificación de Operaciones con Recursos de Procedencia Ilícita)                     |
+| **Data Privacy**                                       | Must comply with Ley Federal de Protección de Datos Personales                                                                                                               |
+| **Open Banking APIs**                                  | Fintech law mandates API sharing for account aggregation (if licensed)                                                                                                       |
+| **Llave MX**                                           | New national digital ID platform (2025 reforms)                                                                                                                              |
+| **Stablecoin rules**                                   | 2025 reforms introduced stablecoin reserve requirements for MXN-pegged tokens                                                                                                |
 
 **Does Velo need a Mexican license?**
 
-| Scenario | License Required? |
-|----------|-------------------|
-| Velo contracts with tapi (aggregator handles cash-in) | Possibly not — tapi is the regulated entity |
-| Velo opens Mexican entity, hires local team | Corporate registration (RFC) required |
-| Velo holds client funds in Mexico | IFPE license likely required |
-| Velo issues stablecoins pegged to MXN | Full IFPE or banking license required |
+| Scenario                                                                                     | License Required?                                            |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Velo contracts with tapi (aggregator handles cash-in)                                        | Possibly not — tapi is the regulated entity                  |
+| Velo opens Mexican entity, hires local team                                                  | Corporate registration (RFC) required                        |
+| Velo holds client funds in Mexico                                                            | IFPE license likely required                                 |
+| Velo issues stablecoins pegged to MXN                                                        | Full IFPE or banking license required                        |
 | Velo only provides Stellar infrastructure to Mexican partners, no direct customer onboarding | Likely no license needed — tapi handles regulated activities |
 
 **Critical Note:** If Velo partners with tapi, tapi is the regulated entity (post-Arcus acquisition, tapi operates through Mastercard's existing Mexican payment infrastructure licenses). This significantly reduces regulatory burden.
@@ -299,38 +306,38 @@ The June 2025 acquisition of Arcus by tapi is the single most important recent e
 
 ### 3.2 Market Size Opportunity
 
-| Metric | Value | Source |
-|--------|-------|--------|
-| Cash transactions in Mexico | $315B of $476B total (66%) | Rebill, 2022 data |
-| e-commerce cash payments | $6B (10% of online) | Rebill |
-| OXXO Pay volume | ~$6B annually | Industry estimates |
-| Unbanked adults | 42% of adult population | INEGI/CNBV |
-| Fintech startups | 1,104+ (2025) | Finnovista |
-| Mercado Pago cash network | 45,000+ access points | Mercado Pago |
-| Cash logistics CAGR | 8.69% (2025-2030) | Bonafide Research |
+| Metric                      | Value                      | Source             |
+| --------------------------- | -------------------------- | ------------------ |
+| Cash transactions in Mexico | $315B of $476B total (66%) | Rebill, 2022 data  |
+| e-commerce cash payments    | $6B (10% of online)        | Rebill             |
+| OXXO Pay volume             | ~$6B annually              | Industry estimates |
+| Unbanked adults             | 42% of adult population    | INEGI/CNBV         |
+| Fintech startups            | 1,104+ (2025)              | Finnovista         |
+| Mercado Pago cash network   | 45,000+ access points      | Mercado Pago       |
+| Cash logistics CAGR         | 8.69% (2025-2030)          | Bonafide Research  |
 
 ### 3.3 Competitive Landscape
 
 **Players already integrating Stellar / blockchain with cash:**
 
-| Company | Approach |
-|---------|----------|
-| **MoneyGram** | Direct Stellar partner for USDC settlement. Has cash-in/cash-out in Mexico via retail partners. |
-| **Félix Pago** | WhatsApp-based remittances. Payouts via OXXO, Walmart, Soriana, 7-Eleven, +40,000 locations. |
-| **Mercado Pago** | Largest cash-in/out network in Mexico. 45,000+ points. Not Stellar-native. |
+| Company          | Approach                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| **MoneyGram**    | Direct Stellar partner for USDC settlement. Has cash-in/cash-out in Mexico via retail partners. |
+| **Félix Pago**   | WhatsApp-based remittances. Payouts via OXXO, Walmart, Soriana, 7-Eleven, +40,000 locations.    |
+| **Mercado Pago** | Largest cash-in/out network in Mexico. 45,000+ points. Not Stellar-native.                      |
 
 **Stellar-specific consideration:** MoneyGram's Stellar integration means there is already infrastructure for USDC-to-cash in Mexico. However, MoneyGram's retail partner network in Mexico (~16,000 locations) is smaller than what's available through tapi.
 
 ### 3.4 Key Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Heavy aggregator fees (2-4%) | Medium | Volume pricing negotiation; pass-through to merchants |
-| Settlement delay (T+2/3) | Medium | Velo may need to front liquidity |
-| Regulatory change | Medium | Work through licensed partner (tapi) |
-| Competitor threat (Mercado Pago, Nubank building own networks) | High | Focus on Stellar's unique value (speed, cost, cross-border) |
-| OXXO/FEMSA building Spin as a full bank | Medium | Delay in banking license application per 2025 annual report |
-| Currency volatility (MXN/USD) | Low | Stablecoin layer mitigates; SPEI settlement in MXN |
+| Risk                                                           | Severity | Mitigation                                                  |
+| -------------------------------------------------------------- | -------- | ----------------------------------------------------------- |
+| Heavy aggregator fees (2-4%)                                   | Medium   | Volume pricing negotiation; pass-through to merchants       |
+| Settlement delay (T+2/3)                                       | Medium   | Velo may need to front liquidity                            |
+| Regulatory change                                              | Medium   | Work through licensed partner (tapi)                        |
+| Competitor threat (Mercado Pago, Nubank building own networks) | High     | Focus on Stellar's unique value (speed, cost, cross-border) |
+| OXXO/FEMSA building Spin as a full bank                        | Medium   | Delay in banking license application per 2025 annual report |
+| Currency volatility (MXN/USD)                                  | Low      | Stablecoin layer mitigates; SPEI settlement in MXN          |
 
 ---
 
@@ -365,35 +372,35 @@ The June 2025 acquisition of Arcus by tapi is the single most important recent e
 
 ### 4.4 Recommended Partner Priority
 
-| Tier | Partners | Rationale |
-|------|----------|-----------|
-| **Tier 1** | tapi → OXXO, 7-Eleven, Chedraui, Soriana, Telecomm | Single integration, maximum coverage |
-| **Tier 2** | MoneyGram existing Stellar pipeline | Already connected, proven Stellar integration |
-| **Tier 3** | Direct: Soriana, Chedraui | Potential for better economics |
-| **Monitor** | Walmart/Cashi, Spin by OXXO | Both are potential competitors; evaluate partnership vs. competition |
+| Tier        | Partners                                           | Rationale                                                            |
+| ----------- | -------------------------------------------------- | -------------------------------------------------------------------- |
+| **Tier 1**  | tapi → OXXO, 7-Eleven, Chedraui, Soriana, Telecomm | Single integration, maximum coverage                                 |
+| **Tier 2**  | MoneyGram existing Stellar pipeline                | Already connected, proven Stellar integration                        |
+| **Tier 3**  | Direct: Soriana, Chedraui                          | Potential for better economics                                       |
+| **Monitor** | Walmart/Cashi, Spin by OXXO                        | Both are potential competitors; evaluate partnership vs. competition |
 
 ---
 
 ## Appendix A: Transaction Limits by Partner (from Rapyd Network)
 
-| Retailer | Max per Transaction (MXN) |
-|----------|--------------------------|
-| Santander, Scotiabank, Banco Azteca, HSBC, Afirme, Banorte | 215,000 |
-| BBVA | 199,000 |
-| Walmart, Walmart Express, Sam's Club, Bodega Aurrera | 30,000 |
-| Farmacias del Ahorro, 7-Eleven, Farmacias Benavides | 15,000 |
-| Circle K, Extra, Chedraui, Telecomm, Soriana | 10,000 |
-| Waldos | 5,000 |
+| Retailer                                                   | Max per Transaction (MXN) |
+| ---------------------------------------------------------- | ------------------------- |
+| Santander, Scotiabank, Banco Azteca, HSBC, Afirme, Banorte | 215,000                   |
+| BBVA                                                       | 199,000                   |
+| Walmart, Walmart Express, Sam's Club, Bodega Aurrera       | 30,000                    |
+| Farmacias del Ahorro, 7-Eleven, Farmacias Benavides        | 15,000                    |
+| Circle K, Extra, Chedraui, Telecomm, Soriana               | 10,000                    |
+| Waldos                                                     | 5,000                     |
 
 ## Appendix B: Key Regulatory Bodies
 
-| Body | Role |
-|------|------|
-| **CNBV** (Comisión Nacional Bancaria y de Valores) | Primary fintech regulator; issues IFPE/IFC licenses |
-| **Banxico** (Banco de México) | Central bank; regulates SPEI, CoDi, payment systems |
-| **SHCP** (Secretaría de Hacienda y Crédito Público) | Finance Ministry; sets fintech policy |
-| **CONDUSEF** | Consumer financial protection |
-| **SAT** (Servicio de Administración Tributaria) | Tax authority |
+| Body                                                | Role                                                |
+| --------------------------------------------------- | --------------------------------------------------- |
+| **CNBV** (Comisión Nacional Bancaria y de Valores)  | Primary fintech regulator; issues IFPE/IFC licenses |
+| **Banxico** (Banco de México)                       | Central bank; regulates SPEI, CoDi, payment systems |
+| **SHCP** (Secretaría de Hacienda y Crédito Público) | Finance Ministry; sets fintech policy               |
+| **CONDUSEF**                                        | Consumer financial protection                       |
+| **SAT** (Servicio de Administración Tributaria)     | Tax authority                                       |
 
 ## Appendix C: Cash Fact Summary (Mexico)
 

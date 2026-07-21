@@ -1,16 +1,16 @@
-import "dotenv/config";
-import { Server } from "@stellar/stellar-sdk/rpc";
-import { loadConfig, assertRunnable } from "./config.js";
-import { SorobanWatcher } from "./soroban-watcher.js";
-import { EthersEvmHtlcClient } from "./evm-htlc.js";
-import { Relayer } from "./relayer.js";
+import 'dotenv/config';
+import { Server } from '@stellar/stellar-sdk/rpc';
+import { loadConfig, assertRunnable } from './config.js';
+import { SorobanWatcher } from './soroban-watcher.js';
+import { EthersEvmHtlcClient } from './evm-htlc.js';
+import { Relayer } from './relayer.js';
 
 function main() {
   const cfg = loadConfig();
   assertRunnable(cfg);
 
   const server = new Server(cfg.sorobanRpcUrl, {
-    allowHttp: cfg.sorobanRpcUrl.startsWith("http://"),
+    allowHttp: cfg.sorobanRpcUrl.startsWith('http://'),
   });
 
   const watcher = new SorobanWatcher(server, {
@@ -25,12 +25,12 @@ function main() {
   relayer.run();
 
   const shutdown = () => {
-    console.log("[relayer] shutting down");
+    console.log('[relayer] shutting down');
     relayer.stop();
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main();

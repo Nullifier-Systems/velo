@@ -7,7 +7,7 @@
  *   DEPLOYED_URL=<LIVE_URL> npm run post-deploy-check
  */
 
-import { URL } from "node:url";
+import { URL } from 'node:url';
 
 async function main() {
   const urlArg = process.argv[2];
@@ -15,10 +15,12 @@ async function main() {
   const rawUrl = urlArg || envUrl;
 
   if (!rawUrl) {
-    console.error("Error: Live URL must be provided either as a command line argument or via the DEPLOYED_URL/LIVE_URL/VERCEL_URL environment variable.");
-    console.error("Usage examples:");
-    console.error("  npm run post-deploy-check -- https://api.velo.example.com");
-    console.error("  DEPLOYED_URL=https://api.velo.example.com npm run post-deploy-check");
+    console.error(
+      'Error: Live URL must be provided either as a command line argument or via the DEPLOYED_URL/LIVE_URL/VERCEL_URL environment variable.'
+    );
+    console.error('Usage examples:');
+    console.error('  npm run post-deploy-check -- https://api.velo.example.com');
+    console.error('  DEPLOYED_URL=https://api.velo.example.com npm run post-deploy-check');
     process.exit(1);
   }
 
@@ -26,7 +28,7 @@ async function main() {
   try {
     const parsedUrl = new URL(rawUrl);
     // Standardize URL by stripping trailing slash
-    baseUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/$/, "");
+    baseUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/$/, '');
   } catch (err) {
     console.error(`Error: Invalid URL format: "${rawUrl}"`);
     process.exit(1);
@@ -45,11 +47,11 @@ async function main() {
       console.error(`FAIL: Health check returned HTTP status ${response.status}`);
       failed = true;
     } else {
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       if (data && data.ok === true) {
-        console.log("SUCCESS: Health check returned { ok: true }");
+        console.log('SUCCESS: Health check returned { ok: true }');
       } else {
-        console.error("FAIL: Health check response body does not match expected format.", data);
+        console.error('FAIL: Health check response body does not match expected format.', data);
         failed = true;
       }
     }
@@ -67,11 +69,14 @@ async function main() {
       console.error(`FAIL: Services check returned HTTP status ${response.status}`);
       failed = true;
     } else {
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       if (data && Array.isArray(data.services)) {
         console.log(`SUCCESS: Services endpoint returned ${data.services.length} services`);
       } else {
-        console.error("FAIL: Services check response body does not contain a 'services' array.", data);
+        console.error(
+          "FAIL: Services check response body does not contain a 'services' array.",
+          data
+        );
         failed = true;
       }
     }
@@ -81,14 +86,14 @@ async function main() {
   }
 
   if (failed) {
-    console.error("FAIL: One or more post-deployment checks failed!");
+    console.error('FAIL: One or more post-deployment checks failed!');
     process.exit(1);
   }
 
-  console.log("SUCCESS: All post-deployment checks passed successfully!");
+  console.log('SUCCESS: All post-deployment checks passed successfully!');
 }
 
 main().catch((err) => {
-  console.error("Unhandled error during post-deployment checks:", err);
+  console.error('Unhandled error during post-deployment checks:', err);
   process.exit(1);
 });

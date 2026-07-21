@@ -19,23 +19,24 @@ Follow the checklist **in order** — each step depends on the previous one.
 
 ### 2. Fee Economics — Final Review
 
-| Parameter | Testnet | Mainnet | Rationale |
-|-----------|---------|---------|-----------|
-| `platform_fee_bps` (escrow) | 0 (not set) | **50 bps (0.5%)** | Covers API hosting + x402 Stellar tx fees |
-| `DEFAULT_TIMEOUT_LEDGERS` | 100 (~15 min) | **500 (~50 min)** | Mainnet ledgers are ~5-6s; 500 ledgers gives ~50 min for a hand-off |
-| `x402: GET /cash/agents` | 0.001 USDC | **0.005 USDC** | Covers Soroban simulation + submission cost |
-| `x402: POST /cash/request` | 0.01 USDC | **0.05 USDC** | Covers escrow lock tx fee + profit margin |
-| `x402: POST /cash/request/prepare` | 0.01 USDC | **0.02 USDC** | Covers soroban simulation cost |
-| `x402: POST /cash/request/submit` | 0.01 USDC | **0.02 USDC** | Covers tx submission + verification cost |
-| `x402: GET /reputation/:addr` | 0.0005 USDC | **0.002 USDC** | Covers lookup cost |
-| Rate limit (global) | 100 req/min | **200 req/min** | Higher capacity for mainnet traffic |
-| Stellar BASE_FEE | 100 stroops | **1000 stroops (min recommended)** | Mainnet requires higher fee for timely inclusion |
+| Parameter                          | Testnet       | Mainnet                            | Rationale                                                           |
+| ---------------------------------- | ------------- | ---------------------------------- | ------------------------------------------------------------------- |
+| `platform_fee_bps` (escrow)        | 0 (not set)   | **50 bps (0.5%)**                  | Covers API hosting + x402 Stellar tx fees                           |
+| `DEFAULT_TIMEOUT_LEDGERS`          | 100 (~15 min) | **500 (~50 min)**                  | Mainnet ledgers are ~5-6s; 500 ledgers gives ~50 min for a hand-off |
+| `x402: GET /cash/agents`           | 0.001 USDC    | **0.005 USDC**                     | Covers Soroban simulation + submission cost                         |
+| `x402: POST /cash/request`         | 0.01 USDC     | **0.05 USDC**                      | Covers escrow lock tx fee + profit margin                           |
+| `x402: POST /cash/request/prepare` | 0.01 USDC     | **0.02 USDC**                      | Covers soroban simulation cost                                      |
+| `x402: POST /cash/request/submit`  | 0.01 USDC     | **0.02 USDC**                      | Covers tx submission + verification cost                            |
+| `x402: GET /reputation/:addr`      | 0.0005 USDC   | **0.002 USDC**                     | Covers lookup cost                                                  |
+| Rate limit (global)                | 100 req/min   | **200 req/min**                    | Higher capacity for mainnet traffic                                 |
+| Stellar BASE_FEE                   | 100 stroops   | **1000 stroops (min recommended)** | Mainnet requires higher fee for timely inclusion                    |
 
 The escrow contract's `platform_fee_bps` is passed to `initialize()` at deployment
 time and cannot be changed after initialization (the contract has no setter).
 Choose carefully.
 
 **USDC on Stellar Mainnet:**
+
 - Issuer: `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` (Circle)
 - SAC address: `CCW67TSZV3SSWZ6NAU4B46GSAV4IX3ODU6OVU5Q2ZWCEO6PJ6W7JXK2O`
 - All settlement amounts in the escrow contract use this token.
@@ -45,6 +46,7 @@ Choose carefully.
 Create `.env` in each service directory with mainnet values:
 
 **apps/api/.env:**
+
 ```
 PORT=3000
 STELLAR_NETWORK=PUBLIC
@@ -59,6 +61,7 @@ REFUND_WEBHOOK_URL=<discord/slack webhook URL>
 ```
 
 **apps/relayer/.env:**
+
 ```
 STELLAR_NETWORK=PUBLIC
 SOROBAN_RPC_URL=https://soroban.stellar.org
@@ -187,12 +190,12 @@ The mainnet flow is:
 
 If a critical issue is found post-launch:
 
-| Severity | Action | Timeline |
-|----------|--------|----------|
-| **Critical** (funds at risk) | Pause the API (return 503). No on-chain action needed — funds are in the escrow contract and timeout-protected. | Immediate |
-| **High** (broken flow, no funds at risk) | Revert API deployment to last known-good version. Fix in staging, re-deploy. | < 4 hours |
-| **Medium** (non-functional issue) | File an issue, fix in next release cycle. | < 1 week |
-| **Contract bug** | No on-chain fix possible (contracts are immutable). New version must be deployed and the old contract's remaining trades must timeout and refund naturally. | 1-2 weeks |
+| Severity                                 | Action                                                                                                                                                      | Timeline  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| **Critical** (funds at risk)             | Pause the API (return 503). No on-chain action needed — funds are in the escrow contract and timeout-protected.                                             | Immediate |
+| **High** (broken flow, no funds at risk) | Revert API deployment to last known-good version. Fix in staging, re-deploy.                                                                                | < 4 hours |
+| **Medium** (non-functional issue)        | File an issue, fix in next release cycle.                                                                                                                   | < 1 week  |
+| **Contract bug**                         | No on-chain fix possible (contracts are immutable). New version must be deployed and the old contract's remaining trades must timeout and refund naturally. | 1-2 weeks |
 
 **Specific rollback scenarios:**
 
@@ -225,6 +228,7 @@ If a critical issue is found post-launch:
 
 All boxes above must be checked before mainnet launch. The final sign-off
 requires:
+
 - [ ] Smart contract audit passed (or waiver signed for unaudited deployment)
 - [ ] Staging environment fully tested with mainnet-like conditions
 - [ ] At least one end-to-end dry run on testnet using the non-custodial flow
@@ -237,22 +241,22 @@ requires:
 
 ### Mainnet RPC Endpoints
 
-| Service | URL |
-|---------|-----|
-| Soroban RPC | `https://soroban.stellar.org` |
-| Stellar Network Passphrase | `Public Global Stellar Network ; September 2015` |
-| USDC Issuer (Circle) | `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` |
-| USDC SAC | `CCW67TSZV3SSWZ6NAU4B46GSAV4IX3ODU6OVU5Q2ZWCEO6PJ6W7JXK2O` |
+| Service                    | URL                                                        |
+| -------------------------- | ---------------------------------------------------------- |
+| Soroban RPC                | `https://soroban.stellar.org`                              |
+| Stellar Network Passphrase | `Public Global Stellar Network ; September 2015`           |
+| USDC Issuer (Circle)       | `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` |
+| USDC SAC                   | `CCW67TSZV3SSWZ6NAU4B46GSAV4IX3ODU6OVU5Q2ZWCEO6PJ6W7JXK2O` |
 
 ### Key Files to Update After Deployment
 
-| File | What to Change |
-|------|----------------|
-| `packages/shared/src/index.ts` | `CONTRACTS.mainnet.escrow` and `CONTRACTS.mainnet.atomicSwapA` |
-| `apps/api/.env` | `ESCROW_CONTRACT_ID`, `SOROBAN_RPC_URL`, `STELLAR_NETWORK=PUBLIC` |
-| `apps/relayer/.env` | `RELAYER_SOROBAN_CONTRACT_ID`, `SOROBAN_RPC_URL`, `STELLAR_NETWORK=PUBLIC` |
-| `mobile/backend/.env` | N/A (not used in mainnet flow yet) |
-| `apps/api/src/openapi.ts` | Update server URL if different from `https://api.velo.cash` |
+| File                           | What to Change                                                             |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `packages/shared/src/index.ts` | `CONTRACTS.mainnet.escrow` and `CONTRACTS.mainnet.atomicSwapA`             |
+| `apps/api/.env`                | `ESCROW_CONTRACT_ID`, `SOROBAN_RPC_URL`, `STELLAR_NETWORK=PUBLIC`          |
+| `apps/relayer/.env`            | `RELAYER_SOROBAN_CONTRACT_ID`, `SOROBAN_RPC_URL`, `STELLAR_NETWORK=PUBLIC` |
+| `mobile/backend/.env`          | N/A (not used in mainnet flow yet)                                         |
+| `apps/api/src/openapi.ts`      | Update server URL if different from `https://api.velo.cash`                |
 
 ### Useful Commands
 

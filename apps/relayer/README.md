@@ -6,13 +6,13 @@ secret, and submits `withdraw(secret)` on the counterpart EVM HTLC.
 
 ## Layout
 
-| File | Responsibility |
-|------|----------------|
-| `src/config.ts` | Env config + fail-fast validation. |
-| `src/soroban-watcher.ts` | `decodeReleasedEvent` (pure) + `SorobanWatcher` polling `getEvents`. |
-| `src/evm-htlc.ts` | `EvmHtlcClient` interface + ethers-backed implementation + ABI. |
-| `src/relayer.ts` | Orchestrator: on a `released` event, claim the EVM leg (idempotent per secret). |
-| `src/index.ts` | Entrypoint: wires config → watcher → EVM client → relayer. |
+| File                     | Responsibility                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| `src/config.ts`          | Env config + fail-fast validation.                                              |
+| `src/soroban-watcher.ts` | `decodeReleasedEvent` (pure) + `SorobanWatcher` polling `getEvents`.            |
+| `src/evm-htlc.ts`        | `EvmHtlcClient` interface + ethers-backed implementation + ABI.                 |
+| `src/relayer.ts`         | Orchestrator: on a `released` event, claim the EVM leg (idempotent per secret). |
+| `src/index.ts`           | Entrypoint: wires config → watcher → EVM client → relayer.                      |
 
 ## Run
 

@@ -1,12 +1,12 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
 /** Minimal ABI for the counterpart HTLC (contracts-evm/HTLC.sol). */
 export const HTLC_ABI = [
-  "function newSwap(bytes32 hashlock, address recipient, uint256 timelock) payable",
-  "function withdraw(bytes32 secret)",
-  "function refund(bytes32 hashlock)",
-  "function hashOf(bytes32 secret) view returns (bytes32)",
-  "event Withdrawn(bytes32 indexed hashlock, bytes32 secret)",
+  'function newSwap(bytes32 hashlock, address recipient, uint256 timelock) payable',
+  'function withdraw(bytes32 secret)',
+  'function refund(bytes32 hashlock)',
+  'function hashOf(bytes32 secret) view returns (bytes32)',
+  'event Withdrawn(bytes32 indexed hashlock, bytes32 secret)',
 ];
 
 /**

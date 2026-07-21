@@ -1,5 +1,5 @@
-import type { EvmHtlcClient } from "./evm-htlc.js";
-import type { ReleasedEvent, SorobanWatcher } from "./soroban-watcher.js";
+import type { EvmHtlcClient } from './evm-htlc.js';
+import type { ReleasedEvent, SorobanWatcher } from './soroban-watcher.js';
 
 export interface RelayerLogger {
   info: (msg: string, ...args: unknown[]) => void;
@@ -13,7 +13,7 @@ const defaultLogger: RelayerLogger = {
 
 export interface ClaimResult {
   tradeId: string;
-  status: "claimed" | "skipped" | "failed";
+  status: 'claimed' | 'skipped' | 'failed';
   txHash?: string;
   error?: string;
 }
@@ -43,7 +43,7 @@ export class Relayer {
   async handleReleased(event: ReleasedEvent): Promise<ClaimResult> {
     if (this.processed.has(event.secret)) {
       this.logger.info(`skip already-claimed trade ${event.tradeId}`);
-      return { tradeId: event.tradeId, status: "skipped" };
+      return { tradeId: event.tradeId, status: 'skipped' };
     }
     // Mark before awaiting so overlapping deliveries can't double-submit.
     this.processed.add(event.secret);
@@ -52,19 +52,19 @@ export class Relayer {
       this.logger.info(`claiming EVM leg for trade ${event.tradeId} (ledger ${event.ledger})`);
       const txHash = await this.evm.withdraw(event.secret);
       this.logger.info(`claimed trade ${event.tradeId} -> EVM tx ${txHash}`);
-      return { tradeId: event.tradeId, status: "claimed", txHash };
+      return { tradeId: event.tradeId, status: 'claimed', txHash };
     } catch (err) {
       // Allow a retry on a later delivery if the claim genuinely failed.
       this.processed.delete(event.secret);
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`claim failed for trade ${event.tradeId}: ${message}`);
-      return { tradeId: event.tradeId, status: "failed", error: message };
+      return { tradeId: event.tradeId, status: 'failed', error: message };
     }
   }
 
   /** Start watching Soroban and claiming matching EVM HTLCs. Runs until stopped. */
   run(): void {
-    this.logger.info("started; watching Soroban released events");
+    this.logger.info('started; watching Soroban released events');
     this.watcher.start(async (event) => {
       await this.handleReleased(event);
     });

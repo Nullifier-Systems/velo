@@ -24,12 +24,12 @@ Treat every section as a **research pointer**, not a determination of liability.
 
 ### 2.1 Income characterization (typical US framing)
 
-| Question | Research direction |
-| --- | --- |
-| Is USDC a “taxable unit”? | US IRS treats virtual currency as **property** for federal tax purposes (Notice 2014-21 lineage; later FAQs). Receiving crypto for services is generally **income** measured at FMV in USD at receipt. |
+| Question                               | Research direction                                                                                                                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Is USDC a “taxable unit”?              | US IRS treats virtual currency as **property** for federal tax purposes (Notice 2014-21 lineage; later FAQs). Receiving crypto for services is generally **income** measured at FMV in USD at receipt.                                                                           |
 | Is a bounty “wages” or “other income”? | Absent employment: often **self-employment / other income** for services, not wages. Employment classification is facts-and-circumstances (control, integration, tools). GrantFox-style OSS bounties usually look like **independent contractor / freelance** work, not payroll. |
-| When is income recognized? | Typically when the contributor has **dominion and control** over the USDC (credited to their wallet / claimable and withdrawable), not when the issue is opened. |
-| Basis for later disposal | FMV at receipt becomes **cost basis** for capital gain/loss if later sold or swapped. |
+| When is income recognized?             | Typically when the contributor has **dominion and control** over the USDC (credited to their wallet / claimable and withdrawable), not when the issue is opened.                                                                                                                 |
+| Basis for later disposal               | FMV at receipt becomes **cost basis** for capital gain/loss if later sold or swapped.                                                                                                                                                                                            |
 
 ### 2.2 Self-employment and reporting (US research flags)
 
@@ -78,7 +78,7 @@ If GrantFox (or Stellar rails) is the **technical payout rail** but Nullifier is
 
 ---
 
-## 4. What this research does *not* decide
+## 4. What this research does _not_ decide
 
 - Exact tax owed by any contributor or by Nullifier Systems.
 - Whether GrantFox auto-issues 1099s in 2026.
@@ -90,14 +90,14 @@ If GrantFox (or Stellar rails) is the **technical payout rail** but Nullifier is
 
 ## 5. Recommended next steps (operational, not legal advice)
 
-| Priority | Action |
-| --- | --- |
-| High | Retain a CPA / tax counsel familiar with crypto service payments in Nullifier’s home jurisdiction. |
-| High | Document each payout: amount, asset, USD FMV, date, txid, issue/PR link, payee wallet. |
-| Medium | Add contributor FAQ: “You are responsible for taxes in your jurisdiction; this is not employment.” (non-advice disclaimer). |
-| Medium | If paying US persons regularly: process for W-9 / TIN and 1099 review before year-end. |
-| Medium | If paying non-US: W-8 / residency workflow review. |
-| Low | Monitor IRS digital asset broker rules and GrantFox platform tax features quarterly. |
+| Priority | Action                                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| High     | Retain a CPA / tax counsel familiar with crypto service payments in Nullifier’s home jurisdiction.                          |
+| High     | Document each payout: amount, asset, USD FMV, date, txid, issue/PR link, payee wallet.                                      |
+| Medium   | Add contributor FAQ: “You are responsible for taxes in your jurisdiction; this is not employment.” (non-advice disclaimer). |
+| Medium   | If paying US persons regularly: process for W-9 / TIN and 1099 review before year-end.                                      |
+| Medium   | If paying non-US: W-8 / residency workflow review.                                                                          |
+| Low      | Monitor IRS digital asset broker rules and GrantFox platform tax features quarterly.                                        |
 
 ---
 
@@ -117,4 +117,4 @@ If GrantFox (or Stellar rails) is the **technical payout rail** but Nullifier is
 2. **Nullifier Systems:** May have **business-expense and information-reporting** questions if systematically paying people for services; not automatically “no obligations” just because the asset is USDC on Stellar.
 3. **This document is insufficient for compliance.** Budget professional review before mainnet-scale GrantFox payout volume.
 
-*Prepared for Velo / Nullifier Systems open research. Not a substitute for licensed advice.*
+_Prepared for Velo / Nullifier Systems open research. Not a substitute for licensed advice._

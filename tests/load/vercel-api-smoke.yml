@@ -1,5 +1,5 @@
 config:
-  target: "{{ $processEnvironment.BASE_URL }}"
+  target: '{{ $processEnvironment.BASE_URL }}'
   http:
     timeout: 10
   phases:
@@ -13,7 +13,7 @@ config:
     thresholds:
       - http.response_time.p95: 1500
     conditions:
-      - expression: "http.request_rate <= 1.5"
+      - expression: 'http.request_rate <= 1.5'
   defaults:
     headers:
       user-agent: velo-cost-capped-artillery-smoke/1.0
@@ -25,4 +25,4 @@ scenarios:
           url: /health
           followRedirect: false
           expect:
-            - statusCode: "{{ $processEnvironment.EXPECTED_STATUS }}"
+            - statusCode: '{{ $processEnvironment.EXPECTED_STATUS }}'

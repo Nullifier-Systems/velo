@@ -1,9 +1,9 @@
 name: contracts-ci
 on:
   push:
-    paths: ["contracts/**"]
+    paths: ['contracts/**']
   pull_request:
-    paths: ["contracts/**"]
+    paths: ['contracts/**']
   workflow_dispatch:
 
 permissions:

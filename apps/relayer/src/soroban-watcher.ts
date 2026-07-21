@@ -1,5 +1,5 @@
-import { scValToNative, xdr } from "@stellar/stellar-sdk";
-import type { Server } from "@stellar/stellar-sdk/rpc";
+import { scValToNative, xdr } from '@stellar/stellar-sdk';
+import type { Server } from '@stellar/stellar-sdk/rpc';
 
 /** A decoded `released` event from the Soroban atomic-swap contract. */
 export interface ReleasedEvent {
@@ -15,13 +15,13 @@ type TopicEntry = xdr.ScVal | string;
 
 /** Convert a topic/value entry (ScVal or base64 XDR string) to a native JS value. */
 function toNative(entry: TopicEntry): unknown {
-  const scv = typeof entry === "string" ? xdr.ScVal.fromXDR(entry, "base64") : entry;
+  const scv = typeof entry === 'string' ? xdr.ScVal.fromXDR(entry, 'base64') : entry;
   return scValToNative(scv);
 }
 
 function toHex(value: unknown): string | null {
-  if (value instanceof Uint8Array) return Buffer.from(value).toString("hex");
-  if (Buffer.isBuffer(value)) return value.toString("hex");
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('hex');
+  if (Buffer.isBuffer(value)) return value.toString('hex');
   return null;
 }
 
@@ -42,7 +42,7 @@ export function decodeReleasedEvent(raw: {
   if (topics.length < 2 || raw.value === undefined) return null;
 
   const kind = toNative(topics[0]);
-  if (kind !== "released") return null;
+  if (kind !== 'released') return null;
 
   const tradeId = toHex(toNative(topics[1]));
   const secretHex = toHex(toNative(raw.value));
@@ -84,12 +84,11 @@ export class SorobanWatcher {
 
   /** One poll cycle: fetch new events, decode the `released` ones, advance cursor. */
   async pollOnce(): Promise<ReleasedEvent[]> {
-    const startLedger =
-      this.cursorLedger ?? (await this.server.getLatestLedger()).sequence;
+    const startLedger = this.cursorLedger ?? (await this.server.getLatestLedger()).sequence;
 
     const res = await this.server.getEvents({
       startLedger,
-      filters: [{ type: "contract", contractIds: [this.contractId] }],
+      filters: [{ type: 'contract', contractIds: [this.contractId] }],
     });
 
     const decoded: ReleasedEvent[] = [];
@@ -114,7 +113,7 @@ export class SorobanWatcher {
         const events = await this.pollOnce();
         for (const ev of events) await onEvent(ev);
       } catch (err) {
-        console.error("[relayer] poll error:", err);
+        console.error('[relayer] poll error:', err);
       } finally {
         this.polling = false;
       }
