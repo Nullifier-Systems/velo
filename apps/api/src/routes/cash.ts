@@ -474,6 +474,18 @@ export async function cashRoutes(app: FastifyInstance) {
         reply.code(404).send({ error: "request not found" });
         return;
       }
+      if (record.status === "locked") {
+        const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+        reply.code(200).send({
+          id: record.id,
+          status: "locked",
+          transaction_hash: null,
+          claim_url: `${baseUrl}/claim/${record.id}`,
+          qr_payload: record.qrPayload,
+          instructions: "Show this QR to the cash provider to receive your cash.",
+        });
+        return;
+      }
       if (record.status !== "pending_signature") {
         reply.code(409).send({ error: `request is in status ${record.status}, expected pending_signature` });
         return;
@@ -499,6 +511,19 @@ export async function cashRoutes(app: FastifyInstance) {
           instructions: "Show this QR to the cash provider to receive your cash.",
         });
       } catch (err) {
+        const current = getCashRequest(record.id);
+        if (current && current.status === "locked") {
+          const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+          reply.code(200).send({
+            id: record.id,
+            status: "locked",
+            transaction_hash: null,
+            claim_url: `${baseUrl}/claim/${record.id}`,
+            qr_payload: record.qrPayload,
+            instructions: "Show this QR to the cash provider to receive your cash.",
+          });
+          return;
+        }
         req.log.error(err, "submitSignedTransaction failed");
         reply.code(502).send({ error: "transaction submission failed", detail: String(err) });
         return;
@@ -518,6 +543,9 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!record) {
         reply.code(404).send({ error: "request not found" });
         return;
+      }
+      if (record.status === "released") {
+        return { id: record.id, status: "released" };
       }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
@@ -540,6 +568,10 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitReleaseTx(signed_xdr);
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "released") {
+            return { id: record.id, status: "released" };
+          }
           req.log.error(err, "submitReleaseTx failed");
           reply.code(502).send({ error: "release submission failed", detail: String(err) });
           return;
@@ -552,6 +584,10 @@ export async function cashRoutes(app: FastifyInstance) {
             secretHex: secret,
           });
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "released") {
+            return { id: record.id, status: "released" };
+          }
           req.log.error(err, "releaseEscrow failed");
           reply.code(502).send({ error: "escrow release failed", detail: String(err) });
           return;
@@ -581,6 +617,9 @@ export async function cashRoutes(app: FastifyInstance) {
         reply.code(404).send({ error: "request not found" });
         return;
       }
+      if (record.status === "refunded") {
+        return { id: record.id, status: "refunded" };
+      }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
@@ -597,6 +636,10 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitRefundTx(refundBody.signed_xdr);
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "refunded") {
+            return { id: record.id, status: "refunded" };
+          }
           req.log.error(err, "submitRefundTx failed");
           reply.code(502).send({ error: "refund submission failed", detail: String(err) });
           return;
@@ -608,6 +651,10 @@ export async function cashRoutes(app: FastifyInstance) {
             tradeId: record.id,
           });
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "refunded") {
+            return { id: record.id, status: "refunded" };
+          }
           req.log.error(err, "refundEscrow failed");
           reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
           return;
@@ -642,6 +689,15 @@ export async function cashRoutes(app: FastifyInstance) {
         reply.code(404).send({ error: "request not found" });
         return;
       }
+      if (record.status === "disputed") {
+        return {
+          id: record.id,
+          status: "disputed",
+          disputedAt: record.disputedAt,
+          disputedBy: record.disputedBy,
+          disputeReason: record.disputeReason || "",
+        };
+      }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
@@ -671,6 +727,16 @@ export async function cashRoutes(app: FastifyInstance) {
           caller,
         });
       } catch (err) {
+        const current = getCashRequest(record.id);
+        if (current && current.status === "disputed") {
+          return {
+            id: record.id,
+            status: "disputed",
+            disputedAt: current.disputedAt,
+            disputedBy: current.disputedBy,
+            disputeReason: current.disputeReason || "",
+          };
+        }
         req.log.error(err, "disputeEscrow failed");
         reply.code(502).send({ error: "escrow dispute failed", detail: String(err) });
         return;
