@@ -19,10 +19,10 @@ body:
       label: Reward Tier
       description: Select the reward tier for this bounty.
       options:
-        - "Tier 1: Starter ($50 - $150)"
-        - "Tier 2: Intermediate ($150 - $400)"
-        - "Tier 3: Advanced ($400 - $1000)"
-        - "Tier 4: Expert ($1000+)"
+        - 'Tier 1: Starter ($50 - $150)'
+        - 'Tier 2: Intermediate ($150 - $400)'
+        - 'Tier 3: Advanced ($400 - $1000)'
+        - 'Tier 4: Expert ($1000+)'
     validations:
       required: true
   - type: input

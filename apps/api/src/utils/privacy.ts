@@ -22,8 +22,8 @@
  * provider.
  */
 
-import type { ProviderRecord } from "../lib/store.js";
-import { cellFor, decodeGeohash, haversineKm, type GeoCell } from "./geohash.js";
+import type { ProviderRecord } from '../lib/store.js';
+import { cellFor, decodeGeohash, haversineKm, type GeoCell } from './geohash.js';
 
 /** Default cell precision (6 ≈ 1.2 km cells). */
 export const DEFAULT_PRECISION = 6;
@@ -44,9 +44,9 @@ export function distanceBand(km: number): string {
 export interface PublicProvider {
   id: string;
   name: string;
-  tier: ProviderRecord["tier"];
+  tier: ProviderRecord['tier'];
   rate: string;
-  status: ProviderRecord["status"];
+  status: ProviderRecord['status'];
   /** Coarse geohash cell (the finest location the system will disclose). */
   geohash: string;
   /** Cell centroid — a fixed point per cell, NOT the provider's real position. */
@@ -69,7 +69,7 @@ function cellRadiusMeters(cell: GeoCell): number {
 export function toPublicProvider(
   provider: ProviderRecord,
   query?: { lat: number; lng: number; precision?: number },
-  precision = DEFAULT_PRECISION,
+  precision = DEFAULT_PRECISION
 ): PublicProvider {
   const cell = cellFor(provider.lat, provider.lng, precision);
   const base: PublicProvider = {
@@ -105,7 +105,7 @@ export function withinRadius(
   providers: ProviderRecord[],
   query: { lat: number; lng: number },
   radiusKm: number,
-  precision = DEFAULT_PRECISION,
+  precision = DEFAULT_PRECISION
 ): ProviderRecord[] {
   const queryCell = cellFor(query.lat, query.lng, precision);
   return providers.filter((p) => {
@@ -120,10 +120,7 @@ export function withinRadius(
  * Apply k-anonymity: drop providers whose cell holds fewer than `k` available
  * providers. With `k <= 1` this is a no-op.
  */
-export function applyKAnonymity(
-  publicProviders: PublicProvider[],
-  k: number,
-): PublicProvider[] {
+export function applyKAnonymity(publicProviders: PublicProvider[], k: number): PublicProvider[] {
   if (k <= 1) return publicProviders;
   const counts = new Map<string, number>();
   for (const p of publicProviders) {

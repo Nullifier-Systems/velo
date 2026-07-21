@@ -17,6 +17,7 @@ Based on codebase exploration, Velo currently implements:
 - **Privacy-preserving architecture** (conceptual, anticipating ZK integration)
 
 **Not Found in Current Codebase:**
+
 - CETES bonds implementation
 - Blend DeFi integration
 - Bank on-ramp screens or infrastructure
@@ -28,6 +29,7 @@ Based on codebase exploration, Velo currently implements:
 **Purpose:** Standard protocol for wallets and anchors to interact for on/off-ramping
 
 **Key Capabilities:**
+
 - Deposit external assets with an anchor (fiat → crypto)
 - Withdraw assets from an anchor (crypto → fiat)
 - Communicate deposit & withdrawal fee structures
@@ -36,6 +38,7 @@ Based on codebase exploration, Velo currently implements:
 - View transaction history
 
 **API Endpoints:**
+
 - `POST /transactions/deposit/interactive` - Initiate deposit
 - `POST /transactions/deposit/withdraw/interactive` - Initiate withdrawal
 - `GET /info` - Anchor capabilities and supported assets
@@ -51,6 +54,7 @@ Based on codebase exploration, Velo currently implements:
 **Purpose:** Protocol for payments between two financial accounts outside Stellar network
 
 **Key Capabilities:**
+
 - Cross-border payments via sending/receiving anchor model
 - KYC handling via SEP-12 integration
 - Rate quotes via SEP-38 RFQ API
@@ -58,17 +62,20 @@ Based on codebase exploration, Velo currently implements:
 - Callback-based status updates
 
 **Entities:**
+
 - Sending Client (origin account owner)
 - Sending Anchor (receives funds, sends to receiving anchor)
 - Receiving Anchor (receives Stellar payment, delivers to destination)
 - Receiving Client (destination account owner)
 
 **Flow:**
+
 1. Sending Client → Sending Anchor (off-chain)
 2. Sending Anchor → Receiving Anchor (on-Stellar)
 3. Receiving Anchor → Receiving Client (off-chain)
 
 **API Endpoints:**
+
 - `GET /info` - Receiving anchor capabilities
 - `POST /transactions` - Create cross-border transaction
 - `GET /transactions/:id` - Transaction status
@@ -84,21 +91,23 @@ Based on codebase exploration, Velo currently implements:
 
 **How SEP-24 Replaces Custom Infrastructure:**
 
-| Custom Component | SEP-24 Replacement | Benefit |
-|------------------|-------------------|---------|
-| Bank account input forms | Anchor-hosted interactive webapp | Offloads KYC/AML compliance to anchor |
-| Deposit status tracking | `GET /transactions` endpoint | Standardized status model |
-| Fee calculation logic | `GET /info` + SEP-38 `/price` | Transparent, market-driven pricing |
-| Transaction history | `GET /transactions` with pagination | Built-in audit trail |
-| Withdrawal processing | `POST /transactions/withdraw/interactive` | Standardized withdrawal flow |
+| Custom Component         | SEP-24 Replacement                        | Benefit                               |
+| ------------------------ | ----------------------------------------- | ------------------------------------- |
+| Bank account input forms | Anchor-hosted interactive webapp          | Offloads KYC/AML compliance to anchor |
+| Deposit status tracking  | `GET /transactions` endpoint              | Standardized status model             |
+| Fee calculation logic    | `GET /info` + SEP-38 `/price`             | Transparent, market-driven pricing    |
+| Transaction history      | `GET /transactions` with pagination       | Built-in audit trail                  |
+| Withdrawal processing    | `POST /transactions/withdraw/interactive` | Standardized withdrawal flow          |
 
 **Implementation Recommendation:**
+
 - Implement SEP-24 client instead of custom bank integration
 - Leverage existing Stellar anchors for on-ramp/off-ramp
 - Use SEP-38 for asset conversion (e.g., MXN → USDC)
 - Maintain Velo's escrow layer for conditional settlement post-on-ramp
 
 **Simplified Architecture:**
+
 ```
 User → Velo Wallet (SEP-24 Client) → Anchor (SEP-24 Server) → Bank
                                     ↓
@@ -114,21 +123,23 @@ User → Velo Wallet (SEP-24 Client) → Anchor (SEP-24 Server) → Bank
 **Analysis:**
 CETES bonds are Mexican government treasury instruments. While SEP standards don't directly implement bond trading, they can support the infrastructure around it:
 
-| Bond Trading Component | SEP Support | Notes |
-|------------------------|-------------|-------|
-| Fiat on-ramp (MXN) | SEP-24 | Convert MXN to stablecoins |
-| Cross-border settlement | SEP-31 | If bonds traded internationally |
-| KYC/AML compliance | SEP-12 (via SEP-24/31) | Regulatory requirements |
-| Asset custody | Not covered | Requires custom implementation |
-| Bond smart contracts | Not covered | Requires Soroban implementation |
+| Bond Trading Component  | SEP Support            | Notes                           |
+| ----------------------- | ---------------------- | ------------------------------- |
+| Fiat on-ramp (MXN)      | SEP-24                 | Convert MXN to stablecoins      |
+| Cross-border settlement | SEP-31                 | If bonds traded internationally |
+| KYC/AML compliance      | SEP-12 (via SEP-24/31) | Regulatory requirements         |
+| Asset custody           | Not covered            | Requires custom implementation  |
+| Bond smart contracts    | Not covered            | Requires Soroban implementation |
 
 **Implementation Recommendation:**
+
 - Use SEP-24 for MXN → USDC on-ramp
 - Build custom Soroban contracts for CETES bond logic
 - Use SEP-31 if cross-border bond trading is required
 - Leverage SEP-12 for KYC if regulatory compliance needed
 
 **Simplified Architecture:**
+
 ```
 User → Velo Wallet → SEP-24 Anchor → MXN Bank
                     ↓
@@ -146,21 +157,23 @@ User → Velo Wallet → SEP-24 Anchor → MXN Bank
 **Analysis:**
 Blend is a lending protocol on Stellar. SEP standards primarily address fiat on/off-ramping and cross-border payments, not DeFi lending protocols:
 
-| DeFi Component | SEP Support | Notes |
-|----------------|-------------|-------|
-| Fiat on-ramp for collateral | SEP-24 | Convert fiat to collateral assets |
-| Cross-border collateral | SEP-31 | International collateral deposits |
-| Lending/borrowing logic | Not covered | Requires Blend protocol integration |
-| Liquidity pools | Not covered | Requires DeFi protocol integration |
-| Interest rate mechanisms | Not covered | Requires DeFi protocol integration |
+| DeFi Component              | SEP Support | Notes                               |
+| --------------------------- | ----------- | ----------------------------------- |
+| Fiat on-ramp for collateral | SEP-24      | Convert fiat to collateral assets   |
+| Cross-border collateral     | SEP-31      | International collateral deposits   |
+| Lending/borrowing logic     | Not covered | Requires Blend protocol integration |
+| Liquidity pools             | Not covered | Requires DeFi protocol integration  |
+| Interest rate mechanisms    | Not covered | Requires DeFi protocol integration  |
 
 **Implementation Recommendation:**
+
 - Use SEP-24 for fiat on-ramp to provide collateral
 - Integrate directly with Blend protocol for lending/borrowing
 - Use SEP-31 if cross-border collateral deposits are needed
 - SEP standards do not replace DeFi protocol integration
 
 **Simplified Architecture:**
+
 ```
 User → Velo Wallet → SEP-24 Anchor → Bank
                     ↓
@@ -214,18 +227,21 @@ User → Velo Wallet → SEP-24 Anchor → Bank
 ## Recommended Implementation Roadmap
 
 ### Phase 1: Bank On-Ramp (Highest Priority)
+
 1. Implement SEP-24 client in Velo wallet
 2. Integrate with existing Stellar anchors (e.g., Circle, BTC Markets)
 3. Replace simulated bank on-ramp screens with SEP-24 interactive flows
 4. Add SEP-38 integration for transparent fee display and asset conversion
 
 ### Phase 2: CETES Bonds Infrastructure
+
 1. Design Soroban contracts for CETES bond logic
 2. Use SEP-24 for MXN → USDC on-ramp
 3. Implement SEP-12 KYC if Mexican regulations require
 4. Consider SEP-31 if international bond trading is planned
 
 ### Phase 3: Blend DeFi Integration
+
 1. Integrate directly with Blend protocol for lending/borrowing
 2. Use SEP-24 for fiat collateral on-ramp
 3. Consider SEP-31 for cross-border collateral deposits
@@ -234,18 +250,21 @@ User → Velo Wallet → SEP-24 Anchor → Bank
 ## Technical Considerations
 
 ### Dependencies
+
 - **SEP-10/45:** Required authentication for SEP-24/31
 - **SEP-12:** KYC server (required by many anchors)
 - **SEP-38:** Quote API for fee transparency and asset conversion
 - **stellar.toml:** Must be configured for SEP discovery
 
 ### Anchor Selection
+
 - Choose anchors with strong regulatory compliance
 - Verify support for required asset pairs (MXN, USDC, etc.)
 - Confirm SEP-24 and SEP-31 support levels
 - Evaluate fee structures via SEP-38
 
 ### Integration Points
+
 - Velo's existing escrow contracts can layer on top of SEP-24 on-ramp
 - Payment challenge flow (x402) can be preserved for API access
 - Mobile QR experience can incorporate SEP-24 interactive flows

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
   --paper: #edf1e7;
@@ -29,8 +29,9 @@ html.dark {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: calc(32px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
-  font-family: "IBM Plex Sans", sans-serif;
+  padding: calc(32px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px))
+    calc(32px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  font-family: 'IBM Plex Sans', sans-serif;
   color: var(--ink);
   position: relative;
   -webkit-text-size-adjust: 100%;
@@ -73,7 +74,9 @@ html.dark {
   max-width: 380px;
   background: var(--card);
   border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(27, 42, 34, 0.06), 0 8px 24px rgba(27, 42, 34, 0.08);
+  box-shadow:
+    0 1px 2px rgba(27, 42, 34, 0.06),
+    0 8px 24px rgba(27, 42, 34, 0.08);
 }
 
 .claim-ticket__header {
@@ -84,7 +87,7 @@ html.dark {
 }
 
 .claim-ticket__brand {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.12em;
@@ -92,7 +95,7 @@ html.dark {
 }
 
 .claim-ticket__stamp {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -159,7 +162,7 @@ html.dark {
 
 .claim-ticket__perforation::before,
 .claim-ticket__perforation::after {
-  content: "";
+  content: '';
   position: absolute;
   top: -10px;
   width: 20px;
@@ -201,7 +204,7 @@ html.dark {
 }
 
 .claim-ticket__value {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 13px;
   text-align: right;
   word-break: break-all;
@@ -210,7 +213,7 @@ html.dark {
 }
 
 .claim-ticket__amount {
-  font-family: "IBM Plex Serif", serif;
+  font-family: 'IBM Plex Serif', serif;
   font-size: 28px;
   font-weight: 600;
   color: var(--ink);
@@ -241,7 +244,7 @@ html.dark {
   justify-content: center;
   min-height: 44px;
   padding: 10px 24px;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: 'IBM Plex Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   color: var(--card, #f7f9f4);
@@ -275,7 +278,7 @@ html.dark {
   width: 100%;
   min-height: 44px;
   padding: 10px;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: 'IBM Plex Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   color: var(--card);
@@ -410,7 +413,8 @@ html.dark .claim-ticket__skeleton-value {
 
 @media (max-width: 360px) {
   .claim-page {
-    padding: calc(16px + env(safe-area-inset-top, 0px)) calc(10px + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px));
+    padding: calc(16px + env(safe-area-inset-top, 0px)) calc(10px + env(safe-area-inset-right, 0px))
+      calc(20px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px));
   }
   .claim-ticket__header {
     padding: 16px 16px 0;
@@ -436,4 +440,3 @@ html.dark .claim-ticket__skeleton-value {
     font-size: 12px;
   }
 }
-

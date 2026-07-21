@@ -44,12 +44,12 @@ accept the request-scoped logger and stamp each lifecycle stage with a
 `stage` field:
 
 | `stage`    | Meaning                                                        |
-|------------|----------------------------------------------------------------|
-| `build`    | Fetching the source account and building the transaction        |
-| `simulate` | Soroban RPC simulation (failures logged with the RPC error)     |
-| `sign`     | Transaction assembled and signed; `txHash` is known from here   |
-| `submit`   | Submission to the network (`status` shows the RPC verdict)      |
-| `poll`     | Confirmation polling (`attempts`, `elapsedMs`, final `status`)  |
+| ---------- | -------------------------------------------------------------- |
+| `build`    | Fetching the source account and building the transaction       |
+| `simulate` | Soroban RPC simulation (failures logged with the RPC error)    |
+| `sign`     | Transaction assembled and signed; `txHash` is known from here  |
+| `submit`   | Submission to the network (`status` shows the RPC verdict)     |
+| `poll`     | Confirmation polling (`attempts`, `elapsedMs`, final `status`) |
 
 When an invocation fails, an `error`-level line is emitted with the
 `stage` that failed **before** the error propagates up to the route
@@ -64,7 +64,7 @@ Say a client reports a failed `POST /api/v1/cash/request`:
    response header (added by Vercel) works too — when Vercel forwards
    the request, that same value is adopted as the `reqId`.
 2. **Open the log viewer.** Vercel dashboard → your project →
-   **Logs** (under *Observability*). Pick a time range covering the
+   **Logs** (under _Observability_). Pick a time range covering the
    failure.
 3. **Search for the ID.** Paste the request ID into the search box. All
    log lines whose JSON contains that `reqId` are shown — the incoming

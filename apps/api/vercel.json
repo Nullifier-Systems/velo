@@ -1,6 +1,4 @@
 {
   "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/serverless" }
-  ]
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/serverless" }]
 }

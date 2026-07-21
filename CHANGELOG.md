@@ -47,6 +47,7 @@ Future entries in this changelog should adhere to the following rules:
 ### API Launch - 2026-07-10
 
 #### Added
+
 - Initialized the Fastify API with X402 payment gate middleware.
 - Configured Vercel serverless function entry points for backend/API hosting.
 - Set up CORS support for frontend API interactions.
@@ -54,12 +55,14 @@ Future entries in this changelog should adhere to the following rules:
 ### Frontend Launch - 2026-07-10
 
 #### Added
+
 - Initialized the mobile web frontend with a claim ticket and QR code display page.
 - Created key utility functions (`formatStroops`, `shortAddress`) with matching unit tests.
 
 ### Contract Deployment - 2026-07-09
 
 #### Added
+
 - Initialized and deployed the core Escrow Smart Contracts.
 - Recorded deployed escrow contract addresses on the Stellar Testnet.
 - Added Stellar SDK, cryptography, and store helpers for escrow contract interactions.

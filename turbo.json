@@ -1,8 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [
-    ".env"
-  ],
+  "globalDependencies": [".env"],
   "globalEnv": [
     "STELLAR_NETWORK",
     "SOROBAN_RPC_URL",
@@ -23,6 +21,7 @@
       "outputs": ["dist/**", ".next/**", "public/**"]
     },
     "lint": {},
+    "format": {},
     "test": {
       "dependsOn": ["^build"]
     }

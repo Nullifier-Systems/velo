@@ -14,7 +14,7 @@
  */
 
 // Geohash base-32 alphabet (note: a, i, l, o are intentionally excluded).
-const BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 export interface GeoCell {
   /** The geohash string. */
@@ -45,10 +45,10 @@ export const GEOHASH_CELL_SIZE_METERS: Record<number, number> = {
 /** Encode a coordinate to a geohash of the given precision (default 6 ≈ 1.2 km). */
 export function encodeGeohash(lat: number, lon: number, precision = 6): string {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    throw new Error("encodeGeohash requires finite coordinates");
+    throw new Error('encodeGeohash requires finite coordinates');
   }
   if (precision < 1 || precision > 12) {
-    throw new Error("geohash precision must be between 1 and 12");
+    throw new Error('geohash precision must be between 1 and 12');
   }
 
   let latMin = -90;
@@ -56,7 +56,7 @@ export function encodeGeohash(lat: number, lon: number, precision = 6): string {
   let lonMin = -180;
   let lonMax = 180;
 
-  let hash = "";
+  let hash = '';
   let bit = 0;
   let ch = 0;
   let even = true; // even bits encode longitude, odd bits encode latitude

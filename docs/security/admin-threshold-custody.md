@@ -116,11 +116,11 @@ native `require_auth` does not already provide.
 
 In `contracts/escrow/src/lib.rs` (`mod test`):
 
-| Test | Property |
-| :--- | :--- |
+| Test                                                       | Property                                                     |
+| :--------------------------------------------------------- | :----------------------------------------------------------- |
 | `multisig_rejects_a_single_key_repeated_to_meet_threshold` | One compromised key cannot meet a quorum by repeating itself |
-| `multisig_rejects_below_threshold` | Fewer than `threshold` signers is rejected |
-| `multisig_rejects_an_unauthorized_signer` | Non-members do not count |
-| `multisig_accepts_distinct_threshold_signers` | A real quorum succeeds |
-| `resolve_requires_a_quorum_once_multisig_is_active` | Dispute resolution is not a single-key action |
-| `signer_rotation_requires_a_quorum_and_enables_recovery` | Recovery works, and rotated-out keys stop counting |
+| `multisig_rejects_below_threshold`                         | Fewer than `threshold` signers is rejected                   |
+| `multisig_rejects_an_unauthorized_signer`                  | Non-members do not count                                     |
+| `multisig_accepts_distinct_threshold_signers`              | A real quorum succeeds                                       |
+| `resolve_requires_a_quorum_once_multisig_is_active`        | Dispute resolution is not a single-key action                |
+| `signer_rotation_requires_a_quorum_and_enables_recovery`   | Recovery works, and rotated-out keys stop counting           |

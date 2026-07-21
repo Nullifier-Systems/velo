@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from "react";
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;
@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
       error,
       errorInfo,
     });
-    console.error("ErrorBoundary caught an error", error, errorInfo);
+    console.error('ErrorBoundary caught an error', error, errorInfo);
   }
 
   private handleReload = () => {
@@ -45,14 +45,9 @@ export class ErrorBoundary extends Component<Props, State> {
               An unexpected error occurred in the application.
             </p>
             {this.state.error && (
-              <pre className="error-boundary-details">
-                {this.state.error.toString()}
-              </pre>
+              <pre className="error-boundary-details">{this.state.error.toString()}</pre>
             )}
-            <button
-              onClick={this.handleReload}
-              className="error-boundary-button"
-            >
+            <button onClick={this.handleReload} className="error-boundary-button">
               Reload Page
             </button>
           </div>

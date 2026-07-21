@@ -14,30 +14,30 @@
  */
 
 const paymentChallenge = {
-  type: "object",
+  type: 'object',
   description:
-    "x402 challenge returned when no X-Payment header is present. " +
-    "Pay `amount_usdc` to `pay_to` with the given memo, then retry the " +
-    "request with the transaction hash in the X-Payment header.",
-  required: ["challenge"],
+    'x402 challenge returned when no X-Payment header is present. ' +
+    'Pay `amount_usdc` to `pay_to` with the given memo, then retry the ' +
+    'request with the transaction hash in the X-Payment header.',
+  required: ['challenge'],
   properties: {
     challenge: {
-      type: "object",
-      required: ["amount_usdc", "pay_to", "memo"],
+      type: 'object',
+      required: ['amount_usdc', 'pay_to', 'memo'],
       properties: {
         amount_usdc: {
-          type: "string",
-          description: "Price of this call in USDC, as a decimal string.",
-          examples: ["0.01"],
+          type: 'string',
+          description: 'Price of this call in USDC, as a decimal string.',
+          examples: ['0.01'],
         },
         pay_to: {
-          type: "string",
-          description: "Stellar address (G...) of the merchant to pay.",
+          type: 'string',
+          description: 'Stellar address (G...) of the merchant to pay.',
         },
         memo: {
-          type: "string",
-          description: "Memo that MUST be attached to the payment transaction.",
-          examples: ["velo:request"],
+          type: 'string',
+          description: 'Memo that MUST be attached to the payment transaction.',
+          examples: ['velo:request'],
         },
       },
     },
@@ -45,27 +45,27 @@ const paymentChallenge = {
 } as const;
 
 const errorResponse = {
-  type: "object",
-  required: ["error"],
+  type: 'object',
+  required: ['error'],
   properties: {
-    error: { type: "string", description: "Human-readable error message." },
-    detail: { type: "string", description: "Optional underlying error detail." },
+    error: { type: 'string', description: 'Human-readable error message.' },
+    detail: { type: 'string', description: 'Optional underlying error detail.' },
   },
 } as const;
 
 /** Shared 402 response body: either a payment challenge or a rejection. */
 const paymentRequired = {
   description:
-    "Payment required (x402). Returned when the X-Payment header is " +
-    "missing (body contains a challenge), already used, or does not " +
-    "reference a successful Stellar transaction paying the merchant the " +
-    "required amount with the `velo:request` memo.",
+    'Payment required (x402). Returned when the X-Payment header is ' +
+    'missing (body contains a challenge), already used, or does not ' +
+    'reference a successful Stellar transaction paying the merchant the ' +
+    'required amount with the `velo:request` memo.',
   content: {
-    "application/json": {
+    'application/json': {
       schema: {
         oneOf: [
-          { $ref: "#/components/schemas/PaymentChallenge" },
-          { $ref: "#/components/schemas/Error" },
+          { $ref: '#/components/schemas/PaymentChallenge' },
+          { $ref: '#/components/schemas/Error' },
         ],
       },
     },
@@ -73,124 +73,128 @@ const paymentRequired = {
 } as const;
 
 const rateLimited = {
-  description: "Rate limit exceeded for this route (per client IP).",
+  description: 'Rate limit exceeded for this route (per client IP).',
   headers: {
-    "Retry-After": {
-      description: "Seconds to wait before retrying.",
-      schema: { type: "string" },
+    'Retry-After': {
+      description: 'Seconds to wait before retrying.',
+      schema: { type: 'string' },
     },
   },
   content: {
-    "application/json": {
-      schema: { $ref: "#/components/schemas/RateLimitError" },
+    'application/json': {
+      schema: { $ref: '#/components/schemas/RateLimitError' },
     },
   },
 } as const;
 
 export const openApiDocument = {
-  openapi: "3.1.0",
+  openapi: '3.1.0',
   info: {
-    title: "Velo API",
-    version: "0.1.0",
+    title: 'Velo API',
+    version: '0.1.0',
     description:
-      "Velo — anonymous cash liquidity on Stellar. A lightweight, " +
-      "payment-aware service interface for agent-assisted and " +
-      "application-driven cash flows. Paid routes use an x402-style " +
-      "challenge: call without payment to receive a challenge, pay the " +
-      "quoted USDC amount on Stellar with the `velo:request` memo, then " +
-      "retry with the transaction hash in the `X-Payment` header. Each " +
-      "payment transaction is single-use.",
-    contact: { name: "Nullifier Systems", url: "https://github.com/Nullifier-Systems/velo" },
-    license: { name: "MIT", url: "https://github.com/Nullifier-Systems/velo/blob/main/LICENSE" },
+      'Velo — anonymous cash liquidity on Stellar. A lightweight, ' +
+      'payment-aware service interface for agent-assisted and ' +
+      'application-driven cash flows. Paid routes use an x402-style ' +
+      'challenge: call without payment to receive a challenge, pay the ' +
+      'quoted USDC amount on Stellar with the `velo:request` memo, then ' +
+      'retry with the transaction hash in the `X-Payment` header. Each ' +
+      'payment transaction is single-use.',
+    contact: { name: 'Nullifier Systems', url: 'https://github.com/Nullifier-Systems/velo' },
+    license: { name: 'MIT', url: 'https://github.com/Nullifier-Systems/velo/blob/main/LICENSE' },
   },
   servers: [
-    { url: "http://localhost:3000", description: "Local development" },
-    { url: "https://api.velo.cash", description: "Mainnet (production)" },
+    { url: 'http://localhost:3000', description: 'Local development' },
+    { url: 'https://api.velo.cash', description: 'Mainnet (production)' },
   ],
   tags: [
-    { name: "meta", description: "Health, discovery, and specification endpoints." },
-    { name: "cash", description: "Cash request lifecycle: discover providers, lock escrow, poll, release." },
-  { name: "reputation", description: "On-chain reputation lookups." },
-    { name: "status", description: "Public transparency: API/chain health and recent activity." },
+    { name: 'meta', description: 'Health, discovery, and specification endpoints.' },
+    {
+      name: 'cash',
+      description: 'Cash request lifecycle: discover providers, lock escrow, poll, release.',
+    },
+    { name: 'reputation', description: 'On-chain reputation lookups.' },
+    { name: 'status', description: 'Public transparency: API/chain health and recent activity.' },
   ],
   paths: {
-    "/health": {
+    '/health': {
       get: {
-        operationId: "getHealth",
-        tags: ["meta"],
-        summary: "Health check",
-        description: "Free liveness probe for infrastructure.",
-        "x-rate-limit": { max: 100, timeWindow: "1 minute" },
+        operationId: 'getHealth',
+        tags: ['meta'],
+        summary: 'Health check',
+        description: 'Free liveness probe for infrastructure.',
+        'x-rate-limit': { max: 100, timeWindow: '1 minute' },
         responses: {
-          "200": {
-            description: "Service is up.",
+          '200': {
+            description: 'Service is up.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["ok"],
-                  properties: { ok: { type: "boolean", const: true } },
+                  type: 'object',
+                  required: ['ok'],
+                  properties: { ok: { type: 'boolean', const: true } },
                 },
               },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/openapi.json": {
+    '/api/v1/openapi.json': {
       get: {
-        operationId: "getOpenApiSpec",
-        tags: ["meta"],
-        summary: "OpenAPI specification",
+        operationId: 'getOpenApiSpec',
+        tags: ['meta'],
+        summary: 'OpenAPI specification',
         description:
-          "Free machine-readable OpenAPI 3.1 document describing every " +
-          "endpoint, request/response shape, and x402 price of this API.",
-        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+          'Free machine-readable OpenAPI 3.1 document describing every ' +
+          'endpoint, request/response shape, and x402 price of this API.',
+        'x-rate-limit': { max: 60, timeWindow: '1 minute' },
         responses: {
-          "200": {
-            description: "The OpenAPI document itself.",
+          '200': {
+            description: 'The OpenAPI document itself.',
             content: {
-              "application/json": {
-                schema: { type: "object", description: "OpenAPI 3.1 document." },
+              'application/json': {
+                schema: { type: 'object', description: 'OpenAPI 3.1 document.' },
               },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/services": {
+    '/api/v1/services': {
       get: {
-        operationId: "listServices",
-        tags: ["meta"],
-        summary: "Service catalog",
-        description: "Free catalog of paid endpoints and their x402 prices, for agent autodiscovery.",
-        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        operationId: 'listServices',
+        tags: ['meta'],
+        summary: 'Service catalog',
+        description:
+          'Free catalog of paid endpoints and their x402 prices, for agent autodiscovery.',
+        'x-rate-limit': { max: 60, timeWindow: '1 minute' },
         responses: {
-          "200": {
-            description: "Catalog of paid services.",
+          '200': {
+            description: 'Catalog of paid services.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["services"],
+                  type: 'object',
+                  required: ['services'],
                   properties: {
                     services: {
-                      type: "array",
+                      type: 'array',
                       items: {
-                        type: "object",
-                        required: ["endpoint", "price_usdc"],
+                        type: 'object',
+                        required: ['endpoint', 'price_usdc'],
                         properties: {
                           endpoint: {
-                            type: "string",
-                            description: "Method and path of the paid endpoint.",
-                            examples: ["POST /api/v1/cash/request"],
+                            type: 'string',
+                            description: 'Method and path of the paid endpoint.',
+                            examples: ['POST /api/v1/cash/request'],
                           },
                           price_usdc: {
-                            type: "string",
-                            description: "Price per call in USDC, as a decimal string.",
-                            examples: ["0.01"],
+                            type: 'string',
+                            description: 'Price per call in USDC, as a decimal string.',
+                            examples: ['0.01'],
                           },
                         },
                       },
@@ -200,58 +204,58 @@ export const openApiDocument = {
               },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/status": {
+    '/api/v1/status': {
       get: {
-        operationId: "getStatus",
-        tags: ["status"],
-        summary: "Public transparency status",
+        operationId: 'getStatus',
+        tags: ['status'],
+        summary: 'Public transparency status',
         description:
-          "Free, public endpoint for a transparency page: API uptime, " +
-          "Soroban RPC/chain health with the latest known ledger, and a " +
-          "sanitized feed of recent trade activity (id, status, and " +
-          "timestamp only — no addresses, amounts, or secrets).",
-        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+          'Free, public endpoint for a transparency page: API uptime, ' +
+          'Soroban RPC/chain health with the latest known ledger, and a ' +
+          'sanitized feed of recent trade activity (id, status, and ' +
+          'timestamp only — no addresses, amounts, or secrets).',
+        'x-rate-limit': { max: 60, timeWindow: '1 minute' },
         responses: {
-          "200": {
-            description: "Combined API/chain health and recent activity.",
+          '200': {
+            description: 'Combined API/chain health and recent activity.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["api", "chain", "recent_activity"],
+                  type: 'object',
+                  required: ['api', 'chain', 'recent_activity'],
                   properties: {
                     api: {
-                      type: "object",
-                      required: ["status", "uptime_seconds", "timestamp"],
+                      type: 'object',
+                      required: ['status', 'uptime_seconds', 'timestamp'],
                       properties: {
-                        status: { type: "string", const: "ok" },
-                        uptime_seconds: { type: "integer" },
-                        timestamp: { type: "string", format: "date-time" },
+                        status: { type: 'string', const: 'ok' },
+                        uptime_seconds: { type: 'integer' },
+                        timestamp: { type: 'string', format: 'date-time' },
                       },
                     },
                     chain: {
-                      type: "object",
-                      required: ["network", "status", "latest_ledger", "oldest_ledger"],
+                      type: 'object',
+                      required: ['network', 'status', 'latest_ledger', 'oldest_ledger'],
                       properties: {
-                        network: { type: "string", examples: ["testnet", "public"] },
-                        status: { type: "string", examples: ["healthy", "unreachable"] },
-                        latest_ledger: { type: ["integer", "null"] },
-                        oldest_ledger: { type: ["integer", "null"] },
+                        network: { type: 'string', examples: ['testnet', 'public'] },
+                        status: { type: 'string', examples: ['healthy', 'unreachable'] },
+                        latest_ledger: { type: ['integer', 'null'] },
+                        oldest_ledger: { type: ['integer', 'null'] },
                       },
                     },
                     recent_activity: {
-                      type: "array",
+                      type: 'array',
                       items: {
-                        type: "object",
-                        required: ["id", "status", "createdAt"],
+                        type: 'object',
+                        required: ['id', 'status', 'createdAt'],
                         properties: {
-                          id: { type: "string" },
-                          status: { type: "string", enum: ["locked", "released", "refunded"] },
-                          createdAt: { type: "string", format: "date-time" },
+                          id: { type: 'string' },
+                          status: { type: 'string', enum: ['locked', 'released', 'refunded'] },
+                          createdAt: { type: 'string', format: 'date-time' },
                         },
                       },
                     },
@@ -260,249 +264,264 @@ export const openApiDocument = {
               },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/cash/agents": {
+    '/api/v1/cash/agents': {
       get: {
-        operationId: "findCashAgents",
-        tags: ["cash"],
-        summary: "Provider discovery",
-        description: "Find nearby cash providers. Paid route: 0.001 USDC per call via x402.",
+        operationId: 'findCashAgents',
+        tags: ['cash'],
+        summary: 'Provider discovery',
+        description: 'Find nearby cash providers. Paid route: 0.001 USDC per call via x402.',
         security: [{ x402Payment: [] }],
-        "x-price-usdc": "0.001",
-        "x-rate-limit": { max: 30, timeWindow: "1 minute" },
+        'x-price-usdc': '0.001',
+        'x-rate-limit': { max: 30, timeWindow: '1 minute' },
         responses: {
-          "200": {
-            description: "Nearby cash providers.",
+          '200': {
+            description: 'Nearby cash providers.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["agents"],
+                  type: 'object',
+                  required: ['agents'],
                   properties: {
                     agents: {
-                      type: "array",
-                      items: { $ref: "#/components/schemas/CashAgent" },
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/CashAgent' },
                     },
                   },
                 },
               },
             },
           },
-          "402": { $ref: "#/components/responses/PaymentRequired" },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '402': { $ref: '#/components/responses/PaymentRequired' },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/cash/request/prepare": {
+    '/api/v1/cash/request/prepare': {
       post: {
-        operationId: "prepareCashRequest",
-        tags: ["cash"],
-        summary: "Prepare a lock transaction (unsigned XDR)",
+        operationId: 'prepareCashRequest',
+        tags: ['cash'],
+        summary: 'Prepare a lock transaction (unsigned XDR)',
         description:
-          "Build and simulate an escrow lock() transaction, returning " +
-          "the unsigned XDR for client-side signing. Use this on mainnet " +
+          'Build and simulate an escrow lock() transaction, returning ' +
+          'the unsigned XDR for client-side signing. Use this on mainnet ' +
           "where the API cannot sign on the caller's behalf. Paid route: " +
-          "0.01 USDC per call via x402.",
+          '0.01 USDC per call via x402.',
         security: [{ x402Payment: [] }],
-        "x-price-usdc": "0.01",
-        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        'x-price-usdc': '0.01',
+        'x-rate-limit': { max: 20, timeWindow: '1 minute' },
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/CashRequestBody" },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CashRequestBody' },
             },
           },
         },
         responses: {
-          "200": {
+          '200': {
             description:
-              "Unsigned transaction XDR. The caller must sign it and " +
-              "submit via POST /cash/request/submit.",
+              'Unsigned transaction XDR. The caller must sign it and ' +
+              'submit via POST /cash/request/submit.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["trade_id", "unsigned_xdr", "contract_id", "network_passphrase"],
+                  type: 'object',
+                  required: ['trade_id', 'unsigned_xdr', 'contract_id', 'network_passphrase'],
                   properties: {
-                    trade_id: { type: "string", description: "Trade ID for the prepared lock." },
-                    unsigned_xdr: { type: "string", description: "Unsigned TransactionEnvelope XDR (base64)." },
-                    contract_id: { type: "string" },
-                    network_passphrase: { type: "string" },
+                    trade_id: { type: 'string', description: 'Trade ID for the prepared lock.' },
+                    unsigned_xdr: {
+                      type: 'string',
+                      description: 'Unsigned TransactionEnvelope XDR (base64).',
+                    },
+                    contract_id: { type: 'string' },
+                    network_passphrase: { type: 'string' },
                   },
                 },
               },
             },
           },
-          "400": { $ref: "#/components/responses/Error" },
-          "402": { $ref: "#/components/responses/PaymentRequired" },
-          "429": { $ref: "#/components/responses/RateLimited" },
-          "502": { description: "Transaction simulation failed on-chain." },
+          '400': { $ref: '#/components/responses/Error' },
+          '402': { $ref: '#/components/responses/PaymentRequired' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '502': { description: 'Transaction simulation failed on-chain.' },
         },
       },
     },
-    "/api/v1/cash/request/submit": {
+    '/api/v1/cash/request/submit': {
       post: {
-        operationId: "submitCashRequest",
-        tags: ["cash"],
-        summary: "Submit a pre-signed lock transaction",
+        operationId: 'submitCashRequest',
+        tags: ['cash'],
+        summary: 'Submit a pre-signed lock transaction',
         description:
-          "After the caller signs the XDR from /prepare, submit it here " +
+          'After the caller signs the XDR from /prepare, submit it here ' +
           "to register the trade in Velo's local store and get the claim " +
-          "URL / QR payload. Paid route: 0.01 USDC per call via x402.",
+          'URL / QR payload. Paid route: 0.01 USDC per call via x402.',
         security: [{ x402Payment: [] }],
-        "x-price-usdc": "0.01",
-        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        'x-price-usdc': '0.01',
+        'x-rate-limit': { max: 20, timeWindow: '1 minute' },
         requestBody: {
           required: true,
           content: {
-            "application/json": {
+            'application/json': {
               schema: {
-                type: "object",
-                required: ["signed_xdr", "seller", "buyer", "amount_stroops", "secret_hash", "trade_id"],
+                type: 'object',
+                required: [
+                  'signed_xdr',
+                  'seller',
+                  'buyer',
+                  'amount_stroops',
+                  'secret_hash',
+                  'trade_id',
+                ],
                 properties: {
-                  signed_xdr: { type: "string", description: "Signed TransactionEnvelope XDR (base64)." },
-                  seller: { type: "string" },
-                  buyer: { type: "string" },
-                  amount_stroops: { type: "string" },
-                  secret_hash: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
-                  trade_id: { type: "string" },
+                  signed_xdr: {
+                    type: 'string',
+                    description: 'Signed TransactionEnvelope XDR (base64).',
+                  },
+                  seller: { type: 'string' },
+                  buyer: { type: 'string' },
+                  amount_stroops: { type: 'string' },
+                  secret_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+                  trade_id: { type: 'string' },
                 },
               },
             },
           },
         },
         responses: {
-          "201": {
-            description: "Trade registered.",
+          '201': {
+            description: 'Trade registered.',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/CashRequestCreated" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CashRequestCreated' },
               },
             },
           },
-          "400": { $ref: "#/components/responses/Error" },
-          "402": { $ref: "#/components/responses/PaymentRequired" },
-          "429": { $ref: "#/components/responses/RateLimited" },
-          "502": { description: "Transaction submission or confirmation failed on-chain." },
+          '400': { $ref: '#/components/responses/Error' },
+          '402': { $ref: '#/components/responses/PaymentRequired' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '502': { description: 'Transaction submission or confirmation failed on-chain.' },
         },
       },
     },
-    "/api/v1/cash/request": {
+    '/api/v1/cash/request': {
       post: {
-        operationId: "createCashRequest",
-        tags: ["cash"],
-        summary: "Create a cash request",
+        operationId: 'createCashRequest',
+        tags: ['cash'],
+        summary: 'Create a cash request',
         description:
-          "Lock funds in the escrow contract and return a claim URL + QR " +
-          "payload for the cash hand-off. The redemption secret is held " +
-          "client-side and never returned by the API. Paid route: 0.01 " +
-          "USDC per call via x402.",
+          'Lock funds in the escrow contract and return a claim URL + QR ' +
+          'payload for the cash hand-off. The redemption secret is held ' +
+          'client-side and never returned by the API. Paid route: 0.01 ' +
+          'USDC per call via x402.',
         security: [{ x402Payment: [] }],
-        "x-price-usdc": "0.01",
-        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        'x-price-usdc': '0.01',
+        'x-rate-limit': { max: 20, timeWindow: '1 minute' },
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/CashRequestBody" },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CashRequestBody' },
             },
           },
         },
         responses: {
-          "201": {
-            description: "Escrow locked; cash request created.",
+          '201': {
+            description: 'Escrow locked; cash request created.',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/CashRequestCreated" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CashRequestCreated' },
               },
             },
           },
-          "400": {
-            description: "Missing required fields.",
+          '400': {
+            description: 'Missing required fields.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
-          "402": { $ref: "#/components/responses/PaymentRequired" },
-          "429": { $ref: "#/components/responses/RateLimited" },
-          "502": {
-            description: "The escrow lock transaction failed on-chain.",
+          '402': { $ref: '#/components/responses/PaymentRequired' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '502': {
+            description: 'The escrow lock transaction failed on-chain.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
         },
       },
     },
-    "/api/v1/cash/request/{id}": {
+    '/api/v1/cash/request/{id}': {
       get: {
-        operationId: "getCashRequest",
-        tags: ["cash"],
-        summary: "Poll request status",
-        description: "Free polling endpoint for a pending cash request. The secret is never included.",
-        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        operationId: 'getCashRequest',
+        tags: ['cash'],
+        summary: 'Poll request status',
+        description:
+          'Free polling endpoint for a pending cash request. The secret is never included.',
+        'x-rate-limit': { max: 60, timeWindow: '1 minute' },
         parameters: [
           {
-            name: "id",
-            in: "path",
+            name: 'id',
+            in: 'path',
             required: true,
-            description: "Trade id returned when the request was created (64-char hex).",
-            schema: { type: "string" },
+            description: 'Trade id returned when the request was created (64-char hex).',
+            schema: { type: 'string' },
           },
         ],
         responses: {
-          "200": {
-            description: "Current state of the cash request.",
+          '200': {
+            description: 'Current state of the cash request.',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/CashRequestStatus" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CashRequestStatus' },
               },
             },
           },
-          "404": {
-            description: "No cash request with that id.",
+          '404': {
+            description: 'No cash request with that id.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
-    "/api/v1/cash/request/{id}/release": {
+    '/api/v1/cash/request/{id}/release': {
       post: {
-        operationId: "releaseCashRequest",
-        tags: ["cash"],
-        summary: "Release escrow (hand-off)",
+        operationId: 'releaseCashRequest',
+        tags: ['cash'],
+        summary: 'Release escrow (hand-off)',
         description:
-          "Merchant confirms the cash hand-off and releases the escrow " +
-          "using the secret embedded in the scanned QR. Free — this is a " +
-          "state-transition call, not a discovery call.",
-        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+          'Merchant confirms the cash hand-off and releases the escrow ' +
+          'using the secret embedded in the scanned QR. Free — this is a ' +
+          'state-transition call, not a discovery call.',
+        'x-rate-limit': { max: 20, timeWindow: '1 minute' },
         parameters: [
           {
-            name: "id",
-            in: "path",
+            name: 'id',
+            in: 'path',
             required: true,
-            description: "Trade id of the locked cash request.",
-            schema: { type: "string" },
+            description: 'Trade id of the locked cash request.',
+            schema: { type: 'string' },
           },
         ],
         requestBody: {
           required: true,
           content: {
-            "application/json": {
+            'application/json': {
               schema: {
-                type: "object",
-                required: ["secret"],
+                type: 'object',
+                required: ['secret'],
                 properties: {
                   secret: {
-                    type: "string",
-                    description: "Redemption secret from the scanned QR (hex preimage of secret_hash).",
+                    type: 'string',
+                    description:
+                      'Redemption secret from the scanned QR (hex preimage of secret_hash).',
                   },
                 },
               },
@@ -510,80 +529,81 @@ export const openApiDocument = {
           },
         },
         responses: {
-          "200": {
-            description: "Escrow released.",
+          '200': {
+            description: 'Escrow released.',
             content: {
-              "application/json": {
+              'application/json': {
                 schema: {
-                  type: "object",
-                  required: ["id", "status"],
+                  type: 'object',
+                  required: ['id', 'status'],
                   properties: {
-                    id: { type: "string" },
-                    status: { type: "string", const: "released" },
+                    id: { type: 'string' },
+                    status: { type: 'string', const: 'released' },
                   },
                 },
               },
             },
           },
-          "400": {
-            description: "Missing secret.",
+          '400': {
+            description: 'Missing secret.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
-          "404": {
-            description: "No cash request with that id.",
+          '404': {
+            description: 'No cash request with that id.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
-          "409": {
-            description: "Request is not in the `locked` state (already released or refunded).",
+          '409': {
+            description: 'Request is not in the `locked` state (already released or refunded).',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
-          "429": { $ref: "#/components/responses/RateLimited" },
-          "502": {
-            description: "The escrow release transaction failed on-chain.",
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '502': {
+            description: 'The escrow release transaction failed on-chain.',
             content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
+              'application/json': { schema: { $ref: '#/components/schemas/Error' } },
             },
           },
         },
       },
     },
-    "/api/v1/reputation/{address}": {
+    '/api/v1/reputation/{address}': {
       get: {
-        operationId: "getReputation",
-        tags: ["reputation"],
-        summary: "On-chain reputation lookup",
-        description: "Trust signal for a Stellar address. Paid route: 0.0005 USDC per call via x402.",
+        operationId: 'getReputation',
+        tags: ['reputation'],
+        summary: 'On-chain reputation lookup',
+        description:
+          'Trust signal for a Stellar address. Paid route: 0.0005 USDC per call via x402.',
         security: [{ x402Payment: [] }],
-        "x-price-usdc": "0.0005",
-        "x-rate-limit": { max: 30, timeWindow: "1 minute" },
+        'x-price-usdc': '0.0005',
+        'x-rate-limit': { max: 30, timeWindow: '1 minute' },
         parameters: [
           {
-            name: "address",
-            in: "path",
+            name: 'address',
+            in: 'path',
             required: true,
-            description: "Stellar account address (G...).",
-            schema: { type: "string" },
+            description: 'Stellar account address (G...).',
+            schema: { type: 'string' },
           },
         ],
         responses: {
-          "200": {
+          '200': {
             description:
-              "Reputation summary. Fields are null until the on-chain " +
-              "reputation source is wired up.",
+              'Reputation summary. Fields are null until the on-chain ' +
+              'reputation source is wired up.',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Reputation" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Reputation' },
               },
             },
           },
-          "402": { $ref: "#/components/responses/PaymentRequired" },
-          "429": { $ref: "#/components/responses/RateLimited" },
+          '402': { $ref: '#/components/responses/PaymentRequired' },
+          '429': { $ref: '#/components/responses/RateLimited' },
         },
       },
     },
@@ -591,127 +611,131 @@ export const openApiDocument = {
   components: {
     securitySchemes: {
       x402Payment: {
-        type: "apiKey",
-        in: "header",
-        name: "X-Payment",
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-Payment',
         description:
-          "x402 payment header: the hash of a successful Stellar " +
+          'x402 payment header: the hash of a successful Stellar ' +
           "transaction paying the merchant at least the operation's " +
-          "`x-price-usdc` with memo `velo:request`. Each transaction hash " +
-          "is accepted once. Requests without a valid payment receive " +
-          "402 with a challenge, not 401.",
+          '`x-price-usdc` with memo `velo:request`. Each transaction hash ' +
+          'is accepted once. Requests without a valid payment receive ' +
+          '402 with a challenge, not 401.',
       },
     },
     schemas: {
       Error: errorResponse,
       PaymentChallenge: paymentChallenge,
       RateLimitError: {
-        type: "object",
-        required: ["statusCode", "error", "message"],
+        type: 'object',
+        required: ['statusCode', 'error', 'message'],
         properties: {
-          statusCode: { type: "integer", const: 429 },
-          error: { type: "string", const: "Too Many Requests" },
-          message: { type: "string" },
+          statusCode: { type: 'integer', const: 429 },
+          error: { type: 'string', const: 'Too Many Requests' },
+          message: { type: 'string' },
           retryAfter: {
-            type: "string",
-            description: "Human-readable wait time, e.g. \"1 minute\".",
+            type: 'string',
+            description: 'Human-readable wait time, e.g. "1 minute".',
           },
           retryAfterSeconds: {
-            type: "integer",
-            description: "Seconds to wait before retrying.",
+            type: 'integer',
+            description: 'Seconds to wait before retrying.',
           },
         },
       },
       CashAgent: {
-        type: "object",
-        required: ["name", "distance_km", "tier"],
+        type: 'object',
+        required: ['name', 'distance_km', 'tier'],
         properties: {
-          name: { type: "string", examples: ["Farmacia Guadalupe"] },
-          distance_km: { type: "number", examples: [0.3] },
-          tier: { type: "string", examples: ["Maestro"] },
+          name: { type: 'string', examples: ['Farmacia Guadalupe'] },
+          distance_km: { type: 'number', examples: [0.3] },
+          tier: { type: 'string', examples: ['Maestro'] },
         },
       },
       CashRequestBody: {
-        type: "object",
-        required: ["seller", "buyer", "amount_stroops", "secret_hash"],
+        type: 'object',
+        required: ['seller', 'buyer', 'amount_stroops', 'secret_hash'],
         properties: {
           seller: {
-            type: "string",
-            description: "Stellar address (G...) of the cash provider.",
+            type: 'string',
+            description: 'Stellar address (G...) of the cash provider.',
           },
           buyer: {
-            type: "string",
-            description: "Stellar address (G...) of the person requesting cash.",
+            type: 'string',
+            description: 'Stellar address (G...) of the person requesting cash.',
           },
           amount_stroops: {
-            type: "string",
-            description: "Amount in stroops as a bigint string, e.g. \"10000000\" = 1 unit.",
-            examples: ["10000000"],
+            type: 'string',
+            description: 'Amount in stroops as a bigint string, e.g. "10000000" = 1 unit.',
+            examples: ['10000000'],
           },
           secret_hash: {
-            type: "string",
-            description: "64-character hex SHA-256 hash of the client-held redemption secret.",
-            pattern: "^[0-9a-fA-F]{64}$",
+            type: 'string',
+            description: '64-character hex SHA-256 hash of the client-held redemption secret.',
+            pattern: '^[0-9a-fA-F]{64}$',
           },
         },
       },
       CashRequestCreated: {
-        type: "object",
-        required: ["claim_url", "qr_payload", "instructions"],
+        type: 'object',
+        required: ['claim_url', 'qr_payload', 'instructions'],
         properties: {
           claim_url: {
-            type: "string",
-            description: "URL the buyer opens/shares to claim the cash.",
-            examples: ["https://app.velo.cash/claim/{trade_id}"],
+            type: 'string',
+            description: 'URL the buyer opens/shares to claim the cash.',
+            examples: ['https://app.velo.cash/claim/{trade_id}'],
           },
           qr_payload: {
-            type: "string",
-            description: "Deep-link payload to encode as a QR code.",
-            examples: ["velo://claim?request_id={trade_id}&contract={contract_id}"],
+            type: 'string',
+            description: 'Deep-link payload to encode as a QR code.',
+            examples: ['velo://claim?request_id={trade_id}&contract={contract_id}'],
           },
-          instructions: { type: "string" },
+          instructions: { type: 'string' },
         },
       },
       CashRequestStatus: {
-        type: "object",
-        description: "Public view of a cash request. The redemption secret is never included.",
+        type: 'object',
+        description: 'Public view of a cash request. The redemption secret is never included.',
         required: [
-          "id",
-          "contractId",
-          "seller",
-          "buyer",
-          "amountStroops",
-          "secretHashHex",
-          "qrPayload",
-          "status",
-          "createdAt",
+          'id',
+          'contractId',
+          'seller',
+          'buyer',
+          'amountStroops',
+          'secretHashHex',
+          'qrPayload',
+          'status',
+          'createdAt',
         ],
         properties: {
-          id: { type: "string", description: "Trade id (64-char hex)." },
-          contractId: { type: "string", description: "Escrow contract id (C...)." },
-          seller: { type: "string" },
-          buyer: { type: "string" },
-          amountStroops: { type: "string" },
-          secretHashHex: { type: "string" },
-          qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
-          status: { type: "string", enum: ["locked", "released", "refunded", "disputed"] },
-          createdAt: { type: "string", format: "date-time" },
-          disputedAt: { type: "string", format: "date-time" },
-          disputedBy: { type: "string" },
-          disputeReason: { type: "string" },
-          resolvedAt: { type: "string", format: "date-time" },
-          resolvedBy: { type: "string" },
-          resolution: { type: "string" },
+          id: { type: 'string', description: 'Trade id (64-char hex).' },
+          contractId: { type: 'string', description: 'Escrow contract id (C...).' },
+          seller: { type: 'string' },
+          buyer: { type: 'string' },
+          amountStroops: { type: 'string' },
+          secretHashHex: { type: 'string' },
+          qrPayload: {
+            type: 'string',
+            description:
+              'Persisted QR payload from creation; contains request_id and contract only, no secret.',
+          },
+          status: { type: 'string', enum: ['locked', 'released', 'refunded', 'disputed'] },
+          createdAt: { type: 'string', format: 'date-time' },
+          disputedAt: { type: 'string', format: 'date-time' },
+          disputedBy: { type: 'string' },
+          disputeReason: { type: 'string' },
+          resolvedAt: { type: 'string', format: 'date-time' },
+          resolvedBy: { type: 'string' },
+          resolution: { type: 'string' },
         },
       },
       Reputation: {
-        type: "object",
-        required: ["address", "completion_rate", "trades", "trusted"],
+        type: 'object',
+        required: ['address', 'completion_rate', 'trades', 'trusted'],
         properties: {
-          address: { type: "string" },
-          completion_rate: { type: ["number", "null"] },
-          trades: { type: ["integer", "null"] },
-          trusted: { type: ["boolean", "null"] },
+          address: { type: 'string' },
+          completion_rate: { type: ['number', 'null'] },
+          trades: { type: ['integer', 'null'] },
+          trusted: { type: ['boolean', 'null'] },
         },
       },
     },

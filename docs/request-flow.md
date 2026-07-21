@@ -3,6 +3,7 @@
 This document details the end-to-end request flow of Velo, showing how the **User (Buyer)**, **Mobile Frontend**, **API Layer**, **Soroban Escrow Contract**, and **Merchant (Seller/Cash Provider)** connect and interact.
 
 The transaction flow is split into three main phases:
+
 1. **Escrow Locking (Initiation)**: Securing stablecoin funds on-chain (supporting both Custodial and Non-Custodial modes).
 2. **Verification (QR Scanning)**: Physical meeting between the buyer and the cash provider, scanning the claim QR code to fetch details.
 3. **Escrow Release (Cash Handoff)**: Submitting the release secret to the contract to trigger on-chain settlement, followed by handing over physical cash.
@@ -24,7 +25,7 @@ sequenceDiagram
     User->>Frontend: Select amount and request cash
     Frontend->>Frontend: Generate Secret & Secret Hash (SHA-256)
     Frontend->>API: POST /api/v1/cash/request/prepare (secret_hash)
-    
+
     alt Custodial Mode (Legacy / Testing)
         API->>Contract: Invoke lock() with secret_hash
         Contract->>Contract: Lock USDC/stablecoin funds
@@ -66,6 +67,7 @@ sequenceDiagram
 ## Detailed Step-by-Step Flow
 
 ### Phase 1: Escrow Locking (Initiation)
+
 1. **User (Buyer)** initiates a cash withdrawal request on the mobile app.
 2. **Mobile Frontend** generates a cryptographic `secret` and its hash (`secret_hash = sha256(secret)`) locally on the client device. The secret is never sent to the API gateway during initiation to preserve trust boundaries.
 3. **Mobile Frontend** submits the request to the **API Layer** (`POST /api/v1/cash/request/prepare`).
@@ -77,6 +79,7 @@ sequenceDiagram
 7. The **Mobile Frontend** renders this payload as a secure QR code for the user.
 
 ### Phase 2: QR Scanning & Verification
+
 8. The **User** meets the **Merchant** in person and displays the Claim QR code.
 9. The **Merchant** opens the **Merchant Release Terminal** on their frontend and scans the QR code.
 10. The scanning terminal extracts the `request_id` and `secret` from the QR payload.
@@ -85,6 +88,7 @@ sequenceDiagram
 13. The merchant terminal displays the verification screen.
 
 ### Phase 3: Cash Handoff & Release
+
 14. The **Merchant** hands the corresponding physical cash to the **User**.
 15. Upon successful physical handoff, the merchant confirms the action on the terminal.
 16. The merchant terminal calls the **API Layer** (`POST /api/v1/cash/request/:id/release`) containing the scanned `secret`.

@@ -15,7 +15,7 @@ function nextId(): string {
   return `${Date.now().toString(36)}-${counter.toString(36)}`;
 }
 
-export function saveMessage(msg: Omit<ChatMessage, "id" | "createdAt">): ChatMessage {
+export function saveMessage(msg: Omit<ChatMessage, 'id' | 'createdAt'>): ChatMessage {
   const record: ChatMessage = { ...msg, id: nextId(), createdAt: new Date().toISOString() };
   const list = messages.get(msg.tradeId) ?? [];
   list.push(record);

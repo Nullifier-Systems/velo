@@ -35,9 +35,11 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 ### POST /api/v1/cash/request
 
 **New Request Parameter:**
+
 - `mode`: `"custodial"` | `"non_custodial"` (default: `"custodial"`)
 
 **Custodial Mode Response (unchanged):**
+
 ```json
 {
   "claim_url": "https://app.velo.cash/claim/{tradeId}",
@@ -47,6 +49,7 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 ```
 
 **Non-Custodial Mode Response (new):**
+
 ```json
 {
   "request_id": "{tradeId}",
@@ -62,6 +65,7 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 ### POST /api/v1/cash/request/:id/submit (New Endpoint)
 
 **Request Body:**
+
 ```json
 {
   "signed_xdr": "AAAA...base64 encoded signed XDR..."
@@ -69,6 +73,7 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 ```
 
 **Response:**
+
 ```json
 {
   "id": "{tradeId}",
@@ -92,17 +97,20 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 4. `submitSignedTransaction(signedXdr)` - Submits signed XDR to Stellar network
 
 **Updated Functions:**
+
 - `LockParams` interface now accepts optional `signerPublicKey` for non-custodial mode
 - Existing `lockEscrow()`, `releaseEscrow()`, `refundEscrow()` functions remain unchanged
 
 ### Store Changes
 
 **Updated Status Values in `apps/api/src/lib/store.ts`:**
+
 - Added `"pending_signature"` status for non-custodial transactions awaiting user signature
 
 ### Route Changes
 
 **Updated `apps/api/src/routes/cash.ts`:**
+
 - Added `mode` parameter validation
 - Conditional logic for custodial vs non-custodial flows
 - New `/submit` endpoint for signed XDR submission
@@ -112,6 +120,7 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
 ### Non-Custodial Flow
 
 1. **Request unsigned transaction:**
+
    ```typescript
    const response = await fetch('/api/v1/cash/request', {
      method: 'POST',
@@ -121,16 +130,17 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
        buyer: 'GBUYER...',
        amount_stroops: '10000000',
        secret_hash: '64-char-hex-string',
-       mode: 'non_custodial'
-     })
+       mode: 'non_custodial',
+     }),
    });
    const { unsigned_xdr, network_passphrase, submit_url } = await response.json();
    ```
 
 2. **Sign with user's wallet:**
+
    ```typescript
    const signedTx = await wallet.signTransaction(unsigned_xdr, {
-     networkPassphrase: network_passphrase
+     networkPassphrase: network_passphrase,
    });
    const signedXdr = signedTx.toXDR();
    ```
@@ -140,7 +150,7 @@ User Wallet → Signs XDR → API → Submits to Stellar Network
    const result = await fetch(submit_url, {
      method: 'POST',
      headers: { 'Content-Type': 'application/json' },
-     body: JSON.stringify({ signed_xdr: signedXdr })
+     body: JSON.stringify({ signed_xdr: signedXdr }),
    });
    const { transaction_hash, claim_url } = await result.json();
    ```
@@ -159,7 +169,7 @@ const response = await fetch('/api/v1/cash/request', {
     amount_stroops: '10000000',
     secret_hash: '64-char-hex-string',
     // mode defaults to 'custodial'
-  })
+  }),
 });
 ```
 
@@ -193,6 +203,7 @@ No changes required - custodial mode remains the default.
 ## Testing
 
 Added tests in `apps/api/src/routes/cash.test.ts`:
+
 - Mode parameter validation
 - Non-custodial request structure validation
 - Submit endpoint validation

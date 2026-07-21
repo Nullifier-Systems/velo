@@ -1,7 +1,7 @@
-import type { FastifyInstance } from "fastify";
-import { server, NETWORK_PASSPHRASE } from "../lib/stellar.js";
-import { getRecentActivity } from "../lib/store.js";
-import { Networks } from "@stellar/stellar-sdk";
+import type { FastifyInstance } from 'fastify';
+import { server, NETWORK_PASSPHRASE } from '../lib/stellar.js';
+import { getRecentActivity } from '../lib/store.js';
+import { Networks } from '@stellar/stellar-sdk';
 
 const startedAt = Date.now();
 
@@ -19,15 +19,15 @@ const startedAt = Date.now();
  */
 export async function statusRoutes(app: FastifyInstance) {
   app.get(
-    "/status",
+    '/status',
     {
       config: {
-        rateLimit: { max: 60, timeWindow: "1 minute" },
+        rateLimit: { max: 60, timeWindow: '1 minute' },
       },
     },
     async () => {
       const api = {
-        status: "ok" as const,
+        status: 'ok' as const,
         uptime_seconds: Math.floor((Date.now() - startedAt) / 1000),
         timestamp: new Date().toISOString(),
       };
@@ -40,21 +40,18 @@ export async function statusRoutes(app: FastifyInstance) {
       };
 
       try {
-        const [health, latest] = await Promise.all([
-          server.getHealth(),
-          server.getLatestLedger(),
-        ]);
+        const [health, latest] = await Promise.all([server.getHealth(), server.getLatestLedger()]);
         chain = {
-          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "public" : "testnet",
+          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? 'public' : 'testnet',
           status: health.status,
           latest_ledger: latest.sequence,
-          oldest_ledger: "oldestLedger" in health ? (health as any).oldestLedger : null,
+          oldest_ledger: 'oldestLedger' in health ? (health as any).oldestLedger : null,
         };
       } catch (err) {
-        app.log.warn(err, "status: soroban RPC unreachable");
+        app.log.warn(err, 'status: soroban RPC unreachable');
         chain = {
-          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "public" : "testnet",
-          status: "unreachable",
+          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? 'public' : 'testnet',
+          status: 'unreachable',
           latest_ledger: null,
           oldest_ledger: null,
         };
@@ -67,4 +64,4 @@ export async function statusRoutes(app: FastifyInstance) {
       };
     }
   );
-    }
+}
