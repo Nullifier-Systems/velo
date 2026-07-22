@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { issueChatCapability } from "../lib/chat-capability.js";
 import { randomUUID } from "crypto";
 import { getProviderTrades, saveProvider, getProviders, getProviderByAddress, setProviderPayoutMode, ProviderRecord } from "../lib/store.js";
 import { toPublicProvider, DEFAULT_PRECISION } from "../utils/privacy.js";
@@ -200,7 +201,8 @@ export async function providerRoutes(app: FastifyInstance) {
         buyer: t.buyer,
         amount_stroops: t.amountStroops,
         status: t.status,
-        created_at: t.createdAt
+        created_at: t.createdAt,
+        chat_token: t.status === "locked" ? issueChatCapability(t.id, providerAddress) : undefined,
       })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     };
   });
@@ -254,4 +256,3 @@ export async function providerRoutes(app: FastifyInstance) {
       .send(jsonOutput);
   });
 }
-

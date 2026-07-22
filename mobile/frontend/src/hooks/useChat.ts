@@ -16,6 +16,7 @@ const WS_BASE = import.meta.env.VITE_WS_URL ?? `ws://${location.hostname}:5181`;
 interface UseChatOptions {
   tradeId: string;
   participant: string;
+  token: string;
 }
 
 export interface DecryptedChatMessage extends ChatMessage {
@@ -23,7 +24,7 @@ export interface DecryptedChatMessage extends ChatMessage {
   text: string | null;
 }
 
-export function useChat({ tradeId, participant }: UseChatOptions) {
+export function useChat({ tradeId, participant, token }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connected, setConnected] = useState(false);
   const [closed, setClosed] = useState(false);
@@ -32,6 +33,7 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
   const [keyChanged, setKeyChanged] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const keyPairRef = useRef<ReturnType<typeof getOrCreateKeyPair> | null>(null);
+  const lastMessageIdRef = useRef<string | undefined>(undefined);
 
   const applyPeerKey = useCallback(
     (publicKeyB64: string) => {
@@ -52,19 +54,38 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
     setPeerPublicKeyB64(null);
     setSafetyNumber(null);
     setKeyChanged(false);
+    lastMessageIdRef.current = undefined;
 
     const keyPair = getOrCreateKeyPair(participant);
     keyPairRef.current = keyPair;
 
-    const ws = new WebSocket(`${WS_BASE}/api/v1/chat/${tradeId}?participant=${participant}`);
-    wsRef.current = ws;
+    let cancelled = false;
+    let terminallyClosed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectAttempt = 0;
 
-    ws.onopen = () => {
-      setConnected(true);
-      publishChatKey(tradeId, participant, toBase64(keyPair.publicKey)).catch(() => {});
-    };
+    const addMessages = (incoming: ChatMessage[]) => setMessages((previous) => {
+      const byId = new Map(previous.map((message) => [message.id, message]));
+      for (const message of incoming) byId.set(message.id, message);
+      const next = [...byId.values()].sort((a, b) => Number(a.id) - Number(b.id));
+      lastMessageIdRef.current = next.at(-1)?.id;
+      return next;
+    });
 
-    ws.onmessage = (event) => {
+    const connect = () => {
+      if (cancelled || !token) return;
+      const params = new URLSearchParams({ token });
+      if (lastMessageIdRef.current) params.set("after", lastMessageIdRef.current);
+      const ws = new WebSocket(`${WS_BASE}/api/v1/chat/${tradeId}?${params}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttempt = 0;
+        setConnected(true);
+        publishChatKey(tradeId, token, toBase64(keyPair.publicKey)).catch(() => {});
+      };
+
+      ws.onmessage = (event) => {
       let payload: any;
       try {
         payload = JSON.parse(event.data);
@@ -77,26 +98,35 @@ export function useChat({ tradeId, participant }: UseChatOptions) {
       } else if (payload.type === "peerKey") {
         if (payload.participant !== participant) applyPeerKey(payload.publicKey);
       } else if (payload.type === "message") {
-        setMessages((prev) => [...prev, payload.data]);
+        addMessages([payload.data]);
       } else if (payload.type === "closed") {
+        terminallyClosed = true;
         setClosed(true);
         ws.close();
       }
+      };
+
+      ws.onclose = (event) => {
+        setConnected(false);
+        wsRef.current = null;
+        if (!cancelled && !terminallyClosed && event.code !== 4000 && event.code !== 4001) {
+          const delay = Math.min(30_000, 500 * 2 ** reconnectAttempt++);
+          reconnectTimer = setTimeout(connect, delay + Math.random() * 250);
+        }
+      };
     };
 
-    ws.onclose = () => {
-      setConnected(false);
-      wsRef.current = null;
-    };
-
-    fetchChatHistory(tradeId, participant).then((res) => {
-      if (res.messages) setMessages(res.messages);
+    fetchChatHistory(tradeId, token).then((res) => {
+      if (res.messages) addMessages(res.messages);
     }).catch(() => {});
+    connect();
 
     return () => {
-      ws.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
     };
-  }, [tradeId, participant, applyPeerKey]);
+  }, [tradeId, participant, token, applyPeerKey]);
 
   useEffect(() => {
     if (!peerPublicKeyB64 || !keyPairRef.current) {
