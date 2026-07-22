@@ -11,6 +11,7 @@ export interface CashRequestStatus {
   createdAt: string;
 }
 
+
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
   if (!res.ok) {
@@ -18,6 +19,7 @@ export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   }
   return res.json();
 }
+
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
@@ -31,6 +33,39 @@ export async function releaseCashRequest(id: string, secret: string): Promise<vo
   }
 }
 
+export interface ChatMessage {
+  id: string;
+  tradeId: string;
+  sender: string;
+  ciphertext: string;
+  nonce: string;
+  createdAt: string;
+}
+
+export async function fetchChatHistory(tradeId: string, participant: string): Promise<{ messages: ChatMessage[] }> {
+  const res = await fetch(`${API_BASE}/api/v1/chat/${tradeId}/history?participant=${encodeURIComponent(participant)}`);
+  if (!res.ok) throw new Error("chat history failed");
+  return res.json();
+}
+
+export interface KeyEntry {
+  publicKey: string;
+  updatedAt: string;
+}
+
+export async function publishChatKey(tradeId: string, participant: string, publicKey: string): Promise<KeyEntry> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/chat/${tradeId}/keys?participant=${encodeURIComponent(participant)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicKey }),
+    }
+  );
+  if (!res.ok) throw new Error("publishing chat key failed");
+  return res.json();
+}
+
 /** Formats a stroop amount (7 decimal places) as a human-readable string. */
 export function formatStroops(stroops: string): string {
   const n = BigInt(stroops);
@@ -38,3 +73,21 @@ export function formatStroops(stroops: string): string {
   const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
   return `${whole}.${frac}`;
 }
+
+export interface StatusResponse {
+  api: { status: string; uptime_seconds: number; timestamp: string };
+  chain: { network: string; status: string; latest_ledger: number | null };
+  recent_activity: { id: string; status: string; createdAt: string }[];
+}
+
+export async function fetchStatus(): Promise<StatusResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/status`);
+  if (!res.ok) throw new Error("status check failed");
+  return res.json();
+}
+
+/** Truncates a long address/ID to its first and last 5 characters. */
+export function shortAddress(addr: string): string {
+  return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
+}
+

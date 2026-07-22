@@ -148,17 +148,18 @@ impl Htlc for AtomicSwapContract {
             panic_with_error(&env, Error::InvalidSecret);
         }
 
+        // Full amount to the seller — no platform fee on cross-chain swaps.
+        // CEI pattern: update state before external calls
+        state.status = TradeStatus::Released;
+        env.storage().persistent().set(&key, &state);
+
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
-        // Full amount to the seller — no platform fee on cross-chain swaps.
         client.transfer(
             &env.current_contract_address(),
             &state.seller,
             &state.amount,
         );
-
-        state.status = TradeStatus::Released;
-        env.storage().persistent().set(&key, &state);
 
         // The revealed secret is the cross-chain payload: the relayer reads it
         // from this event and uses it to claim the counterpart HTLC.
@@ -182,12 +183,13 @@ impl Htlc for AtomicSwapContract {
             panic_with_error(&env, Error::TimeoutNotReached);
         }
 
+        // CEI pattern: update state before external calls
+        state.status = TradeStatus::Refunded;
+        env.storage().persistent().set(&key, &state);
+
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
-
-        state.status = TradeStatus::Refunded;
-        env.storage().persistent().set(&key, &state);
 
         env.events()
             .publish((Symbol::new(&env, "refunded"), id), state.amount);
@@ -200,3 +202,6 @@ fn panic_with_error(_env: &Env, err: Error) -> ! {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod property_test;

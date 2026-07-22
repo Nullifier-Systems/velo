@@ -105,11 +105,13 @@ export const openApiDocument = {
   },
   servers: [
     { url: "http://localhost:3000", description: "Local development" },
+    { url: "https://api.velo.cash", description: "Mainnet (production)" },
   ],
   tags: [
     { name: "meta", description: "Health, discovery, and specification endpoints." },
     { name: "cash", description: "Cash request lifecycle: discover providers, lock escrow, poll, release." },
-    { name: "reputation", description: "On-chain reputation lookups." },
+  { name: "reputation", description: "On-chain reputation lookups." },
+    { name: "status", description: "Public transparency: API/chain health and recent activity." },
   ],
   paths: {
     "/health": {
@@ -202,6 +204,66 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/status": {
+      get: {
+        operationId: "getStatus",
+        tags: ["status"],
+        summary: "Public transparency status",
+        description:
+          "Free, public endpoint for a transparency page: API uptime, " +
+          "Soroban RPC/chain health with the latest known ledger, and a " +
+          "sanitized feed of recent trade activity (id, status, and " +
+          "timestamp only — no addresses, amounts, or secrets).",
+        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        responses: {
+          "200": {
+            description: "Combined API/chain health and recent activity.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["api", "chain", "recent_activity"],
+                  properties: {
+                    api: {
+                      type: "object",
+                      required: ["status", "uptime_seconds", "timestamp"],
+                      properties: {
+                        status: { type: "string", const: "ok" },
+                        uptime_seconds: { type: "integer" },
+                        timestamp: { type: "string", format: "date-time" },
+                      },
+                    },
+                    chain: {
+                      type: "object",
+                      required: ["network", "status", "latest_ledger", "oldest_ledger"],
+                      properties: {
+                        network: { type: "string", examples: ["testnet", "public"] },
+                        status: { type: "string", examples: ["healthy", "unreachable"] },
+                        latest_ledger: { type: ["integer", "null"] },
+                        oldest_ledger: { type: ["integer", "null"] },
+                      },
+                    },
+                    recent_activity: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        required: ["id", "status", "createdAt"],
+                        properties: {
+                          id: { type: "string" },
+                          status: { type: "string", enum: ["locked", "released", "refunded"] },
+                          createdAt: { type: "string", format: "date-time" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
     "/api/v1/cash/agents": {
       get: {
         operationId: "findCashAgents",
@@ -231,6 +293,101 @@ export const openApiDocument = {
           },
           "402": { $ref: "#/components/responses/PaymentRequired" },
           "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/api/v1/cash/request/prepare": {
+      post: {
+        operationId: "prepareCashRequest",
+        tags: ["cash"],
+        summary: "Prepare a lock transaction (unsigned XDR)",
+        description:
+          "Build and simulate an escrow lock() transaction, returning " +
+          "the unsigned XDR for client-side signing. Use this on mainnet " +
+          "where the API cannot sign on the caller's behalf. Paid route: " +
+          "0.01 USDC per call via x402.",
+        security: [{ x402Payment: [] }],
+        "x-price-usdc": "0.01",
+        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CashRequestBody" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Unsigned transaction XDR. The caller must sign it and " +
+              "submit via POST /cash/request/submit.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["trade_id", "unsigned_xdr", "contract_id", "network_passphrase"],
+                  properties: {
+                    trade_id: { type: "string", description: "Trade ID for the prepared lock." },
+                    unsigned_xdr: { type: "string", description: "Unsigned TransactionEnvelope XDR (base64)." },
+                    contract_id: { type: "string" },
+                    network_passphrase: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/Error" },
+          "402": { $ref: "#/components/responses/PaymentRequired" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+          "502": { description: "Transaction simulation failed on-chain." },
+        },
+      },
+    },
+    "/api/v1/cash/request/submit": {
+      post: {
+        operationId: "submitCashRequest",
+        tags: ["cash"],
+        summary: "Submit a pre-signed lock transaction",
+        description:
+          "After the caller signs the XDR from /prepare, submit it here " +
+          "to register the trade in Velo's local store and get the claim " +
+          "URL / QR payload. Paid route: 0.01 USDC per call via x402.",
+        security: [{ x402Payment: [] }],
+        "x-price-usdc": "0.01",
+        "x-rate-limit": { max: 20, timeWindow: "1 minute" },
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["signed_xdr", "seller", "buyer", "amount_stroops", "secret_hash", "trade_id"],
+                properties: {
+                  signed_xdr: { type: "string", description: "Signed TransactionEnvelope XDR (base64)." },
+                  seller: { type: "string" },
+                  buyer: { type: "string" },
+                  amount_stroops: { type: "string" },
+                  secret_hash: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
+                  trade_id: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Trade registered.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CashRequestCreated" },
+              },
+            },
+          },
+          "400": { $ref: "#/components/responses/Error" },
+          "402": { $ref: "#/components/responses/PaymentRequired" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+          "502": { description: "Transaction submission or confirmation failed on-chain." },
         },
       },
     },
@@ -525,6 +682,7 @@ export const openApiDocument = {
           "buyer",
           "amountStroops",
           "secretHashHex",
+          "qrPayload",
           "status",
           "createdAt",
         ],
@@ -535,8 +693,15 @@ export const openApiDocument = {
           buyer: { type: "string" },
           amountStroops: { type: "string" },
           secretHashHex: { type: "string" },
-          status: { type: "string", enum: ["locked", "released", "refunded"] },
+          qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
+          status: { type: "string", enum: ["locked", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
+          disputedAt: { type: "string", format: "date-time" },
+          disputedBy: { type: "string" },
+          disputeReason: { type: "string" },
+          resolvedAt: { type: "string", format: "date-time" },
+          resolvedBy: { type: "string" },
+          resolution: { type: "string" },
         },
       },
       Reputation: {

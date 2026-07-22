@@ -1,9 +1,16 @@
 name: node-ci
+
 on:
   push:
-    paths-ignore: ["contracts/**"]
+    paths-ignore:
+      - "contracts/**"
+      - "docs/**"
+      - "*.md"
   pull_request:
-    paths-ignore: ["contracts/**"]
+    paths-ignore:
+      - "contracts/**"
+      - "docs/**"
+      - "*.md"
   workflow_dispatch:
 
 permissions:
@@ -14,11 +21,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+        - name: Verify line endings
+          run: |
+            git diff --check || { echo "Line ending inconsistencies detected. Ensure .gitattributes is respected."; exit 1; }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
+          
+      # Clean installation of dependencies using the package lock
       - run: npm ci
+      
+      # Executes the workspaces build steps
       - run: npm run build
+      
       - run: npm run test --if-present
+      
       - run: npm run lint --if-present

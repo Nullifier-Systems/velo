@@ -27,5 +27,7 @@ jobs:
         run: cargo build --workspace
       - name: cargo test
         run: cargo test --workspace
+      - name: soroban-lint (Soroban-specific static analysis)
+        run: cargo run -p soroban-lint -- escrow/src/lib.rs atomic-swap/src/lib.rs htlc-core/src/lib.rs
       - name: cargo build --release (wasm)
         run: cargo build --workspace --target wasm32-unknown-unknown --release

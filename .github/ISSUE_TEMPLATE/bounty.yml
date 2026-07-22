@@ -1,0 +1,54 @@
+name: Bounty
+description: Create a structured bounty issue with rewards and criteria
+labels: [bounty]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for creating a bounty issue. Please fill in the details below to help contributors pick up and complete the task.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Provide a clear description of the issue or feature request.
+      placeholder: Describe the goal, problem, and any necessary context.
+    validations:
+      required: true
+  - type: dropdown
+    id: reward_tier
+    attributes:
+      label: Reward Tier
+      description: Select the reward tier for this bounty.
+      options:
+        - "Tier 1: Starter ($50 - $150)"
+        - "Tier 2: Intermediate ($150 - $400)"
+        - "Tier 3: Advanced ($400 - $1000)"
+        - "Tier 4: Expert ($1000+)"
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Time-box
+      description: Specify the time limit or expected duration for the task (e.g., 3 days, 1 week).
+      placeholder: e.g. 5 days (leave blank if not applicable)
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: List the specific requirements that must be met to claim the bounty.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Automated tests covering the changes
+    validations:
+      required: true
+  - type: textarea
+    id: resources
+    attributes:
+      label: Resources & Context
+      description: Links to files, documentation, or discussion threads.
+      placeholder: e.g., Link to codebase location, relevant issue, design mocks, etc.
+    validations:
+      required: false
