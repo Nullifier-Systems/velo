@@ -30,7 +30,7 @@ vi.mock("@stellar/stellar-sdk/rpc", async (importOriginal) => {
   };
 });
 
-import { Account, Asset, Keypair, Operation, StrKey } from "@stellar/stellar-sdk";
+import { Account, Asset, Keypair, Operation, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
 import { Api } from "@stellar/stellar-sdk/rpc";
 import { lockEscrow, submitSignedTransaction, type StellarLogger } from "./stellar.js";
 

@@ -210,7 +210,7 @@ async function invokeContract(
     stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
     // Conditionally use fee-bump if sponsor is configured
-    let txToSubmit = prepared;
+    let txToSubmit: Transaction | FeeBumpTransaction = prepared;
     if (process.env.SPONSOR_SECRET_KEY) {
         const sponsor = loadSponsorKeypair();
         const innerFee = parseInt(prepared.fee, 10);
