@@ -118,7 +118,7 @@
     "title": "Register as a Provider",
     "subtitle": "Offer cash liquidity to nearby Velo users",
     "successTitle": "Registered Successfully!",
-    "successDescription": "Your cash provision location is now active and ready in the table.",
+    "successDescription": "Your registration and identity document were submitted for manual review. You will appear in matching after approval.",
     "stellarAddress": "Stellar Wallet Address (G...)",
     "businessName": "Business / Provider Name",
     "businessNamePlaceholder": "Farmacia Guadalupe",
@@ -138,7 +138,12 @@
     "invalidLatitude": "Latitude must be a valid number between -90 and 90.",
     "invalidLongitude": "Longitude must be a valid number between -180 and 180.",
     "invalidRate": "Exchange rate must be a reasonable number between 0.01 and 100.0.",
-    "registrationFailed": "Registration failed"
+    "registrationFailed": "Registration failed",
+    "verificationDocument": "Identity verification document",
+    "verificationDocumentHelp": "Upload a clear JPEG, PNG, or WebP image (maximum 5 MB). It is private and reviewed only by administrators.",
+    "verificationDocumentRequired": "An identity verification document is required.",
+    "invalidVerificationDocument": "The document must be a JPEG, PNG, or WebP image no larger than 5 MB.",
+    "documentUploadFailed": "Registration was created, but the verification document upload failed. Please try uploading it again."
   },
   "status": {
     "title": "Velo Status",

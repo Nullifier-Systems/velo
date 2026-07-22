@@ -75,6 +75,19 @@ export function getProviderByAddress(stellarAddress: string): ProviderRecord | u
     return undefined;
 }
 
+export function getProviderById(id: string): ProviderRecord | undefined {
+    return providersStore.get(id);
+}
+
+export function setProviderVerificationStatus(
+    id: string,
+    status: ProviderRecord["kycStatus"]
+): ProviderRecord | undefined {
+    const record = providersStore.get(id);
+    if (record) record.kycStatus = status;
+    return record;
+}
+
 export function countProvidersByNetwork(ipAddress?: string, deviceId?: string): number {
     let count = 0;
     for (const record of providersStore.values()) {

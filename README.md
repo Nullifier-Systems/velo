@@ -105,6 +105,16 @@ For a complete end-to-end worked example, see [examples/telegram_bot.js](example
 
 The mobile experience is intentionally lightweight and QR-centric. It allows a user to claim or complete a payment flow without requiring a full wallet-native experience at the first step.
 
+## Provider Identity Verification
+
+Provider onboarding uses a lightweight manual-review workflow rather than a full KYC service:
+
+1. `POST /api/v1/provider/register` creates the provider with verification status `pending`.
+2. The registration UI immediately uploads one private identity-document image to `POST /api/v1/provider/verification-document`. JPEG, PNG, and WebP files up to 5 MB are accepted and checked against their file signatures.
+3. An operator authenticated with `x-admin-api-key` reviews submissions through `GET /api/v1/admin/providers/verifications`, retrieves a private document through `GET /api/v1/admin/providers/:providerId/verifications/:documentId`, and records a decision with `POST /api/v1/admin/providers/:id/verification` using `{"status":"approved"}` or `{"status":"rejected"}`.
+
+The states are `pending` (awaiting review), `approved` (eligible for public directory and default cash matching), and `rejected` (not eligible; a new document submission returns the provider to `pending`). Verification documents are never returned by public provider APIs. Deployments using PostgreSQL must apply migration `007_add_provider_verification.sql`; operators should restrict database and admin-endpoint access because uploaded identity images are sensitive.
+
 ## Installation
 
 ### Prerequisites

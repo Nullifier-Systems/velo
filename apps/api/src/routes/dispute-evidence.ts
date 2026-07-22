@@ -51,9 +51,11 @@ function hasValidImageSignature(contentType: string, data: Buffer): boolean {
 
 export async function disputeEvidenceRoutes(app: FastifyInstance) {
   for (const contentType of ALLOWED_EVIDENCE_TYPES) {
-    app.addContentTypeParser(contentType, { parseAs: "buffer", bodyLimit: MAX_EVIDENCE_BYTES }, (_request, body, done) => {
-      done(null, body);
-    });
+    if (!app.hasContentTypeParser(contentType)) {
+      app.addContentTypeParser(contentType, { parseAs: "buffer", bodyLimit: MAX_EVIDENCE_BYTES }, (_request, body, done) => {
+        done(null, body);
+      });
+    }
   }
 
   app.post<{ Params: { id: string }; Headers: EvidenceHeaders; Body: Buffer }>(
