@@ -59,7 +59,12 @@
     "releasing": "Releasing...",
     "confirmHandoff": "Confirm hand-off (release funds)",
     "releaseFailed": "release failed",
-    "somethingWentWrong": "something went wrong"
+    "somethingWentWrong": "something went wrong",
+    "waitNormal": "Locking escrow on Stellar…",
+    "waitLonger": "Taking a bit longer than usual — the RPC node may be busy. Your funds are safe.",
+    "waitStill": "Still working. The transaction has been submitted; we're waiting for on-chain confirmation.",
+    "waitCheckBack": "This is taking unusually long. You can safely close this page and check back in a few minutes — if the transaction landed, the status will update automatically.",
+    "waitElapsed": "{{seconds}}s elapsed"
   },
   "chat": {
     "noTradeId": "No trade ID specified.",

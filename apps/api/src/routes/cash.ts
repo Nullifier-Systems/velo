@@ -12,6 +12,7 @@ import {
   submitRefundTx,
   NETWORK_PASSPHRASE,
 } from "../lib/stellar.js";
+import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
@@ -256,11 +257,20 @@ export async function cashRoutes(app: FastifyInstance) {
           });
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
-          reply.code(502).send({
-            error: "escrow lock failed",
-            detail: String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({
+              error: "escrow lock failed",
+              detail: String(err),
+              stack: err instanceof Error ? err.stack : undefined,
+            });
+          }
           return;
         }
 
@@ -390,11 +400,20 @@ export async function cashRoutes(app: FastifyInstance) {
         });
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
-        reply.code(502).send({
-          error: "escrow lock failed",
-          detail: String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-        });
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply.code(502).send({
+            error: "escrow lock failed",
+            detail: String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
         return;
       }
 
@@ -627,7 +646,16 @@ export async function cashRoutes(app: FastifyInstance) {
             return { id: record.id, status: "released" };
           }
           req.log.error(err, "releaseEscrow failed");
-          reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          }
           return;
         }
       } else {
@@ -694,7 +722,16 @@ export async function cashRoutes(app: FastifyInstance) {
             return { id: record.id, status: "refunded" };
           }
           req.log.error(err, "refundEscrow failed");
-          reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          }
           return;
         }
       }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
 import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
+import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { getCashRequest, saveProvider } from "../lib/store.js";
@@ -585,5 +586,150 @@ describe("cashRoutes", () => {
       expect(releaseRes.statusCode).toBe(502);
       expect(releaseRes.json()).toMatchObject({ error: "escrow release failed" });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RPC timeout → 504 response tests
+// ---------------------------------------------------------------------------
+describe("cashRoutes — RPC timeout surfaces as 504", () => {
+  let app: any;
+
+  const registerApp = (a: any) => {
+    a.decorate("requirePayment", async (_req: any, _reply: any) => true);
+    a.register(cashRoutes, { prefix: "/api/v1" });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    app = Fastify();
+    registerApp(app);
+  });
+
+  it("POST /cash/request returns 504 with error=rpc_timeout when lockEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("lock/buildSim", 15_003),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+      },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({
+      error: "rpc_timeout",
+      operation: "lock/buildSim",
+      elapsed_ms: 15_003,
+    });
+  });
+
+  it("POST /cash/request/prepare (custodial) returns 504 when lockEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("lock/poll", 45_001),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request/prepare",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "b".repeat(64),
+        mode: "custodial",
+      },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "lock/poll" });
+  });
+
+  it("POST /cash/request/:id/release returns 504 when releaseEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(undefined);
+
+    // Create a locked trade first
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "c".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(releaseEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("release/poll", 30_002),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "d".repeat(64) },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "release/poll" });
+  });
+
+  it("POST /cash/request/:id/refund returns 504 when refundEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(undefined);
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "e".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(refundEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("refund/buildSim", 10_001),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/refund`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "refund/buildSim" });
+  });
+
+  it("non-timeout errors still produce 502 for lock", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(new Error("host function trap"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "f".repeat(64),
+      },
+    });
+
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: "escrow lock failed" });
   });
 });

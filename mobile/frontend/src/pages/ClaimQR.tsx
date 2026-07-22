@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
@@ -14,6 +14,12 @@ import './ClaimQR.css';
 
 const POLL_INTERVAL_MS = 4000;
 
+// Progressive wait thresholds (milliseconds).  These mirror the backend's
+// RPC_TIMEOUTS policy — see docs/rpc-resilience.md.
+const WAIT_LONGER_MS  =  5_000;   // "taking longer than expected"
+const WAIT_STILL_MS   = 15_000;   // "still working"
+const WAIT_CHECK_BACK = 30_000;   // "check back later"
+
 const CheckIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: "text-bottom"}}><polyline points="20 6 9 17 4 12"></polyline></svg>
 );
@@ -21,6 +27,44 @@ const CheckIcon = () => (
 const LockIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 8}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
 );
+
+/** Shows a contextual message that escalates as `elapsedMs` grows. */
+function WaitingBanner({ elapsedMs }: { elapsedMs: number }) {
+  const { t } = useTranslation();
+
+  let message: string;
+  let level: "info" | "warn" | "critical";
+
+  if (elapsedMs >= WAIT_CHECK_BACK) {
+    message = t("claim.waitCheckBack");
+    level = "critical";
+  } else if (elapsedMs >= WAIT_STILL_MS) {
+    message = t("claim.waitStill");
+    level = "warn";
+  } else if (elapsedMs >= WAIT_LONGER_MS) {
+    message = t("claim.waitLonger");
+    level = "warn";
+  } else {
+    message = t("claim.waitNormal");
+    level = "info";
+  }
+
+  const seconds = Math.floor(elapsedMs / 1000);
+
+  return (
+    <div
+      className={`claim-wait-banner claim-wait-banner--${level}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span className="claim-wait-banner__message">{message}</span>
+      <span className="claim-wait-banner__elapsed">
+        {t("claim.waitElapsed", { seconds })}
+      </span>
+    </div>
+  );
+}
 
 export default function ClaimQR() {
   const { t } = useTranslation();
@@ -31,6 +75,9 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [releaseElapsed, setReleaseElapsed] = useState(0);
+  const releaseStartRef = useRef<number | null>(null);
+  const releaseTickRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -278,11 +325,19 @@ export default function ClaimQR() {
         {import.meta.env.DEV && status.status === 'locked' && secret && (
           <details className="claim-ticket__debug">
             <summary>{t("claim.debugTitle")}</summary>
+            {releasing && <WaitingBanner elapsedMs={releaseElapsed} />}
             <button
               className="claim-ticket__debug-button"
               disabled={releasing}
               onClick={async () => {
                 setReleasing(true);
+                setReleaseElapsed(0);
+                releaseStartRef.current = Date.now();
+                releaseTickRef.current = setInterval(() => {
+                  if (releaseStartRef.current !== null) {
+                    setReleaseElapsed(Date.now() - releaseStartRef.current);
+                  }
+                }, 500);
                 try {
                   await releaseCashRequest(status.id, secret);
                   await load();
@@ -290,6 +345,12 @@ export default function ClaimQR() {
                   setError(err instanceof Error ? err.message : t("claim.releaseFailed"));
                 } finally {
                   setReleasing(false);
+                  if (releaseTickRef.current) {
+                    clearInterval(releaseTickRef.current);
+                    releaseTickRef.current = null;
+                  }
+                  releaseStartRef.current = null;
+                  setReleaseElapsed(0);
                 }
               }}
             >
