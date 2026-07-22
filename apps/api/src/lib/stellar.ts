@@ -11,6 +11,8 @@ import {
     xdr,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
+export { RpcTimeoutError } from "./rpc-errors.js";
+import { RpcTimeoutError } from "./rpc-errors.js";
 
 export interface StellarLogger {
     info: (obj: Record<string, unknown>, msg?: string) => void;
@@ -27,6 +29,59 @@ const noopLogger: StellarLogger = {
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const IS_PUBLIC = process.env.STELLAR_NETWORK === "PUBLIC";
 const RPC_ALLOW_HTTP = RPC_URL.startsWith("http://");
+
+// ---------------------------------------------------------------------------
+// Timeout primitives
+// ---------------------------------------------------------------------------
+
+/**
+ * Races `fn()` against a deadline timer.  If the deadline fires first,
+ * the returned promise rejects with an `RpcTimeoutError`; the underlying
+ * promise is left to settle on its own (fire-and-forget semantics — we
+ * cannot cancel the Stellar SDK's in-flight fetch).
+ *
+ * @param operation  Label used in the error message / logs.
+ * @param timeoutMs  Maximum wait time in milliseconds.
+ * @param fn         Async factory; called immediately.
+ */
+export async function rpcTimeout<T>(
+    operation: string,
+    timeoutMs: number,
+    fn: () => Promise<T>,
+): Promise<T> {
+    const start = Date.now();
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new RpcTimeoutError(operation, Date.now() - start));
+        }, timeoutMs);
+
+        fn().then(
+            (value) => { clearTimeout(timer); resolve(value); },
+            (err)   => { clearTimeout(timer); reject(err); },
+        );
+    });
+}
+
+// Per-operation timeout budgets (milliseconds).
+// These are deliberate policy choices — see docs/rpc-resilience.md.
+export const RPC_TIMEOUTS = {
+    /** getAccount + simulateTransaction for a lock() call. */
+    lockBuildSim:    15_000,
+    /** Poll loop waiting for a lock tx to be confirmed on-chain. */
+    lockPoll:        45_000,
+    /** getAccount + simulateTransaction for a release() or refund() call. */
+    releaseBuildSim: 10_000,
+    /** Poll loop for release/refund confirmation. */
+    releasePoll:     30_000,
+    /** getAccount + simulateTransaction for a refund() call. */
+    refundBuildSim:  10_000,
+    /** Poll loop for refund confirmation. */
+    refundPoll:      30_000,
+    /** Generic build+simulate budget used by non-custodial helpers. */
+    genericBuildSim: 15_000,
+    /** Generic poll budget used by submitSignedEnvelope. */
+    genericPoll:     30_000,
+} as const;
 
 export const NETWORK_PASSPHRASE = IS_PUBLIC ? Networks.PUBLIC : Networks.TESTNET;
 export const server = new Server(RPC_URL, { allowHttp: RPC_ALLOW_HTTP });
@@ -122,55 +177,60 @@ async function buildUnsignedTx(
     functionName: string,
     args: xdr.ScVal[],
     source: string,
+    buildSimTimeoutMs: number = RPC_TIMEOUTS.genericBuildSim,
 ): Promise<BuildTxResult> {
-    const sourceAccount = await server.getAccount(source);
-    const tx = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: contractId,
-                function: functionName,
-                args,
-            })
-        )
-        .setTimeout(30)
-        .build();
+    return rpcTimeout(`${functionName}/buildUnsignedTx`, buildSimTimeoutMs, async () => {
+        const sourceAccount = await server.getAccount(source);
+        const tx = new TransactionBuilder(sourceAccount, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: contractId,
+                    function: functionName,
+                    args,
+                })
+            )
+            .setTimeout(30)
+            .build();
 
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            throw new Error(`simulation failed: ${sim.error}`);
+        }
 
-    const prepared = assembleTransaction(tx, sim).build();
-    return { unsignedXdr: prepared.toXDR() };
+        const prepared = assembleTransaction(tx, sim).build();
+        return { unsignedXdr: prepared.toXDR() };
+    });
 }
 
 /**
  * Submits a pre-signed envelope (returned by the client after signing
  * the unsigned XDR from buildUnsignedTx) and polls for confirmation.
  */
-async function submitSignedEnvelope(signedXdr: string): Promise<{ hash: string }> {
+async function submitSignedEnvelope(
+    signedXdr: string,
+    pollTimeoutMs: number = RPC_TIMEOUTS.genericPoll,
+): Promise<{ hash: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
     const txToSubmit = wrapWithFeeBumpIfPossible(tx);
     const hash = (await server.sendTransaction(txToSubmit)).hash;
 
     const start = Date.now();
-    for (;;) {
-        if (Date.now() - start > 30_000) {
-            throw new Error(`timed out waiting for tx ${hash} to confirm`);
+    return rpcTimeout(`submitSignedEnvelope/poll`, pollTimeoutMs, async () => {
+        for (;;) {
+            const result = await server.getTransaction(hash);
+            if (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+                await new Promise((r) => setTimeout(r, 1500));
+                continue;
+            }
+            if (result.status !== Api.GetTransactionStatus.SUCCESS) {
+                throw new Error(`tx ${hash} failed with status ${result.status}`);
+            }
+            return { hash };
         }
-        const result = await server.getTransaction(hash);
-        if (result.status === Api.GetTransactionStatus.NOT_FOUND) {
-            await new Promise((r) => setTimeout(r, 1500));
-            continue;
-        }
-        if (result.status !== Api.GetTransactionStatus.SUCCESS) {
-            throw new Error(`tx ${hash} failed with status ${result.status}`);
-        }
-        return { hash };
-    }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -183,38 +243,49 @@ async function invokeContract(
     args: xdr.ScVal[],
     signer: Keypair,
     logger: StellarLogger = noopLogger,
+    buildSimTimeoutMs: number = RPC_TIMEOUTS.genericBuildSim,
+    pollTimeoutMs: number = RPC_TIMEOUTS.genericPoll,
 ): Promise<unknown> {
     const stageLog = logger.child({ contract: contractId, fn: functionName });
 
+    // ---- build + simulate (time-bounded) -----------------------------------
     stageLog.info({ stage: "build", signer: signer.publicKey() }, "building contract invocation");
-    const account = await server.getAccount(signer.publicKey());
-    const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: contractId,
-                function: functionName,
-                args,
+
+    const { prepared, txHash } = await rpcTimeout(
+        `${functionName}/buildSim`,
+        buildSimTimeoutMs,
+        async () => {
+            const account = await server.getAccount(signer.publicKey());
+            const tx = new TransactionBuilder(account, {
+                fee: BASE_FEE,
+                networkPassphrase: NETWORK_PASSPHRASE,
             })
-        )
-        .setTimeout(30)
-        .build();
+                .addOperation(
+                    Operation.invokeContractFunction({
+                        contract: contractId,
+                        function: functionName,
+                        args,
+                    })
+                )
+                .setTimeout(30)
+                .build();
 
-    stageLog.info({ stage: "simulate" }, "simulating transaction");
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        stageLog.error({ stage: "simulate", error: sim.error }, "simulation failed");
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
+            stageLog.info({ stage: "simulate" }, "simulating transaction");
+            const sim = await server.simulateTransaction(tx);
+            if (Api.isSimulationError(sim)) {
+                stageLog.error({ stage: "simulate", error: sim.error }, "simulation failed");
+                throw new Error(`simulation failed: ${sim.error}`);
+            }
 
-    const prepared = assembleTransaction(tx, sim).build() as Transaction;
-    prepared.sign(signer);
-    const txHash = prepared.hash().toString("hex");
-    stageLog.info({ stage: "sign", txHash }, "transaction signed");
+            const prepared = assembleTransaction(tx, sim).build() as Transaction;
+            prepared.sign(signer);
+            const txHash = prepared.hash().toString("hex");
+            stageLog.info({ stage: "sign", txHash }, "transaction signed");
+            return { prepared, txHash };
+        },
+    );
 
-    // Conditionally use fee-bump if sponsor is configured
+    // ---- fee-bump (optional) -----------------------------------------------
     let txToSubmit = prepared;
     if (process.env.SPONSOR_SECRET_KEY) {
         const sponsor = loadSponsorKeypair();
@@ -232,6 +303,7 @@ async function invokeContract(
         stageLog.info({ stage: "fee_bump", sponsor: sponsor.publicKey() }, "transaction fee-bumped");
     }
 
+    // ---- submit ------------------------------------------------------------
     const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         stageLog.error(
@@ -242,21 +314,31 @@ async function invokeContract(
     }
     stageLog.info({ stage: "submit", txHash, status: sendResult.status }, "transaction accepted");
 
-    let getResult = await server.getTransaction(sendResult.hash);
+    // ---- poll for confirmation (time-bounded) -------------------------------
     const start = Date.now();
     let attempts = 1;
-    while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
-        if (Date.now() - start > 30_000) {
+
+    const getResult = await rpcTimeout(
+        `${functionName}/poll`,
+        pollTimeoutMs,
+        async () => {
+            let result = await server.getTransaction(sendResult.hash);
+            while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+                await new Promise((r) => setTimeout(r, 1500));
+                result = await server.getTransaction(sendResult.hash);
+                attempts += 1;
+            }
+            return result;
+        },
+    ).catch((err) => {
+        if (err instanceof RpcTimeoutError) {
             stageLog.error(
-                { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
+                { stage: "poll", txHash, attempts, elapsedMs: err.elapsedMs },
                 "timed out waiting for confirmation"
             );
-            throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
         }
-        await new Promise((r) => setTimeout(r, 1500));
-        getResult = await server.getTransaction(sendResult.hash);
-        attempts += 1;
-    }
+        throw err;
+    });
 
     if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
         stageLog.error(
@@ -314,7 +396,12 @@ export async function submitLockTx(signedXdr: string): Promise<{ hash: string }>
 }
 
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
-export async function lockEscrow(params: LockParams, logger: StellarLogger = noopLogger) {
+export async function lockEscrow(
+    params: LockParams,
+    logger: StellarLogger = noopLogger,
+    buildSimTimeoutMs: number = RPC_TIMEOUTS.lockBuildSim,
+    pollTimeoutMs: number = RPC_TIMEOUTS.lockPoll,
+) {
     const signer = loadSignerKeypair();
     const result = await invokeContract(
         params.contractId,
@@ -329,6 +416,8 @@ export async function lockEscrow(params: LockParams, logger: StellarLogger = noo
         ],
         signer,
         logger,
+        buildSimTimeoutMs,
+        pollTimeoutMs,
     );
     return (result as { ledger: number }).ledger;
 }
@@ -339,36 +428,38 @@ export async function lockEscrow(params: LockParams, logger: StellarLogger = noo
  */
 export async function buildLockEscrowTransaction(params: LockParams): Promise<string> {
     const signerPublicKey = params.signerPublicKey || loadSignerKeypair().publicKey();
-    const account = await server.getAccount(signerPublicKey);
+    return rpcTimeout("lock/buildLockEscrowTransaction", RPC_TIMEOUTS.lockBuildSim, async () => {
+        const account = await server.getAccount(signerPublicKey);
 
-    const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: params.contractId,
-                function: "lock",
-                args: [
-                    hexToBytesScVal(params.tradeId),
-                    nativeToScVal(params.seller, { type: "address" }),
-                    nativeToScVal(params.buyer, { type: "address" }),
-                    nativeToScVal(params.amountStroops, { type: "i128" }),
-                    hexToBytesScVal(params.secretHashHex),
-                    nativeToScVal(params.timeoutLedgers, { type: "u32" }),
-                ],
-            })
-        )
-        .setTimeout(30)
-        .build();
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: params.contractId,
+                    function: "lock",
+                    args: [
+                        hexToBytesScVal(params.tradeId),
+                        nativeToScVal(params.seller, { type: "address" }),
+                        nativeToScVal(params.buyer, { type: "address" }),
+                        nativeToScVal(params.amountStroops, { type: "i128" }),
+                        hexToBytesScVal(params.secretHashHex),
+                        nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+                    ],
+                })
+            )
+            .setTimeout(30)
+            .build();
 
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            throw new Error(`simulation failed: ${sim.error}`);
+        }
 
-    const prepared = assembleTransaction(tx, sim).build();
-    return prepared.toXDR();
+        const prepared = assembleTransaction(tx, sim).build();
+        return prepared.toXDR();
+    });
 }
 
 export interface ReleaseParams {
@@ -393,13 +484,21 @@ export async function submitReleaseTx(signedXdr: string): Promise<{ hash: string
 }
 
 /** Testnet-only: custodial release (API signs). */
-export async function releaseEscrow(params: ReleaseParams) {
+export async function releaseEscrow(
+    params: ReleaseParams,
+    logger: StellarLogger = noopLogger,
+    buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
+    pollTimeoutMs: number = RPC_TIMEOUTS.releasePoll,
+) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
         "release",
         [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
         signer,
+        logger,
+        buildSimTimeoutMs,
+        pollTimeoutMs,
     );
 }
 
@@ -409,29 +508,31 @@ export async function releaseEscrow(params: ReleaseParams) {
  */
 export async function buildReleaseEscrowTransaction(params: ReleaseParams & { signerPublicKey?: string }): Promise<string> {
     const signerPublicKey = params.signerPublicKey || loadSignerKeypair().publicKey();
-    const account = await server.getAccount(signerPublicKey);
+    return rpcTimeout("release/buildReleaseEscrowTransaction", RPC_TIMEOUTS.releaseBuildSim, async () => {
+        const account = await server.getAccount(signerPublicKey);
 
-    const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: params.contractId,
-                function: "release",
-                args: [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
-            })
-        )
-        .setTimeout(30)
-        .build();
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: params.contractId,
+                    function: "release",
+                    args: [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
+                })
+            )
+            .setTimeout(30)
+            .build();
 
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            throw new Error(`simulation failed: ${sim.error}`);
+        }
 
-    const prepared = assembleTransaction(tx, sim).build();
-    return prepared.toXDR();
+        const prepared = assembleTransaction(tx, sim).build();
+        return prepared.toXDR();
+    });
 }
 
 export interface RefundParams {
@@ -455,13 +556,21 @@ export async function submitRefundTx(signedXdr: string): Promise<{ hash: string 
 }
 
 /** Testnet-only: custodial refund (API signs). */
-export async function refundEscrow(params: RefundParams) {
+export async function refundEscrow(
+    params: RefundParams,
+    logger: StellarLogger = noopLogger,
+    buildSimTimeoutMs: number = RPC_TIMEOUTS.refundBuildSim,
+    pollTimeoutMs: number = RPC_TIMEOUTS.refundPoll,
+) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
         "refund",
         [hexToBytesScVal(params.tradeId)],
         signer,
+        logger,
+        buildSimTimeoutMs,
+        pollTimeoutMs,
     );
 }
 
@@ -561,15 +670,18 @@ export async function submitSignedTransaction(signedXdr: string): Promise<{ hash
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
 
-    let getResult = await server.getTransaction(sendResult.hash);
-    const start = Date.now();
-    while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
-        if (Date.now() - start > 30_000) {
-            throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
-        }
-        await new Promise((r) => setTimeout(r, 1500));
-        getResult = await server.getTransaction(sendResult.hash);
-    }
+    const getResult = await rpcTimeout(
+        "submitSignedTransaction/poll",
+        RPC_TIMEOUTS.genericPoll,
+        async () => {
+            let result = await server.getTransaction(sendResult.hash);
+            while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+                await new Promise((r) => setTimeout(r, 1500));
+                result = await server.getTransaction(sendResult.hash);
+            }
+            return result;
+        },
+    );
 
     if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
         throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);

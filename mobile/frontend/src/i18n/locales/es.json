@@ -62,7 +62,12 @@
     "releasing": "Liberando...",
     "confirmHandoff": "Confirmar entrega (liberar fondos)",
     "releaseFailed": "error al liberar",
-    "somethingWentWrong": "algo salió mal"
+    "somethingWentWrong": "algo salió mal",
+    "waitNormal": "Bloqueando fondos en Stellar…",
+    "waitLonger": "Está tardando un poco más de lo habitual — el nodo RPC puede estar ocupado. Tus fondos están seguros.",
+    "waitStill": "Seguimos trabajando. La transacción fue enviada; estamos esperando confirmación en la cadena.",
+    "waitCheckBack": "Esto está tardando más de lo esperado. Puedes cerrar esta página con seguridad y volver en unos minutos — si la transacción se confirmó, el estado se actualizará automáticamente.",
+    "waitElapsed": "{{seconds}}s transcurridos"
   },
   "chat": {
     "noTradeId": "No se especificó un ID de comercio.",
