@@ -39,7 +39,7 @@ pub enum Error {
     TimeoutNotReached = 7,
     InvalidAmount = 8,
     InvalidTimeout = 9,
-    Unauthorized = 15,
+    Unauthorized = 10,
     TimeoutReached = 11,
     TradeNotDisputed = 12,
     InvalidFee = 13,
