@@ -31,6 +31,11 @@ const RPC_ALLOW_HTTP = RPC_URL.startsWith("http://");
 export const NETWORK_PASSPHRASE = IS_PUBLIC ? Networks.PUBLIC : Networks.TESTNET;
 export const server = new Server(RPC_URL, { allowHttp: RPC_ALLOW_HTTP });
 
+/** Return the latest closed ledger sequence for timeout bookkeeping. */
+export async function getLatestLedgerSequence(): Promise<number> {
+    return (await server.getLatestLedger()).sequence;
+}
+
 /**
  * Loads the deployer/buyer keypair — testnet-only.
  *
@@ -265,7 +270,10 @@ async function invokeContract(
         { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
         "transaction confirmed"
     );
-    return getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
+    return {
+        returnValue: getResult.returnValue ? scValToNative(getResult.returnValue) : undefined,
+        ledger: getResult.ledger,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +316,7 @@ export async function submitLockTx(signedXdr: string): Promise<{ hash: string }>
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
 export async function lockEscrow(params: LockParams, logger: StellarLogger = noopLogger) {
     const signer = loadSignerKeypair();
-    return invokeContract(
+    const result = await invokeContract(
         params.contractId,
         "lock",
         [
@@ -322,6 +330,7 @@ export async function lockEscrow(params: LockParams, logger: StellarLogger = noo
         signer,
         logger,
     );
+    return (result as { ledger: number }).ledger;
 }
 
 /**
@@ -544,7 +553,7 @@ export async function resolveEscrow(params: ResolveParams) {
  * Submits a signed transaction XDR to the Stellar network.
  * Waits for transaction confirmation and returns the result.
  */
-export async function submitSignedTransaction(signedXdr: string): Promise<{ hash: string; status: string }> {
+export async function submitSignedTransaction(signedXdr: string): Promise<{ hash: string; status: string; ledger: number }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
     const txToSubmit = wrapWithFeeBumpIfPossible(tx);
     const sendResult = await server.sendTransaction(txToSubmit);
@@ -566,5 +575,5 @@ export async function submitSignedTransaction(signedXdr: string): Promise<{ hash
         throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
     }
 
-    return { hash: sendResult.hash, status: getResult.status };
+    return { hash: sendResult.hash, status: getResult.status, ledger: getResult.ledger };
 }

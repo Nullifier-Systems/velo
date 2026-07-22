@@ -86,6 +86,7 @@ export default function ClaimQR() {
 
   const statusLabel = (s: CashRequestStatus["status"]): string => {
     if (s === "locked") return t("claim.statusReady");
+    if (s === "expired") return t("claim.statusExpired");
     if (s === "released") return t("claim.statusCompleted");
     return t("claim.statusRefunded");
   };
@@ -224,6 +225,12 @@ export default function ClaimQR() {
               <strong>{t("claim.claimCompleted")}</strong>
               <br />
               {t("claim.fundsReleased")}
+            </p>
+          ) : status.status === 'expired' ? (
+            <p className="claim-ticket__instruction">
+              <strong>{t("claim.claimExpired")}</strong>
+              <br />
+              {t("claim.refundRequired")}
             </p>
           ) : (
             <p className="claim-ticket__instruction">
