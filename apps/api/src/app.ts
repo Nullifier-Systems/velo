@@ -15,6 +15,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { statusRoutes } from "./routes/status.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
+import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
 
 const usedPayments = new Set<string>();
 
@@ -109,6 +110,16 @@ app.register(rateLimit, {
   global: true,
   max: 100,
   timeWindow: "1 minute",
+  onExceeded: (request, identifier) => {
+    recordRateLimitViolation(
+      {
+        identifier,
+        route: request.routeOptions.url ?? request.url.split("?", 1)[0],
+        method: request.method,
+      },
+      (app as any).pg,
+    );
+  },
   errorResponseBuilder: (request, context) => {
     const locale = (request as any).locale ?? "en";
     return {
