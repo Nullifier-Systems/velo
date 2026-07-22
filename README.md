@@ -65,6 +65,7 @@ flowchart LR
 - Fastify for service APIs
 - React + Vite for the mobile frontend
 - TurboRepo for workspace orchestration
+- Managed Redis for distributed trade-chat state and Pub/Sub
 - Stellar / Soroban for settlement infrastructure
 
 ## Soroban Smart Contracts
@@ -153,6 +154,14 @@ npm run dev:api
 npm run dev:backend
 npm run dev:frontend
 ```
+
+### Distributed WebSocket chat
+
+Trade chat requires a Redis-compatible managed service in deployed environments. Set `REDIS_URL` to its connection URL and set `CHAT_CAPABILITY_SECRET` to at least 32 random characters. Optional settings are `CHAT_CAPABILITY_TTL_SECONDS` (default `3600`) and `CHAT_HEARTBEAT_INTERVAL_MS` (default `30000`). Local development falls back to process-local state when `REDIS_URL` is absent; that fallback is not suitable for multi-instance deployments.
+
+The backend issues a short-lived capability bound to one `{tradeId, participant}` pair through the existing buyer claim and seller dashboard flows. The client presents it during the WebSocket handshake. The server verifies its signature and expiry, loads shared trade membership from Redis, and admits only the recorded buyer or seller. HTTP chat history and encryption-key routes require the same token as a Bearer credential.
+
+Each API instance subscribes to a Redis channel only while it owns connections for that trade. Ciphertext is persisted before publication, so clients reconnect with the last received message ID and replay anything missed. Server heartbeat pings remove dropped connections, while clients reconnect with bounded exponential backoff. Serverless deployments must support WebSocket upgrades and long-lived connections, permit outbound Redis connections, and use the same Redis database and capability secret on every instance.
 
 ## Running Tests
 

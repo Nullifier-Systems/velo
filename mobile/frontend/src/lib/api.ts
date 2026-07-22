@@ -42,8 +42,11 @@ export interface ChatMessage {
   createdAt: string;
 }
 
-export async function fetchChatHistory(tradeId: string, participant: string): Promise<{ messages: ChatMessage[] }> {
-  const res = await fetch(`${API_BASE}/api/v1/chat/${tradeId}/history?participant=${encodeURIComponent(participant)}`);
+export async function fetchChatHistory(tradeId: string, token: string, after?: string): Promise<{ messages: ChatMessage[] }> {
+  const suffix = after ? `?after=${encodeURIComponent(after)}` : "";
+  const res = await fetch(`${API_BASE}/api/v1/chat/${tradeId}/history${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) throw new Error("chat history failed");
   return res.json();
 }
@@ -53,12 +56,12 @@ export interface KeyEntry {
   updatedAt: string;
 }
 
-export async function publishChatKey(tradeId: string, participant: string, publicKey: string): Promise<KeyEntry> {
+export async function publishChatKey(tradeId: string, token: string, publicKey: string): Promise<KeyEntry> {
   const res = await fetch(
-    `${API_BASE}/api/v1/chat/${tradeId}/keys?participant=${encodeURIComponent(participant)}`,
+    `${API_BASE}/api/v1/chat/${tradeId}/keys`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ publicKey }),
     }
   );
@@ -90,4 +93,3 @@ export async function fetchStatus(): Promise<StatusResponse> {
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
 }
-

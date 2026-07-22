@@ -27,6 +27,7 @@ export default function ClaimQR() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const secret = searchParams.get('secret');
+  const chatToken = searchParams.get('chatToken') ?? "";
 
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -259,12 +260,12 @@ export default function ClaimQR() {
         {status.status === "locked" && (
           <div className="claim-ticket__actions">
             <a
-              href={`/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}`}
+              href={`/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`}
               className="claim-ticket__chat-link"
               onClick={(e) => {
                 e.preventDefault();
                 window.open(
-                  `/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}`,
+                  `/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`,
                   "chat",
                   "width=460,height=700"
                 );

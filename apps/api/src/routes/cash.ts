@@ -21,6 +21,8 @@ import { sendNotification } from "../lib/notification.js";
 import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
 import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash.js";
 import { t } from "../lib/i18n.js";
+import { issueChatCapability } from "../lib/chat-capability.js";
+import { registerTradeForChat } from "../lib/chat-infrastructure.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -280,10 +282,12 @@ export async function cashRoutes(app: FastifyInstance) {
           notificationType: notification_type,
           contactInfo: contact_info,
         });
+        await registerTradeForChat(getCashRequest(tradeId)!);
 
         reply.code(201).send({
           // The secret is held client-side and is NOT returned by the API
           claim_url: `${baseUrl}/claim/${tradeId}`,
+          chat_token: issueChatCapability(tradeId, buyer),
           qr_payload: qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -314,6 +318,7 @@ export async function cashRoutes(app: FastifyInstance) {
             notificationType: notification_type,
             contactInfo: contact_info,
           });
+          await registerTradeForChat(getCashRequest(tradeId)!);
 
           reply.code(201).send({
             request_id: tradeId,
@@ -321,6 +326,7 @@ export async function cashRoutes(app: FastifyInstance) {
             network_passphrase: NETWORK_PASSPHRASE,
             submit_url: `/api/v1/cash/request/${tradeId}/submit`,
             claim_url: `${baseUrl}/claim/${tradeId}`,
+            chat_token: issueChatCapability(tradeId, buyer),
             qr_payload: qrPayload,
             instructions: t(locale, "instructions.signAndSubmit"),
           });
@@ -415,11 +421,13 @@ export async function cashRoutes(app: FastifyInstance) {
         notificationType: notification_type,
         contactInfo: contact_info,
       });
+      await registerTradeForChat(getCashRequest(tradeId)!);
 
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       const locale = (req as any).locale ?? "en";
       reply.code(201).send({
         claim_url: `${baseUrl}/claim/${tradeId}`,
+        chat_token: issueChatCapability(tradeId, buyer),
         qr_payload: qrPayload,
         instructions: t(locale, "instructions.showQR"),
       });
@@ -506,6 +514,7 @@ export async function cashRoutes(app: FastifyInstance) {
           status: "locked",
           transaction_hash: null,
           claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
           qr_payload: record.qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -533,6 +542,7 @@ export async function cashRoutes(app: FastifyInstance) {
           status: "locked",
           transaction_hash: result.hash,
           claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
           qr_payload: record.qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -546,6 +556,7 @@ export async function cashRoutes(app: FastifyInstance) {
             status: "locked",
             transaction_hash: null,
             claim_url: `${baseUrl}/claim/${record.id}`,
+            chat_token: issueChatCapability(record.id, record.buyer),
             qr_payload: record.qrPayload,
             instructions: t(locale, "instructions.showQR"),
           });
@@ -638,7 +649,7 @@ export async function cashRoutes(app: FastifyInstance) {
       }
 
       updateStatus(record.id, "released");
-      notifyTradeStatus(record.id, "released");
+      await notifyTradeStatus(record.id, "released");
       await sendNotification(record, "released", (req as any).locale ?? "en");
       return { id: record.id, status: "released" };
     }
@@ -702,7 +713,7 @@ export async function cashRoutes(app: FastifyInstance) {
       }
 
       updateStatus(record.id, "refunded");
-      notifyTradeStatus(record.id, "refunded");
+      await notifyTradeStatus(record.id, "refunded");
       await sendNotification(record, "refunded", (req as any).locale ?? "en");
 
       sendRefundAlert({
