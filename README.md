@@ -166,9 +166,18 @@ Each API instance subscribes to a Redis channel only while it owns connections f
 ## Running Tests
 
 ```bash
+npm run localization:check
 npm run test
 cd contracts && cargo test --workspace
 ```
+
+When adding user-facing text, add matching keys to the English and Spanish
+catalogs under `mobile/frontend/src/i18n/locales/` (or
+`apps/api/src/i18n/locales/` for API messages) and render the text through the
+project's translation helper. `npm run localization:check` mirrors CI and fails
+on unmatched catalog keys or placeholders, unknown translation keys, and newly
+hardcoded frontend text. See [CONTRIBUTING.md](CONTRIBUTING.md#localization) for
+the full contributor workflow.
 
 ## Repository Structure
 
