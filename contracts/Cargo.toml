@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "htlc-core",
     "escrow",
-    "atomic-swap",
+    "atomic-swap", "soroban-lint",
 ]
 
 [workspace.dependencies]

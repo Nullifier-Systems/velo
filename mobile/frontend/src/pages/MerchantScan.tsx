@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Html5Qrcode } from "html5-qrcode";
+import { useTranslation } from "react-i18next";
+import QrScanner from "qr-scanner";
+import LanguageSwitcher from "../components/LanguageSwitcher.js";
 import {
   fetchCashRequest,
   releaseCashRequest,
@@ -11,6 +13,7 @@ import {
 import "./MerchantScan.css";
 
 export default function MerchantScan() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [scanning, setScanning] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +22,10 @@ export default function MerchantScan() {
   const [releasing, setReleasing] = useState(false);
   const [scannedData, setScannedData] = useState<{ id: string; secret: string } | null>(null);
   const [claimDetails, setClaimDetails] = useState<CashRequestStatus | null>(null);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [manualCode, setManualCode] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerRef = useRef<any | null>(null);
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -38,72 +44,80 @@ export default function MerchantScan() {
     localStorage.setItem("velo-theme", nextTheme);
   };
 
+  const processDecodedText = (decodedText: string) => {
+    try {
+      let urlObj: URL;
+      if (decodedText.startsWith("velo://")) {
+        urlObj = new URL(decodedText.replace("velo://", "https://"));
+      } else if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
+        urlObj = new URL(decodedText);
+      } else {
+        throw new Error(t("merchant.invalidQR"));
+      }
+
+      let requestId = urlObj.searchParams.get("request_id");
+      if (!requestId) {
+        const pathParts = urlObj.pathname.split("/");
+        requestId = pathParts[pathParts.length - 1];
+      }
+
+      const secret = urlObj.searchParams.get("secret");
+
+      if (!requestId || !secret) {
+        throw new Error(t("merchant.missingIdOrSecret"));
+      }
+
+      if (scannerRef.current) {
+        scannerRef.current.destroy();
+        scannerRef.current = null;
+      }
+      setScanning(false);
+      setScannedData({ id: requestId, secret });
+      fetchDetails(requestId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("merchant.parseError"));
+    }
+  };
+
   useEffect(() => {
-    // Initialize html5-qrcode scanner
-    if (scanning && !scannedData) {
-      const html5QrCode = new Html5Qrcode("scanner-video-container");
-      scannerRef.current = html5QrCode;
-
-      html5QrCode
-        .start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: (width, height) => {
-              const size = Math.min(width, height) * 0.7;
-              return { width: size, height: size };
-            },
+    if (scanning && !scannedData && videoRef.current) {
+      const qrScanner = new QrScanner(
+        videoRef.current,
+        (result: any) => {
+          processDecodedText(result.data);
+        },
+        {
+          preferredCamera: "environment",
+          maxScansPerSecond: 8,
+          highlightScanRegion: false,
+          calculateScanRegion: (video: any) => {
+            const minDim = Math.min(video.videoWidth, video.videoHeight);
+            const size = Math.round(minDim * 0.7);
+            return {
+              x: Math.round((video.videoWidth - size) / 2),
+              y: Math.round((video.videoHeight - size) / 2),
+              width: size,
+              height: size,
+              downScaledWidth: 400,
+              downScaledHeight: 400,
+            };
           },
-          async (decodedText) => {
-            try {
-              // Parse the QR payload
-              // format: velo://claim?request_id=xxx&secret=yyy or http://.../claim/xxx?secret=yyy
-              let urlObj: URL;
-              if (decodedText.startsWith("velo://")) {
-                urlObj = new URL(decodedText.replace("velo://", "https://"));
-              } else if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
-                urlObj = new URL(decodedText);
-              } else {
-                throw new Error("Invalid Velo QR payload format");
-              }
+        }
+      );
+      scannerRef.current = qrScanner;
 
-              let requestId = urlObj.searchParams.get("request_id");
-              if (!requestId) {
-                // Try to extract from path (e.g. /claim/:id)
-                const pathParts = urlObj.pathname.split("/");
-                requestId = pathParts[pathParts.length - 1];
-              }
-
-              const secret = urlObj.searchParams.get("secret");
-
-              if (!requestId || !secret) {
-                throw new Error("Missing Claim ID or Secret key in QR payload");
-              }
-
-              // Stop scanner on success
-              await html5QrCode.stop();
-              setScanning(false);
-              setScannedData({ id: requestId, secret });
-              fetchDetails(requestId);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Failed to parse QR code");
-            }
-          },
-          () => {
-            // silent fail on non-detected frame
-          }
-        )
-        .catch((err) => {
-          setError(`Camera access error: ${err instanceof Error ? err.message : err}`);
-        });
+      qrScanner.start().catch((err: unknown) => {
+        setError(`${t("merchant.cameraError")}: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
 
     return () => {
-      if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current.stop().catch((e) => console.error("Error stopping scanner", e));
+      if (scannerRef.current) {
+        scannerRef.current.destroy();
+        scannerRef.current = null;
       }
     };
-  }, [scanning, scannedData]);
+  }, [scanning, scannedData, t]);
 
   const fetchDetails = async (id: string) => {
     setLoadingDetails(true);
@@ -112,7 +126,7 @@ export default function MerchantScan() {
       const details = await fetchCashRequest(id);
       setClaimDetails(details);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch claim details");
+      setError(err instanceof Error ? err.message : t("merchant.fetchError"));
     } finally {
       setLoadingDetails(false);
     }
@@ -124,12 +138,11 @@ export default function MerchantScan() {
     setError(null);
     try {
       await releaseCashRequest(scannedData.id, scannedData.secret);
-      setSuccessMsg("Funds successfully released!");
-      // refresh claim details
+      setSuccessMsg(t("merchant.fundsReleased"));
       const updatedDetails = await fetchCashRequest(scannedData.id);
       setClaimDetails(updatedDetails);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Release request failed");
+      setError(err instanceof Error ? err.message : t("merchant.releaseError"));
     } finally {
       setReleasing(false);
     }
@@ -140,7 +153,27 @@ export default function MerchantScan() {
     setClaimDetails(null);
     setSuccessMsg(null);
     setError(null);
+    setManualCode("");
     setScanning(true);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    try {
+      const result = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
+      processDecodedText(result.data);
+    } catch (err) {
+      setError(t("merchant.noQRFound"));
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCode.trim()) return;
+    setError(null);
+    processDecodedText(manualCode.trim());
   };
 
   const renderThemeToggle = () => (
@@ -171,22 +204,23 @@ export default function MerchantScan() {
 
   return (
     <div className="merchant-scan-page">
+      <LanguageSwitcher />
       {renderThemeToggle()}
       <header className="merchant-scan-header">
-        <button onClick={() => navigate("/")} className="back-button" aria-label="Go home">
-          &larr; Home
+        <button onClick={() => navigate("/")} className="back-button" aria-label={t("merchant.goHome")}>
+          {t("merchant.home")}
         </button>
-        <h1>Merchant Release Terminal</h1>
+        <h1>{t("merchant.title")}</h1>
       </header>
 
       <main className="merchant-scan-content">
         {error && (
           <div className="merchant-scan-alert error">
-            <span className="alert-title">Error</span>
+            <span className="alert-title">{t("common.error")}</span>
             <p>{error}</p>
             {!scanning && (
               <button onClick={resetScanner} className="scan-retry-button">
-                Try Scanning Again
+                {t("merchant.tryAgain")}
               </button>
             )}
           </div>
@@ -194,7 +228,7 @@ export default function MerchantScan() {
 
         {successMsg && (
           <div className="merchant-scan-alert success">
-            <span className="alert-title">Success</span>
+            <span className="alert-title">{t("merchant.successTitle")}</span>
             <p>{successMsg}</p>
           </div>
         )}
@@ -202,7 +236,7 @@ export default function MerchantScan() {
         {scanning && (
           <div className="scanner-container">
             <div className="scanner-viewfinder">
-              <div id="scanner-video-container" />
+              <video ref={videoRef} className="scanner-video" />
               <div className="scanner-overlay">
                 <div className="scanner-border-corner top-left"></div>
                 <div className="scanner-border-corner top-right"></div>
@@ -211,39 +245,66 @@ export default function MerchantScan() {
                 <div className="scanner-laser-line"></div>
               </div>
             </div>
-            <p className="scanner-hint">Align the buyer's claim QR code within the frame to scan</p>
+            <p className="scanner-hint">{t("merchant.alignQR")}</p>
+
+            <div className="scanner-fallback-section">
+              <span className="fallback-divider">{t("merchant.or")}</span>
+              <div className="fallback-actions">
+                <label className="fallback-file-button">
+                  {t("merchant.uploadQR")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                <form onSubmit={handleManualSubmit} className="manual-entry-group">
+                  <input
+                    type="text"
+                    placeholder={t("merchant.manualPlaceholder")}
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value)}
+                    className="manual-entry-input"
+                  />
+                  <button type="submit" className="manual-entry-button">
+                    {t("merchant.submit")}
+                  </button>
+                </form>
+              </div>
+            </div>
           </div>
         )}
 
         {loadingDetails && (
           <div className="loading-details-spinner">
             <div className="spinner"></div>
-            <p>Fetching claim details...</p>
+            <p>{t("merchant.fetching")}</p>
           </div>
         )}
 
         {claimDetails && (
           <div className="claim-details-card">
-            <h2>Verify Claim</h2>
+            <h2>{t("merchant.verifyClaim")}</h2>
             <div className="details-grid">
               <div className="details-row">
-                <span className="details-label">Amount</span>
+                <span className="details-label">{t("common.amount")}</span>
                 <span className="details-value amount">{formatStroops(claimDetails.amountStroops)} Velo</span>
               </div>
               <div className="details-row">
-                <span className="details-label">Status</span>
+                <span className="details-label">{t("merchant.status")}</span>
                 <span className={`details-value status-badge status-${claimDetails.status}`}>
                   {claimDetails.status.toUpperCase()}
                 </span>
               </div>
               <div className="details-row">
-                <span className="details-label">Buyer</span>
+                <span className="details-label">{t("common.buyer")}</span>
                 <span className="details-value address" title={claimDetails.buyer}>
                   {shortAddress(claimDetails.buyer)}
                 </span>
               </div>
               <div className="details-row">
-                <span className="details-label">Claim ID</span>
+                <span className="details-label">{t("common.claimId")}</span>
                 <span className="details-value address" title={claimDetails.id}>
                   {shortAddress(claimDetails.id)}
                 </span>
@@ -257,11 +318,11 @@ export default function MerchantScan() {
                   disabled={releasing}
                   className="release-action-button"
                 >
-                  {releasing ? "Releasing escrow..." : "Confirm Handoff & Release Funds"}
+                  {releasing ? t("merchant.releasing") : t("merchant.releaseButton")}
                 </button>
               ) : (
                 <button onClick={resetScanner} className="scan-next-button">
-                  Scan Next QR
+                  {t("merchant.scanNext")}
                 </button>
               )}
             </div>

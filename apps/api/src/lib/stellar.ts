@@ -1,14 +1,28 @@
 import {
     BASE_FEE,
+    FeeBumpTransaction,
     Keypair,
     Networks,
     Operation,
+    Transaction,
     TransactionBuilder,
     nativeToScVal,
     scValToNative,
     xdr,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
+
+export interface StellarLogger {
+    info: (obj: Record<string, unknown>, msg?: string) => void;
+    error: (obj: Record<string, unknown>, msg?: string) => void;
+    child: (bindings: Record<string, unknown>) => StellarLogger;
+}
+
+const noopLogger: StellarLogger = {
+    info: () => {},
+    error: () => {},
+    child: () => noopLogger,
+};
 
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const IS_PUBLIC = process.env.STELLAR_NETWORK === "PUBLIC";
@@ -38,6 +52,21 @@ function loadSignerKeypair(): Keypair {
         throw new Error(
             "BUYER_SECRET_KEY not set — see apps/api/.env.example. " +
             "This is a testnet-only signer."
+        );
+    }
+    return Keypair.fromSecret(secret);
+}
+
+/**
+ * Loads the platform treasury keypair used to sponsor user transactions
+ * via fee-bumps. Defaults to BUYER_SECRET_KEY if SPONSOR_SECRET_KEY is omitted.
+ * Works on both testnet and mainnet when SPONSOR_SECRET_KEY is configured.
+ */
+function loadSponsorKeypair(): Keypair {
+    const secret = process.env.SPONSOR_SECRET_KEY || process.env.BUYER_SECRET_KEY;
+    if (!secret) {
+        throw new Error(
+            "SPONSOR_SECRET_KEY or BUYER_SECRET_KEY not set — see apps/api/.env.example."
         );
     }
     return Keypair.fromSecret(secret);
@@ -73,6 +102,28 @@ const noopLogger: StellarLogger = {
 // ---------------------------------------------------------------------------
 // Build helpers — return unsigned, simulated XDR (non-custodial flow)
 // ---------------------------------------------------------------------------
+
+function wrapWithFeeBumpIfPossible(tx: Transaction | FeeBumpTransaction): Transaction | FeeBumpTransaction {
+    if (tx instanceof FeeBumpTransaction) {
+        return tx;
+    }
+
+    try {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(tx.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            tx,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        return feeBumpTx;
+    } catch {
+        return tx;
+    }
+}
 
 interface BuildTxResult {
     /** Unsigned transaction XDR (base64) ready for client-side signing. */
@@ -116,7 +167,8 @@ async function buildUnsignedTx(
  */
 async function submitSignedEnvelope(signedXdr: string): Promise<{ hash: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const hash = (await server.sendTransaction(tx)).hash;
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const hash = (await server.sendTransaction(txToSubmit)).hash;
 
     const start = Date.now();
     for (;;) {
@@ -146,7 +198,7 @@ async function invokeContract(
     signer: Keypair,
     log: StellarLogger = noopLogger,
 ): Promise<unknown> {
-    const stageLog = log.child({ contract: contractId, fn: functionName });
+    const stageLog = logger.child({ contract: contractId, fn: functionName });
 
     stageLog.info({ stage: "build", signer: signer.publicKey() }, "building contract invocation");
     const account = await server.getAccount(signer.publicKey());
@@ -171,13 +223,30 @@ async function invokeContract(
         throw new Error(`simulation failed: ${sim.error}`);
     }
 
-    const prepared = assembleTransaction(tx, sim).build();
+    const prepared = assembleTransaction(tx, sim).build() as Transaction;
     prepared.sign(signer);
     const txHash = prepared.hash().toString("hex");
     stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
-    stageLog.info({ stage: "submit", txHash }, "submitting transaction");
-    const sendResult = await server.sendTransaction(prepared);
+    // Conditionally use fee-bump if sponsor is configured
+    let txToSubmit = prepared;
+    if (process.env.SPONSOR_SECRET_KEY) {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(prepared.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            prepared,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        txToSubmit = feeBumpTx;
+        stageLog.info({ stage: "fee_bump", sponsor: sponsor.publicKey() }, "transaction fee-bumped");
+    }
+
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         stageLog.error(
             { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
@@ -408,35 +477,88 @@ export async function refundEscrow(params: RefundParams, log: StellarLogger = no
     );
 }
 
+export interface DisputeParams {
+    contractId: string;
+    tradeId: string;
+    caller: string;
+}
+
+/** Calls escrow's dispute(caller, id). Flagged by either buyer or seller. */
+export async function disputeEscrow(params: DisputeParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "dispute",
+        [
+            nativeToScVal(params.caller, { type: "address" }),
+            hexToBytesScVal(params.tradeId),
+        ],
+        signer
+    );
+}
+
+export interface BatchReleaseParams {
+    contractId: string;
+    /** Each entry mirrors ReleaseParams — one trade id and its revealed secret. */
+    releases: { tradeId: string; secretHex: string }[];
+}
+
+/** Encodes one (id, secret) pair as the BatchReleaseItem struct the escrow
+ * contract expects — an ScMap with keys in alphabetical field order. */
+function batchReleaseItemScVal(tradeId: string, secretHex: string): xdr.ScVal {
+    return xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("id"),
+            val: hexToBytesScVal(tradeId),
+        }),
+        new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("secret"),
+            val: hexToBytesScVal(secretHex),
+        }),
+    ]);
+}
+
 /**
- * Builds an unsigned transaction for the escrow refund operation.
- * Returns the unsigned XDR transaction base64 string for client-side signing.
+ * Testnet-only: custodial batch release (API signs). Settles many trades'
+ * payouts in a single Soroban invocation of the escrow contract's
+ * `batch_release()` — the on-chain half of provider payout batching. Each
+ * item is still verified against its own trade's secret hash on-chain, so
+ * this changes nothing about the trust model versus calling `release()`
+ * once per trade — it only reduces how many separate transactions get
+ * submitted. See docs/provider-payout-batching.md.
+ *
+ * Returns the hex trade ids that were actually released (a stale or
+ * already-settled entry is skipped by the contract, not rejected as a
+ * whole batch).
  */
-export async function buildRefundEscrowTransaction(params: RefundParams & { signerPublicKey?: string }): Promise<string> {
-    const signerPublicKey = params.signerPublicKey || loadSignerKeypair().publicKey();
-    const account = await server.getAccount(signerPublicKey);
+export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<string[]> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex))
+    );
+    const result = await invokeContract(params.contractId, "batch_release", [itemsScVal], signer);
+    const releasedIds = (result as Buffer[] | undefined) ?? [];
+    return releasedIds.map((id) => Buffer.from(id).toString("hex"));
+}
 
-    const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-    })
-        .addOperation(
-            Operation.invokeContractFunction({
-                contract: params.contractId,
-                function: "refund",
-                args: [hexToBytesScVal(params.tradeId)],
-            })
-        )
-        .setTimeout(30)
-        .build();
+export interface ResolveParams {
+    contractId: string;
+    tradeId: string;
+    resolveToBuyer: boolean;
+}
 
-    const sim = await server.simulateTransaction(tx);
-    if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-    }
-
-    const prepared = assembleTransaction(tx, sim).build();
-    return prepared.toXDR();
+/** Calls escrow's resolve(id, resolve_to_buyer). Admin-only. */
+export async function resolveEscrow(params: ResolveParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.resolveToBuyer),
+        ],
+        signer
+    );
 }
 
 /**
@@ -445,7 +567,8 @@ export async function buildRefundEscrowTransaction(params: RefundParams & { sign
  */
 export async function submitSignedTransaction(signedXdr: string): Promise<{ hash: string; status: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const sendResult = await server.sendTransaction(tx);
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }

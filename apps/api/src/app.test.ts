@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { app } from "./app.js";
 import { server } from "./lib/stellar.js";
 
@@ -148,5 +148,34 @@ describe("requirePayment verification", () => {
     expect(result).toBe(false);
     expect(mockReply.code).toHaveBeenCalledWith(402);
     expect(mockReply.send).toHaveBeenCalledWith({ error: "Transaction does not contain a valid payment" });
+  });
+});
+
+describe("GET /version", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("returns commit and timestamp", async () => {
+    process.env.VERCEL_GIT_COMMIT_SHA = "abcdef123456";
+    process.env.DEPLOY_TIMESTAMP = "2026-01-01T12:00:00Z";
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/version",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      commit: "abcdef123456",
+      timestamp: "2026-01-01T12:00:00Z",
+    });
   });
 });

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchStatus, type StatusResponse } from "../lib/api.js";
+import { useTranslation } from "react-i18next";
+import LanguageSwitcher from "../components/LanguageSwitcher.js";
+import { fetchStatus } from "../lib/api.js";
 
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -17,7 +19,8 @@ function healthyBadge(status: string): "status-locked" | "status-released" | "st
 }
 
 export default function Status() {
-  const [data, setData] = useState<StatusResponse | null>(null);
+  const { t } = useTranslation();
+  const [data, setData] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,72 +28,68 @@ export default function Status() {
 
     async function load() {
       try {
-        const result = await fetchStatus();
+        const result = await fetchStatus(); 
         if (!cancelled) {
           setData(result);
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load status");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("status.failedToLoad"));
       }
     }
 
     load();
-    // This is a public transparency page — poll so it stays live for
-    // anyone leaving it open (e.g. an investor dashboard tab).
     const interval = setInterval(load, 30_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [t]);
 
   if (error && !data) {
     return (
       <main className="status-container">
-        <div className="status-card error-state">Unable to load status: {error}</div>
+        <div className="status-card error-state">{t("status.loadError")}: {error}</div>
       </main>
     );
   }
 
-  if (!data) {
+  if (!data || !data.api || !data.chain) {
     return (
       <main className="status-container">
-        <div className="status-card loading-state">Loading status…</div>
+        <div className="status-card loading-state">{t("status.loading")}</div>
       </main>
     );
   }
 
   return (
     <main className="status-container">
+      <LanguageSwitcher />
       <div className="status-card">
-        <h1 className="home-title">Velo Status</h1>
-        <p className="home-subtitle">
-          Live API and on-chain health, for transparency with users and
-          partners. No trade details, balances, or addresses shown here.
-        </p>
+        <h1 className="home-title">{t("status.title")}</h1>
+        <p className="home-subtitle">{t("status.subtitle")}</p>
 
         <div className="status-grid">
           <div className="status-tile">
-            <span className="detail-label">API</span>
+            <span className="detail-label">{t("status.api")}</span>
             <span className={`status-pill ${healthyBadge(data.api.status)}`}>{data.api.status}</span>
-            <span className="detail-value">up {formatUptime(data.api.uptime_seconds)}</span>
+            <span className="detail-value">{t("status.up", { time: formatUptime(data.api.uptime_seconds) })}</span>
           </div>
           <div className="status-tile">
-            <span className="detail-label">Chain ({data.chain.network})</span>
+            <span className="detail-label">{t("status.chain")} ({data.chain.network})</span>
             <span className={`status-pill ${healthyBadge(data.chain.status)}`}>{data.chain.status}</span>
             <span className="detail-value">
-              {data.chain.latest_ledger !== null ? `ledger #${data.chain.latest_ledger}` : "n/a"}
+              {data.chain.latest_ledger !== null ? t("status.ledger", { ledger: data.chain.latest_ledger }) : t("status.nA")}
             </span>
           </div>
         </div>
 
-        <h2 className="status-subheading">Recent activity</h2>
-        {data.recent_activity.length === 0 ? (
-          <p className="status-empty">No recent trades yet.</p>
+        <h2 className="status-subheading">{t("status.recentActivity")}</h2>
+        {!data.recent_activity || data.recent_activity.length === 0 ? (
+          <p className="status-empty">{t("status.noRecentTrades")}</p>
         ) : (
           <ul className="activity-list">
-            {data.recent_activity.map((item) => (
+            {data.recent_activity.map((item: any) => (
               <li key={item.id} className="activity-row">
                 <span className="detail-value activity-id">{item.id.slice(0, 10)}…</span>
                 <span className={`status-pill status-pill-sm status-${item.status}`}>{item.status}</span>
@@ -100,8 +99,8 @@ export default function Status() {
           </ul>
         )}
 
-        <p className="instructions">Auto-refreshes every 30s · last updated {new Date(data.api.timestamp).toLocaleTimeString()}</p>
+        <p className="instructions">{t("status.autoRefresh", { time: new Date(data.api.timestamp || Date.now()).toLocaleTimeString() })}</p>
       </div>
     </main>
   );
-      }
+}

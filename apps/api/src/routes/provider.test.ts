@@ -124,4 +124,155 @@ describe("providerRoutes", () => {
 
     await app.close();
   });
+
+  it("registers a new provider with valid inputs", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const validAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: validAddress,
+        name: "Test Provider Shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 1.05,
+        availability: "available"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.id).toBeDefined();
+    expect(body.stellar_address).toBe(validAddress);
+    expect(body.name).toBe("Test Provider Shop");
+    expect(body.rate).toBe(1.05);
+    expect(body.availability).toBe("available");
+
+    await app.close();
+  });
+
+  it("rejects provider registration with invalid Stellar address", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: "INVALID_STELLAR_ADDRESS",
+        name: "Invalid Shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 1.0
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("Validation failed");
+    await app.close();
+  });
+
+  it("rejects provider registration with out-of-range rate", async () => {
+    const app = Fastify();
+    registerApp(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: {
+        stellar_address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH",
+        name: "Out of range rate shop",
+        lat: 19.4326,
+        lng: -99.1332,
+        rate: 150.0 // Exceeds max rate 100.0
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("Validation failed");
+    await app.close();
+  });
+
+  describe("POST /provider/payout-settings", () => {
+    it("returns 401 when x-provider-address header is missing", async () => {
+      const app = Fastify();
+      registerApp(app);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/provider/payout-settings",
+        payload: { payout_mode: "batched" },
+      });
+
+      expect(response.statusCode).toBe(401);
+      await app.close();
+    });
+
+    it("rejects an invalid payout_mode", async () => {
+      const app = Fastify();
+      registerApp(app);
+      const providerAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/provider/payout-settings",
+        headers: { "x-provider-address": providerAddress },
+        payload: { payout_mode: "sometimes" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      await app.close();
+    });
+
+    it("returns 404 for an address with no registered provider", async () => {
+      const app = Fastify();
+      registerApp(app);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/provider/payout-settings",
+        headers: { "x-provider-address": "G_UNKNOWN_PAYOUT_SETTINGS_ADDR" },
+        payload: { payout_mode: "batched" },
+      });
+
+      expect(response.statusCode).toBe(404);
+      await app.close();
+    });
+
+    it("opts a registered provider into batched payouts", async () => {
+      const app = Fastify();
+      registerApp(app);
+      const providerAddress = "GCPAYSHPBATCHNGTEST9999999999999999999999999999999999999";
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/provider/register",
+        payload: {
+          stellar_address: providerAddress,
+          name: "Batching Test Shop",
+          lat: 19.4326,
+          lng: -99.1332,
+          rate: 1.0,
+        },
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/provider/payout-settings",
+        headers: { "x-provider-address": providerAddress },
+        payload: { payout_mode: "batched" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        stellar_address: providerAddress,
+        payout_mode: "batched",
+      });
+
+      await app.close();
+    });
+  });
 });

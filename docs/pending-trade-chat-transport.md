@@ -43,6 +43,8 @@ The deciding factors are:
 
 Treat the connection as a notification channel, not as the data store. Persist each message before broadcasting it, assign a monotonically ordered message ID, authorize both participants against the pending trade, and let reconnecting clients request messages after their last acknowledged ID. Add exponential reconnect backoff and heartbeat handling.
 
+Messages are now end-to-end encrypted client-side (see `docs/trade-chat-e2e-encryption.md`): the persisted/broadcast payload is an opaque ciphertext blob rather than plaintext. This doesn't affect the transport decision above — a durable store still holds the same shape of record, just with `ciphertext`/`nonce` fields instead of `text`.
+
 Before production rollout, confirm WebSocket behavior, limits, and observability under the project's Vercel plan. If beta support proves unreliable or the team requires a generally available platform feature, use **SSE plus `POST /trades/:id/messages` as the fallback**. Keeping send and replay operations as normal HTTP APIs makes that fallback possible without changing the persisted chat model.
 
 ## Sources

@@ -87,3 +87,50 @@ The current implementation uses an x402-style challenge mechanism. When a valid 
 ## Configuration
 
 The API reads environment variables from the local environment or `.env` file. The most important values include the port, merchant address, and network configuration.
+
+## Fee Sponsorship for Users Without XLM
+
+The API supports fee-bump transactions to sponsor transaction fees for users who don't hold XLM. This allows users to interact with the escrow contract without needing to maintain an XLM balance for transaction fees.
+
+### How It Works
+
+When a fee sponsor is configured, the API wraps user transactions in Stellar fee-bump transactions. The sponsor account pays the transaction fees while the user's account executes the contract operations. This is particularly useful for:
+
+- New users who haven't acquired XLM yet
+- Mobile-first experiences where onboarding complexity should be minimized
+- Agent-mediated flows where the end user may not have a funded wallet
+
+### Configuration
+
+Set the `SPONSOR_SECRET_KEY` environment variable in `apps/api/.env`:
+
+```
+SPONSOR_SECRET_KEY=S...YOUR_SPONSOR_SECRET_KEY
+```
+
+The sponsor account must:
+- Have sufficient XLM balance to cover transaction fees
+- Be funded on the target network (testnet or mainnet)
+- Be properly secured (this is a signing key)
+
+### Behavior
+
+- **When SPONSOR_SECRET_KEY is set**: The API automatically wraps transactions in fee-bump transactions for both custodial and non-custodial flows
+- **When SPONSOR_SECRET_KEY is unset**: Users must pay their own transaction fees (standard behavior)
+- **Works on both testnet and mainnet**: Unlike the custodial BUYER_SECRET_KEY, fee sponsorship is not restricted to testnet
+
+### Fee Calculation
+
+The fee-bump transaction fee is calculated as:
+```
+bump_fee = inner_transaction_fee + BASE_FEE
+```
+
+This ensures the sponsor pays both the inner transaction's resource fees and the fee-bump operation overhead.
+
+### Security Considerations
+
+- The sponsor account holds XLM and can sign transactions, so it must be properly secured
+- Consider using a dedicated sponsor account with limited XLM balance to limit exposure
+- Monitor sponsor account balance and transaction history for unusual activity
+- On mainnet, implement proper key management practices (HSM, key rotation, etc.)

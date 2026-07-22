@@ -30,9 +30,9 @@ vi.mock("@stellar/stellar-sdk/rpc", async (importOriginal) => {
   };
 });
 
-import { Account, Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Account, Asset, Keypair, Operation, StrKey } from "@stellar/stellar-sdk";
 import { Api } from "@stellar/stellar-sdk/rpc";
-import { lockEscrow, type StellarLogger } from "./stellar.js";
+import { lockEscrow, submitSignedTransaction, type StellarLogger } from "./stellar.js";
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32));
 
@@ -47,9 +47,9 @@ interface CapturedLine {
 function makeCapturingLogger() {
   const lines: CapturedLine[] = [];
   const make = (bindings: Record<string, unknown>): StellarLogger => ({
-    info: (obj, msg) => lines.push({ level: "info", obj, msg, bindings }),
-    error: (obj, msg) => lines.push({ level: "error", obj, msg, bindings }),
-    child: (b) => make({ ...bindings, ...b }),
+    info: (obj: Record<string, unknown>, msg?: string) => lines.push({ level: "info", obj, msg, bindings }),
+    error: (obj: Record<string, unknown>, msg?: string) => lines.push({ level: "error", obj, msg, bindings }),
+    child: (b: Record<string, unknown>) => make({ ...bindings, ...b }),
   });
   return { lines, log: make({}) };
 }
@@ -125,5 +125,36 @@ describe("stellar invocation lifecycle logging", () => {
     });
 
     await expect(lockEscrow(lockParams())).resolves.toBeUndefined();
+  });
+
+  it("wraps a user-signed transaction in a fee-bump when a sponsor is configured", async () => {
+    const signer = Keypair.random();
+    const sponsor = Keypair.random();
+    process.env.SPONSOR_SECRET_KEY = sponsor.secret();
+    process.env.STELLAR_NETWORK = "TESTNET";
+
+    const tx = new Account(signer.publicKey(), "0");
+    const builtTx = new TransactionBuilder(tx, {
+      fee: "100",
+      networkPassphrase: "Test SDF Network ; September 2015",
+    })
+      .addOperation(Operation.payment({
+        destination: signer.publicKey(),
+        amount: "1",
+        asset: Asset.native(),
+      }))
+      .setTimeout(30)
+      .build();
+    builtTx.sign(signer);
+
+    h.sendTransaction.mockResolvedValue({ status: "PENDING", hash: "fee-bump-hash" });
+    h.getTransaction.mockResolvedValue({ status: Api.GetTransactionStatus.SUCCESS });
+
+    await expect(submitSignedTransaction(builtTx.toXDR())).resolves.toMatchObject({ hash: "fee-bump-hash" });
+
+    const submittedTx = h.sendTransaction.mock.calls[0]?.[0] as any;
+    expect(submittedTx).toBeDefined();
+    expect(submittedTx.innerTransaction).toBeDefined();
+    expect(submittedTx.feeSource).toBeDefined();
   });
 });
