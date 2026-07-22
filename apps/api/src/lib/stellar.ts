@@ -286,7 +286,7 @@ async function invokeContract(
     );
 
     // ---- fee-bump (optional) -----------------------------------------------
-    let txToSubmit = prepared;
+    let txToSubmit: Transaction | FeeBumpTransaction = prepared;
     if (process.env.SPONSOR_SECRET_KEY) {
         const sponsor = loadSponsorKeypair();
         const innerFee = parseInt(prepared.fee, 10);
