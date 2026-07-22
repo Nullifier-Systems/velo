@@ -6,6 +6,8 @@ import {
   getRateLimitViolations,
   resolveRateLimitViolation,
 } from "../lib/rate-limit-violations.js";
+import { getDisputeEvidence, getDisputeEvidenceForTrade } from "../lib/dispute-evidence-store.js";
+import { disputeEvidenceMetadata } from "./dispute-evidence.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -42,6 +44,42 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: "Unauthorized access to internal ops endpoints." });
     }
   });
+
+  app.get<{ Params: { id: string } }>("/admin/trades/:id/evidence", async (req, reply) => {
+    const trade = getCashRequest(req.params.id);
+    if (!trade) return reply.status(404).send({ error: "Trade request not found." });
+    if ((app as any).pg) {
+      const { rows } = await (app as any).pg.query(
+        `SELECT id, trade_id, uploaded_by, file_name, content_type, size_bytes, created_at
+         FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
+        [req.params.id],
+      );
+      return { data: rows };
+    }
+    return { data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) };
+  });
+
+  app.get<{ Params: { id: string; evidenceId: string } }>(
+    "/admin/trades/:id/evidence/:evidenceId",
+    async (req, reply) => {
+      if (!getCashRequest(req.params.id)) return reply.status(404).send({ error: "Trade request not found." });
+      if ((app as any).pg) {
+        const { rows } = await (app as any).pg.query(
+          `SELECT file_name, content_type, data FROM dispute_evidence WHERE id = $1 AND trade_id = $2`,
+          [req.params.evidenceId, req.params.id],
+        );
+        if (!rows[0]) return reply.status(404).send({ error: "Evidence not found." });
+        return reply.type(rows[0].content_type)
+          .header("content-disposition", `inline; filename="${String(rows[0].file_name).replace(/[\"\r\n]/g, "_")}"`)
+          .send(rows[0].data);
+      }
+      const evidence = getDisputeEvidence(req.params.evidenceId);
+      if (!evidence || evidence.tradeId !== req.params.id) return reply.status(404).send({ error: "Evidence not found." });
+      return reply.type(evidence.contentType)
+        .header("content-disposition", `inline; filename="${evidence.fileName.replace(/\"/g, "_")}"`)
+        .send(evidence.data);
+    },
+  );
 
   /**
    * GET /admin/stats — store-level statistics (in-memory replacement for DB query).
