@@ -22,9 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-        - name: Verify line endings
-          run: |
-            git diff --check || { echo "Line ending inconsistencies detected. Ensure .gitattributes is respected."; exit 1; }
+      - name: Verify line endings
+        run: |
+          git diff --check || { echo "Line ending inconsistencies detected. Ensure .gitattributes is respected."; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -32,6 +32,9 @@ jobs:
           
       # Clean installation of dependencies using the package lock
       - run: npm ci
+
+      - name: Validate localization coverage
+        run: npm run localization:check
       
       # Executes the workspaces build steps
       - run: npm run build

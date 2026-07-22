@@ -13,13 +13,16 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "npm run test:localization && turbo run test",
+    "test:localization": "node --test scripts/validate-localization.test.mjs",
+    "localization:check": "node scripts/validate-localization.mjs",
     "dev:api": "npm run dev -w apps/api",
     "dev:frontend": "npm run dev -w mobile/frontend",
     "dev:backend": "npm run dev -w mobile/backend",
     "post-deploy-check": "npm run post-deploy-check -w apps/api"
   },
   "devDependencies": {
+    "typescript": "^5.5.4",
     "turbo": "^2.1.0"
   },
   "packageManager": "npm@10.0.0"
