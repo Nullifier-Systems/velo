@@ -15,7 +15,7 @@ export async function providerRoutes(app: FastifyInstance) {
       return;
     }
 
-    const allTrades = getProviderTrades(providerAddress);
+    const allTrades = await getProviderTrades(providerAddress);
     
     // Calculate total volume from released/completed trades
     const completedTrades = allTrades.filter(t => t.status === "released");

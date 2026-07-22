@@ -17,10 +17,13 @@
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.10",
+    "@electric-sql/pglite": "^0.5.4",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
