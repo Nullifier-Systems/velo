@@ -86,7 +86,9 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!paid) return;
 
       const { lat, lng, radius, precision, k } = req.query;
-      const providers = getProviders().filter(p => p.status === "available");
+      const providers = getProviders().filter(
+        p => p.status === "available" && p.kycStatus === "approved",
+      );
       const prec = precision ? parseInt(precision, 10) : DEFAULT_PRECISION;
       const kAnon = k ? parseInt(k, 10) : 1;
 

@@ -3,9 +3,14 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { getProviderTrades, saveProvider, getProviders, getProviderByAddress, setProviderPayoutMode, ProviderRecord } from "../lib/store.js";
 import { toPublicProvider, DEFAULT_PRECISION } from "../utils/privacy.js";
+import {
+  ALLOWED_VERIFICATION_DOCUMENT_TYPES,
+  MAX_VERIFICATION_DOCUMENT_BYTES,
+  saveProviderVerificationDocument,
+} from "../lib/provider-verification-store.js";
 
 const registerProviderSchema = z.object({
-  stellar_address: z.string().trim().regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/, "Invalid Stellar address format"),
+  stellar_address: z.string().trim().regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar address format"),
   name: z.string().trim().min(1, "Name is required"),
   lat: z.number().min(-90, "Latitude must be >= -90").max(90, "Latitude must be <= 90"),
   lng: z.number().min(-180, "Longitude must be >= -180").max(180, "Longitude must be <= 180"),
@@ -50,9 +55,9 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
   if ((app as any).pg) {
     try {
       const query = `
-        INSERT INTO providers (id, stellar_address, name, latitude, longitude, rate, availability, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-        RETURNING id, stellar_address, name, latitude, longitude, rate, availability, created_at;
+        INSERT INTO providers (id, stellar_address, name, latitude, longitude, rate, availability, verification_status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+        RETURNING id, stellar_address, name, latitude, longitude, rate, availability, verification_status, created_at;
       `;
       const { rows } = await (app as any).pg.query(query, [id, stellar_address, name, lat, lng, rate, availability]);
       if (rows && rows.length > 0) {
@@ -88,6 +93,7 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
     rate,
     availability,
     status: availability,
+    verification_status: "pending",
     created_at: createdAt,
     ...(dbRecord ? { db_persisted: true } : {}),
   });
@@ -97,6 +103,13 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
  * Provider routes — dashboard, export, registration, and directory
  */
 export async function providerRoutes(app: FastifyInstance) {
+  for (const contentType of ALLOWED_VERIFICATION_DOCUMENT_TYPES) {
+    if (!app.hasContentTypeParser(contentType)) {
+      app.addContentTypeParser(contentType, { parseAs: "buffer", bodyLimit: MAX_VERIFICATION_DOCUMENT_BYTES }, (_request, body, done) => {
+        done(null, body);
+      });
+    }
+  }
   // POST /provider/register & POST /providers/register — Provider Onboarding (Issue #44)
   app.post("/provider/register", async (req, reply) => handleProviderRegistration(req, reply, app));
   app.post("/providers/register", async (req, reply) => handleProviderRegistration(req, reply, app));
@@ -119,7 +132,7 @@ export async function providerRoutes(app: FastifyInstance) {
           tier: r.tier ?? "Probationary",
           rate: String(r.rate),
           status: r.availability ?? "available",
-          kycStatus: r.kyc_status ?? "pending",
+          kycStatus: r.verification_status ?? "pending",
           createdAt: r.created_at,
         }));
       } catch (err) {
@@ -129,8 +142,63 @@ export async function providerRoutes(app: FastifyInstance) {
     } else {
       records = getProviders();
     }
-    return reply.send({ providers: records.map((p) => toPublicProvider(p, undefined, DEFAULT_PRECISION)) });
+    const verified = records.filter(provider => provider.kycStatus === "approved");
+    return reply.send({ providers: verified.map((p) => toPublicProvider(p, undefined, DEFAULT_PRECISION)) });
   });
+
+  app.post<{ Headers: { "x-provider-address"?: string; "x-file-name"?: string; "content-type"?: string }; Body: Buffer }>(
+    "/provider/verification-document",
+    async (req, reply) => {
+      const address = req.headers["x-provider-address"];
+      const provider = address ? getProviderByAddress(address) : undefined;
+      if (!provider) return reply.code(address ? 404 : 401).send({ error: address ? "Provider not found" : "Missing x-provider-address header" });
+      if (provider.kycStatus === "approved") {
+        return reply.code(409).send({ error: "Approved providers cannot replace their verification document." });
+      }
+
+      const contentType = req.headers["content-type"]?.split(";", 1)[0].toLowerCase();
+      if (!contentType || !ALLOWED_VERIFICATION_DOCUMENT_TYPES.has(contentType)) {
+        return reply.code(415).send({ error: "Verification document must be a JPEG, PNG, or WebP image." });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.byteLength === 0) {
+        return reply.code(400).send({ error: "A verification document image is required." });
+      }
+      const signatures: Record<string, boolean> = {
+        "image/jpeg": req.body.length >= 3 && req.body.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+        "image/png": req.body.length >= 8 && req.body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+        "image/webp": req.body.length >= 12 && req.body.subarray(0, 4).toString("ascii") === "RIFF" && req.body.subarray(8, 12).toString("ascii") === "WEBP",
+      };
+      if (!signatures[contentType]) return reply.code(415).send({ error: "The file content does not match its declared image type." });
+
+      const document = saveProviderVerificationDocument({
+        providerId: provider.id,
+        fileName: String(req.headers["x-file-name"] ?? "identity-document").replace(/[\\/\r\n]/g, "_").slice(0, 255),
+        contentType,
+        data: req.body,
+      });
+      provider.kycStatus = "pending";
+      if ((app as any).pg) {
+        await (app as any).pg.query(
+          `INSERT INTO provider_verification_documents (id, provider_id, file_name, content_type, size_bytes, data, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [document.id, document.providerId, document.fileName, document.contentType, document.sizeBytes, document.data, document.createdAt],
+        );
+        await (app as any).pg.query(
+          "UPDATE providers SET verification_status = 'pending', verification_reviewed_at = NULL, verification_reviewed_by = NULL, updated_at = NOW() WHERE id = $1",
+          [provider.id],
+        );
+      }
+      return reply.code(201).send({
+        id: document.id,
+        provider_id: provider.id,
+        file_name: document.fileName,
+        content_type: document.contentType,
+        size_bytes: document.sizeBytes,
+        verification_status: provider.kycStatus,
+        created_at: document.createdAt,
+      });
+    },
+  );
 
   // POST /provider/payout-settings — opt in/out of batched payouts.
   // Default is "immediate" (today's behavior: release() fires per trade).
@@ -254,4 +322,3 @@ export async function providerRoutes(app: FastifyInstance) {
       .send(jsonOutput);
   });
 }
-

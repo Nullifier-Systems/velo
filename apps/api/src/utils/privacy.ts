@@ -47,6 +47,7 @@ export interface PublicProvider {
   tier: ProviderRecord["tier"];
   rate: string;
   status: ProviderRecord["status"];
+  verification_status: ProviderRecord["kycStatus"];
   /** Coarse geohash cell (the finest location the system will disclose). */
   geohash: string;
   /** Cell centroid — a fixed point per cell, NOT the provider's real position. */
@@ -78,6 +79,7 @@ export function toPublicProvider(
     tier: provider.tier,
     rate: provider.rate,
     status: provider.status,
+    verification_status: provider.kycStatus,
     geohash: cell.hash,
     approx_lat: round6(cell.lat),
     approx_lng: round6(cell.lon),
