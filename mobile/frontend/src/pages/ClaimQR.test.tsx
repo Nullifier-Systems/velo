@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-function statusLabel(status: 'locked' | 'released' | 'refunded'): string {
+function statusLabel(status: 'locked' | 'expired' | 'released' | 'refunded'): string {
   if (status === 'locked') return 'Ready to claim';
+  if (status === 'expired') return 'Expired';
   if (status === 'released') return 'Released';
   return 'Refunded';
 }
@@ -16,6 +17,7 @@ describe("ClaimQR logic and status formatting", () => {
     expect(statusLabel("locked")).toBe("Ready to claim");
     expect(statusLabel("released")).toBe("Released");
     expect(statusLabel("refunded")).toBe("Refunded");
+    expect(statusLabel("expired")).toBe("Expired");
   });
 
   it("constructs valid QR payload for provider scanning", () => {

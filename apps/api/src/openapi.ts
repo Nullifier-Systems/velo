@@ -250,7 +250,7 @@ export const openApiDocument = {
                         required: ["id", "status", "createdAt"],
                         properties: {
                           id: { type: "string" },
-                          status: { type: "string", enum: ["locked", "released", "refunded"] },
+                          status: { type: "string", enum: ["locked", "expired", "released", "refunded"] },
                           createdAt: { type: "string", format: "date-time" },
                         },
                       },
@@ -694,7 +694,7 @@ export const openApiDocument = {
           amountStroops: { type: "string" },
           secretHashHex: { type: "string" },
           qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
-          status: { type: "string", enum: ["locked", "released", "refunded", "disputed"] },
+          status: { type: "string", enum: ["locked", "expired", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
           disputedAt: { type: "string", format: "date-time" },
           disputedBy: { type: "string" },

@@ -11,11 +11,12 @@ import {
   submitReleaseTx,
   submitRefundTx,
   NETWORK_PASSPHRASE,
+  getLatestLedgerSequence,
 } from "../lib/stellar.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
-import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork, getProviderByAddress, enqueueForBatch } from "../lib/store.js";
+import { saveCashRequest, getCashRequest, updateStatus, expireCashRequest, saveProvider, getProviders, countProvidersByNetwork, getProviderByAddress, enqueueForBatch } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
@@ -248,8 +249,9 @@ export async function cashRoutes(app: FastifyInstance) {
       const locale = (req as any).locale ?? "en";
 
       if (mode === "custodial") {
+        let lockedAtLedger: number;
         try {
-          await lockEscrow({
+          lockedAtLedger = await lockEscrow({
             contractId: ESCROW_CONTRACT_ID,
             tradeId,
             seller,
@@ -278,6 +280,7 @@ export async function cashRoutes(app: FastifyInstance) {
           secretHashHex: secret_hash,
           qrPayload,
           status: "locked",
+          timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
@@ -385,9 +388,10 @@ export async function cashRoutes(app: FastifyInstance) {
       // generates a fresh trade ID, so it cannot be paired with a
       // signed XDR built against some other trade ID.
       const tradeId = randomHex32();
+      let lockedAtLedger: number;
 
       try {
-        await lockEscrow({
+        lockedAtLedger = await lockEscrow({
           contractId: ESCROW_CONTRACT_ID,
           tradeId,
           seller,
@@ -417,6 +421,7 @@ export async function cashRoutes(app: FastifyInstance) {
         secretHashHex: secret_hash,
         qrPayload,
         status: "locked",
+        timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
         createdAt: new Date().toISOString(),
         notificationType: notification_type,
         contactInfo: contact_info,
@@ -446,6 +451,11 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!record) {
         reply.code(404).send({ error: "request not found" });
         return;
+      }
+      try {
+        expireCashRequest(record, await getLatestLedgerSequence());
+      } catch (err) {
+        req.log.warn(err, "could not check cash request expiry");
       }
       const { secretHex: _omit, ...safe } = record;
       return safe;
@@ -534,6 +544,7 @@ export async function cashRoutes(app: FastifyInstance) {
       try {
         const result = await submitSignedTransaction(signed_xdr);
         updateStatus(record.id, "locked");
+        record.timeoutLedger = result.ledger + DEFAULT_TIMEOUT_LEDGERS;
 
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
         const locale = (req as any).locale ?? "en";
@@ -671,7 +682,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (record.status === "refunded") {
         return { id: record.id, status: "refunded" };
       }
-      if (record.status !== "locked") {
+      if (record.status !== "locked" && record.status !== "expired") {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
       }

@@ -8,15 +8,16 @@ import { getCashRequest, saveProvider } from "../lib/store.js";
 
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
-  lockEscrow: vi.fn().mockResolvedValue(undefined),
+  lockEscrow: vi.fn().mockResolvedValue(1_000),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
   disputeEscrow: vi.fn().mockResolvedValue(undefined),
   resolveEscrow: vi.fn().mockResolvedValue(undefined),
   buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
-  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
+  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS", ledger: 1_000 }),
   submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
   submitRefundTx: vi.fn().mockResolvedValue({ hash: "dummy_refund_hash" }),
+  getLatestLedgerSequence: vi.fn().mockResolvedValue(1_000),
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
@@ -332,6 +333,67 @@ describe("cashRoutes", () => {
     expect(getBody).toHaveProperty("qrPayload");
     expect(getBody.qrPayload).toBe(qrPayload);
     expect(getBody).not.toHaveProperty("secretHex");
+  });
+
+  it("marks a stale locked request expired on read without refunding it", async () => {
+    const { getLatestLedgerSequence } = await import("../lib/stellar.js");
+    const ledgerMock = vi.mocked(getLatestLedgerSequence);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+      },
+    });
+    const tradeId = createResponse.json().claim_url.split("/").pop();
+
+    ledgerMock.mockResolvedValueOnce(1_100);
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/cash/request/${tradeId}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({
+      status: "expired",
+      timeoutLedger: 1_100,
+    });
+    expect(refundEscrow).not.toHaveBeenCalled();
+  });
+
+  it("allows refund to be invoked independently after expiration", async () => {
+    const { getLatestLedgerSequence } = await import("../lib/stellar.js");
+    const ledgerMock = vi.mocked(getLatestLedgerSequence);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "b".repeat(64),
+      },
+    });
+    const tradeId = createResponse.json().claim_url.split("/").pop();
+
+    ledgerMock.mockResolvedValueOnce(1_100);
+    await app.inject({ method: "GET", url: `/api/v1/cash/request/${tradeId}` });
+
+    const refundResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/refund`,
+    });
+
+    expect(refundResponse.statusCode).toBe(200);
+    expect(refundResponse.json()).toMatchObject({ status: "refunded" });
+    expect(refundEscrow).toHaveBeenCalledTimes(1);
   });
 
   it("POST /cash/request/:id/dispute transitions status to disputed, and resolving it via admin route works", async () => {
