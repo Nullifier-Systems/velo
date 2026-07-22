@@ -21,6 +21,7 @@ import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
 import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash.js";
+import { t } from "../lib/i18n.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -99,7 +100,10 @@ export async function cashRoutes(app: FastifyInstance) {
         precision: prec,
         cell_size_m: GEOHASH_CELL_SIZE_METERS[prec],
         k_anonymity: kAnon,
-        note: "Locations are generalized to a geohash cell; exact coordinates are revealed only to a confirmed match.",
+        note: t(
+          (req as any).locale ?? "en",
+          "privacy.note"
+        ),
       };
 
       if (lat && lng) {
@@ -238,6 +242,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const tradeId = randomHex32();
       const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      const locale = (req as any).locale ?? "en";
 
       if (mode === "custodial") {
         try {
@@ -279,7 +284,7 @@ export async function cashRoutes(app: FastifyInstance) {
           // The secret is held client-side and is NOT returned by the API
           claim_url: `${baseUrl}/claim/${tradeId}`,
           qr_payload: qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
+          instructions: t(locale, "instructions.showQR"),
         });
       } else {
         try {
@@ -316,7 +321,7 @@ export async function cashRoutes(app: FastifyInstance) {
             submit_url: `/api/v1/cash/request/${tradeId}/submit`,
             claim_url: `${baseUrl}/claim/${tradeId}`,
             qr_payload: qrPayload,
-            instructions: "Sign the transaction with your wallet and submit to the provided endpoint.",
+            instructions: t(locale, "instructions.signAndSubmit"),
           });
         } catch (err) {
           req.log.error(err, "buildLockEscrowTransaction failed");
@@ -411,10 +416,11 @@ export async function cashRoutes(app: FastifyInstance) {
       });
 
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      const locale = (req as any).locale ?? "en";
       reply.code(201).send({
         claim_url: `${baseUrl}/claim/${tradeId}`,
         qr_payload: qrPayload,
-        instructions: "Show this QR to the cash provider to receive your cash.",
+        instructions: t(locale, "instructions.showQR"),
       });
     }
   );
@@ -493,13 +499,14 @@ export async function cashRoutes(app: FastifyInstance) {
       }
       if (record.status === "locked") {
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+        const locale = (req as any).locale ?? "en";
         reply.code(200).send({
           id: record.id,
           status: "locked",
           transaction_hash: null,
           claim_url: `${baseUrl}/claim/${record.id}`,
           qr_payload: record.qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
+          instructions: t(locale, "instructions.showQR"),
         });
         return;
       }
@@ -519,25 +526,27 @@ export async function cashRoutes(app: FastifyInstance) {
         updateStatus(record.id, "locked");
 
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+        const locale = (req as any).locale ?? "en";
         reply.code(200).send({
           id: record.id,
           status: "locked",
           transaction_hash: result.hash,
           claim_url: `${baseUrl}/claim/${record.id}`,
           qr_payload: record.qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
+          instructions: t(locale, "instructions.showQR"),
         });
       } catch (err) {
         const current = getCashRequest(record.id);
         if (current && current.status === "locked") {
           const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+          const locale = (req as any).locale ?? "en";
           reply.code(200).send({
             id: record.id,
             status: "locked",
             transaction_hash: null,
             claim_url: `${baseUrl}/claim/${record.id}`,
             qr_payload: record.qrPayload,
-            instructions: "Show this QR to the cash provider to receive your cash.",
+            instructions: t(locale, "instructions.showQR"),
           });
           return;
         }
@@ -563,6 +572,9 @@ export async function cashRoutes(app: FastifyInstance) {
       }
       if (record.status === "released") {
         return { id: record.id, status: "released" };
+      }
+      if (record.status === "pending_batch") {
+        return { id: record.id, status: "pending_batch" };
       }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
@@ -594,6 +606,16 @@ export async function cashRoutes(app: FastifyInstance) {
           return;
         }
       } else if (secret) {
+        // Providers who opted into batched payouts (POST /provider/payout-settings)
+        // don't get an immediate on-chain release() here — the secret is queued
+        // and settled later alongside their other pending trades in one
+        // batch_release() call. See docs/provider-payout-batching.md.
+        const provider = getProviderByAddress(record.seller);
+        if (provider?.payoutMode === "batched") {
+          enqueueForBatch(record.id, secret);
+          return { id: record.id, status: "pending_batch" };
+        }
+
         try {
           await releaseEscrow({
             contractId: record.contractId,
@@ -616,7 +638,7 @@ export async function cashRoutes(app: FastifyInstance) {
 
       updateStatus(record.id, "released");
       notifyTradeStatus(record.id, "released");
-      await sendNotification(record, "released");
+      await sendNotification(record, "released", (req as any).locale ?? "en");
       return { id: record.id, status: "released" };
     }
   );
@@ -680,7 +702,7 @@ export async function cashRoutes(app: FastifyInstance) {
 
       updateStatus(record.id, "refunded");
       notifyTradeStatus(record.id, "refunded");
-      await sendNotification(record, "refunded");
+      await sendNotification(record, "refunded", (req as any).locale ?? "en");
 
       sendRefundAlert({
         tradeId: record.id,

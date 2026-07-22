@@ -1,0 +1,56 @@
+name: testnet-contract-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: testnet-contract-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: testnet
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Build contract WASM
+        working-directory: contracts
+        run: cargo build --workspace --target wasm32-unknown-unknown --release
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v27.0.0
+
+      - name: Deploy contracts and update registry
+        env:
+          STELLAR_TESTNET_DEPLOYER_SECRET: ${{ secrets.STELLAR_TESTNET_DEPLOYER_SECRET }}
+        run: bash scripts/deploy-testnet-contracts.sh
+
+      - name: Validate recorded addresses
+        run: node scripts/update-testnet-contract-addresses.mjs --check
+
+      - name: Commit deployed addresses
+        run: |
+          if git diff --quiet -- packages/shared/src/index.ts; then
+            echo "Contract addresses are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/shared/src/index.ts
+          git commit -m "chore(contracts): record testnet deployments [skip ci]"
+          git push origin HEAD:main

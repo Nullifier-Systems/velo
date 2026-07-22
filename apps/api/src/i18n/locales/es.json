@@ -1,0 +1,54 @@
+{
+  "errors": {
+    "invalidRequest": "Solicitud inválida",
+    "notFound": "Solicitud no encontrada",
+    "internalError": "Error interno del servidor",
+    "rateLimited": "Límite de tasa excedido. Has enviado demasiadas solicitudes en {{after}}. Por favor espera antes de reintentar.",
+    "tooManyRequests": "Demasiadas solicitudes",
+    "paymentRequired": "Pago requerido",
+    "paymentAlreadyUsed": "Pago ya utilizado",
+    "paymentNotSuccessful": "Transacción de pago no exitosa",
+    "invalidPaymentMemo": "Memo de pago inválido",
+    "invalidPaymentTransaction": "Transacción de pago inválida",
+    "noValidPayment": "La transacción no contiene un pago válido",
+    "onlyParticipants": "Solo los participantes pueden disputar un comercio",
+    "notParticipant": "No eres participante de este comercio",
+    "tradeNotFound": "Comercio no encontrado",
+    "chatOnlyWhileLocked": "El chat solo está disponible mientras el comercio está bloqueado",
+    "tradeNoLongerActive": "El comercio ya no está activo",
+    "invalidJSON": "JSON inválido",
+    "invalidCoordinates": "Coordenadas numéricas o radio no válidos",
+    "precisionRange": "La precisión debe ser un entero entre 4 y 8",
+    "nameLatLngRequired": "Se requieren nombre, lat (número) y lng (número)",
+    "registrationLimit": "Límite de registro excedido para esta red o dispositivo",
+    "contactInfoRequired": "Se requiere información de contacto cuando se especifica el tipo de notificación",
+    "invalidEmail": "Formato de correo electrónico inválido",
+    "invalidPhone": "Formato de número de teléfono inválido",
+    "modeMustBe": "El modo debe ser 'custodial' o 'non_custodial'",
+    "signedXdrRequired": "Se requiere XDR firmado",
+    "wrongStatus": "La solicitud ya está {{status}}",
+    "wrongStatusExpected": "La solicitud está en estado {{status}}, se esperaba {{expected}}",
+    "escrowLockFailed": "Error al bloquear el depósito",
+    "escrowReleaseFailed": "Error al liberar el depósito",
+    "escrowRefundFailed": "Error al reembolsar el depósito",
+    "escrowDisputeFailed": "Error al disputar el depósito",
+    "transactionBuildFailed": "Error al construir la transacción",
+    "transactionSubmitFailed": "Error al enviar la transacción",
+    "releaseSubmissionFailed": "Error al enviar la liberación",
+    "refundSubmissionFailed": "Error al enviar el reembolso",
+    "secretOrSignedXdrRequired": "Se requiere 'secret' o 'signed_xdr'",
+    "locationRevealedOnlyAfterMatch": "La ubicación se revela solo después de que se confirme una coincidencia (depósito bloqueado)",
+    "noProviderForTrade": "No hay un proveedor registrado para este comercio"
+  },
+  "instructions": {
+    "showQR": "Muestra este QR al proveedor de efectivo para recibir tu dinero.",
+    "signAndSubmit": "Firma la transacción con tu billetera y envíala al endpoint proporcionado."
+  },
+  "notifications": {
+    "claimUpdate": "Actualización de reclamo Velo: Tu reclamo {{id}} por {{amount}} XLM/USDC ha sido {{status}}.",
+    "emailSubject": "Actualización de reclamo Velo: {{status}}"
+  },
+  "privacy": {
+    "note": "Las ubicaciones se generalizan a una celda geohash; las coordenadas exactas se revelan solo a una coincidencia confirmada."
+  }
+}

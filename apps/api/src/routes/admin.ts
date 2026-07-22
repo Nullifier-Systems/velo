@@ -2,6 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
 import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";
+import {
+  getRateLimitViolations,
+  resolveRateLimitViolation,
+} from "../lib/rate-limit-violations.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -84,6 +88,101 @@ export async function adminRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: "Failed to load trades." });
       }
     }
+  );
+
+  app.get("/admin/rate-limit-violations", async (req, reply) => {
+    try {
+      let records;
+      if ((app as any).pg) {
+        const { rows } = await (app as any).pg.query(`
+          SELECT id, identifier, route, method, occurred_at, offense_count,
+                 severity, status, resolved_at, resolved_by
+          FROM rate_limit_violations
+          ORDER BY occurred_at DESC;
+        `);
+        records = rows;
+      } else {
+        records = getRateLimitViolations()
+          .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
+          .map(record => ({
+            id: record.id,
+            identifier: record.identifier,
+            route: record.route,
+            method: record.method,
+            occurred_at: record.occurredAt,
+            offense_count: record.offenseCount,
+            severity: record.severity,
+            status: record.status,
+            resolved_at: record.resolvedAt,
+            resolved_by: record.resolvedBy,
+          }));
+      }
+
+      return reply.status(200).send({
+        status: "success",
+        count: records.length,
+        data: records,
+      });
+    } catch (error) {
+      req.log.error(error, "Failed to retrieve rate-limit violations");
+      return reply.status(500).send({ error: "Failed to load rate-limit violations." });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>(
+    "/admin/rate-limit-violations/:id/resolve",
+    async (req, reply) => {
+      const { id } = req.params;
+      const operatorName = String(req.headers["x-admin-operator-name"] || "System Admin");
+
+      try {
+        let record;
+        if ((app as any).pg) {
+          const { rows, rowCount } = await (app as any).pg.query(
+            `
+              UPDATE rate_limit_violations
+              SET status = 'resolved',
+                  resolved_at = COALESCE(resolved_at, NOW()),
+                  resolved_by = COALESCE(resolved_by, $1)
+              WHERE id = $2
+              RETURNING id, identifier, route, method, occurred_at,
+                        offense_count, severity, status, resolved_at, resolved_by;
+            `,
+            [operatorName, id],
+          );
+          if (rowCount === 0) {
+            return reply.status(404).send({ error: "Rate-limit violation not found." });
+          }
+          record = rows[0];
+        } else {
+          const resolved = resolveRateLimitViolation(id, operatorName);
+          if (!resolved) {
+            return reply.status(404).send({ error: "Rate-limit violation not found." });
+          }
+          record = {
+            id: resolved.id,
+            identifier: resolved.identifier,
+            route: resolved.route,
+            method: resolved.method,
+            occurred_at: resolved.occurredAt,
+            offense_count: resolved.offenseCount,
+            severity: resolved.severity,
+            status: resolved.status,
+            resolved_at: resolved.resolvedAt,
+            resolved_by: resolved.resolvedBy,
+          };
+        }
+
+        return reply.status(200).send({
+          status: "success",
+          message: "Rate-limit violation resolved.",
+          data: record,
+        });
+      } catch (error) {
+        req.log.error(error, `Failed to resolve rate-limit violation ${id}`);
+        return reply.status(500).send({ error: "Could not resolve rate-limit violation." });
+      }
+    },
   );
 
   /**

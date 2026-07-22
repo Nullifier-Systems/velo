@@ -159,7 +159,10 @@ soroban contract invoke \
 - [ ] **Soroban RPC** — uses HTTPS (`allowHttp: false` on mainnet by default,
       checked via `RPC_URL.startsWith("http://")`).
 - [ ] **WebSocket chat** — gated per-trade by participant check against buyer/seller.
-      Chat auto-closes when trade is released/refunded.
+      Chat auto-closes when trade is released/refunded. Messages are end-to-end
+      encrypted client-side (see `docs/trade-chat-e2e-encryption.md`); confirm
+      the safety-number verification UI renders and the key-change warning
+      fires before relying on this in production.
 
 ### 8. Non-Custodial Flow Verification (Mainnet Only)
 

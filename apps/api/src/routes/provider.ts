@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { getProviderTrades, saveProvider, getProviders, ProviderRecord } from "../lib/store.js";
+import { getProviderTrades, saveProvider, getProviders, getProviderByAddress, setProviderPayoutMode, ProviderRecord } from "../lib/store.js";
 import { toPublicProvider, DEFAULT_PRECISION } from "../utils/privacy.js";
 
 const registerProviderSchema = z.object({
@@ -130,6 +130,38 @@ export async function providerRoutes(app: FastifyInstance) {
       records = getProviders();
     }
     return reply.send({ providers: records.map((p) => toPublicProvider(p, undefined, DEFAULT_PRECISION)) });
+  });
+
+  // POST /provider/payout-settings — opt in/out of batched payouts.
+  // Default is "immediate" (today's behavior: release() fires per trade).
+  // "batched" queues released trades and settles many at once on a
+  // schedule/threshold via a single batch_release() call — see
+  // docs/provider-payout-batching.md for the latency/fee tradeoff.
+  app.post("/provider/payout-settings", async (req, reply) => {
+    const providerAddress = req.headers["x-provider-address"];
+    if (!providerAddress || typeof providerAddress !== "string") {
+      reply.code(401).send({ error: "Unauthorized: Missing x-provider-address header" });
+      return;
+    }
+
+    const bodySchema = z.object({ payout_mode: z.enum(["immediate", "batched"]) });
+    const parsed = bodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      reply.code(400).send({ error: "payout_mode must be 'immediate' or 'batched'" });
+      return;
+    }
+
+    const provider = getProviderByAddress(providerAddress);
+    if (!provider) {
+      reply.code(404).send({ error: "no registered provider for this address" });
+      return;
+    }
+
+    const updated = setProviderPayoutMode(providerAddress, parsed.data.payout_mode);
+    return {
+      stellar_address: providerAddress,
+      payout_mode: updated?.payoutMode ?? "immediate",
+    };
   });
 
   app.get("/provider/dashboard", async (req, reply) => {

@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import "./i18n/index.js";
 import "./index.css";
 import Home from "./pages/Home.js";
 import ClaimQR from "./pages/ClaimQR.js";
@@ -30,6 +31,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/claim/:id" element={<ClaimQR />} />
           <Route path="/chat/:tradeId" element={<Chat />} />
           <Route path="/merchant/scan" element={<MerchantScan />} />
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

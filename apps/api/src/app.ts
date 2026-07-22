@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import { randomUUID } from "crypto";
 import "dotenv/config";
+import { resolveLocale, t } from "./lib/i18n.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
@@ -14,6 +15,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { statusRoutes } from "./routes/status.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
+import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
 
 const usedPayments = new Set<string>();
 
@@ -56,6 +58,20 @@ app.addHook("onRequest", async (req, reply) => {
   reply.header("x-request-id", req.id);
 });
 
+/**
+ * Locale detection — resolve the best supported locale from the
+ * Accept-Language header and attach it to the request for downstream
+ * handlers. Falls back to "en" when no supported locale matches.
+ */
+app.decorateRequest("locale", "");
+app.addHook("onRequest", async (req) => {
+  const raw = req.headers["accept-language"];
+  const locale = resolveLocale(
+    Array.isArray(raw) ? raw[0] : raw
+  );
+  (req as any).locale = locale;
+});
+
 // Allow the mobile frontend (and other trusted origins) to call this API
 // from the browser. Locked to specific origins rather than "*" since
 // this API also handles authenticated/paid requests later.
@@ -94,12 +110,23 @@ app.register(rateLimit, {
   global: true,
   max: 100,
   timeWindow: "1 minute",
+  onExceeded: (request, identifier) => {
+    recordRateLimitViolation(
+      {
+        identifier,
+        route: request.routeOptions.url ?? request.url.split("?", 1)[0],
+        method: request.method,
+      },
+      (app as any).pg,
+    );
+  },
   errorResponseBuilder: (request, context) => {
+    const locale = (request as any).locale ?? "en";
     return {
       statusCode: 429,
-      error: "Too Many Requests",
-      message: `Rate limit exceeded. You have sent too many requests in ${context.after}. Please wait before retrying.`,
-      retryAfter: context.after, // human-readable, e.g. "1 minute"
+      error: t(locale, "errors.tooManyRequests"),
+      message: t(locale, "errors.rateLimited", { after: context.after }),
+      retryAfter: context.after,
       retryAfterSeconds: Math.ceil(context.ttl / 1000),
     };
   },

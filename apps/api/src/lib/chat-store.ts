@@ -2,7 +2,8 @@ export interface ChatMessage {
   id: string;
   tradeId: string;
   sender: string;
-  text: string;
+  ciphertext: string;
+  nonce: string;
   createdAt: string;
 }
 

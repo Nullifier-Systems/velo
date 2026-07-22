@@ -1,5 +1,6 @@
 import {
     BASE_FEE,
+    FeeBumpTransaction,
     Keypair,
     Networks,
     Operation,
@@ -59,11 +60,9 @@ function loadSignerKeypair(): Keypair {
 /**
  * Loads the platform treasury keypair used to sponsor user transactions
  * via fee-bumps. Defaults to BUYER_SECRET_KEY if SPONSOR_SECRET_KEY is omitted.
+ * Works on both testnet and mainnet when SPONSOR_SECRET_KEY is configured.
  */
 function loadSponsorKeypair(): Keypair {
-    if (process.env.STELLAR_NETWORK === "PUBLIC") {
-        throw new Error("Custodial sponsor cannot be used on mainnet.");
-    }
     const secret = process.env.SPONSOR_SECRET_KEY || process.env.BUYER_SECRET_KEY;
     if (!secret) {
         throw new Error(
@@ -84,6 +83,28 @@ function hexToBytesScVal(hex: string) {
 // ---------------------------------------------------------------------------
 // Build helpers — return unsigned, simulated XDR (non-custodial flow)
 // ---------------------------------------------------------------------------
+
+function wrapWithFeeBumpIfPossible(tx: Transaction | FeeBumpTransaction): Transaction | FeeBumpTransaction {
+    if (tx instanceof FeeBumpTransaction) {
+        return tx;
+    }
+
+    try {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(tx.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            tx,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        return feeBumpTx;
+    } catch {
+        return tx;
+    }
+}
 
 interface BuildTxResult {
     /** Unsigned transaction XDR (base64) ready for client-side signing. */
@@ -127,7 +148,8 @@ async function buildUnsignedTx(
  */
 async function submitSignedEnvelope(signedXdr: string): Promise<{ hash: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const hash = (await server.sendTransaction(tx)).hash;
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const hash = (await server.sendTransaction(txToSubmit)).hash;
 
     const start = Date.now();
     for (;;) {
@@ -187,19 +209,25 @@ async function invokeContract(
     const txHash = prepared.hash().toString("hex");
     stageLog.info({ stage: "sign", txHash }, "transaction signed");
 
-    const sponsor = loadSponsorKeypair();
-    const innerFee = parseInt(prepared.fee, 10);
-    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+    // Conditionally use fee-bump if sponsor is configured
+    let txToSubmit = prepared;
+    if (process.env.SPONSOR_SECRET_KEY) {
+        const sponsor = loadSponsorKeypair();
+        const innerFee = parseInt(prepared.fee, 10);
+        const bumpFee = innerFee + parseInt(BASE_FEE, 10);
 
-    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
-        sponsor,
-        bumpFee.toString(),
-        prepared,
-        NETWORK_PASSPHRASE
-    );
-    feeBumpTx.sign(sponsor);
+        const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+            sponsor,
+            bumpFee.toString(),
+            prepared,
+            NETWORK_PASSPHRASE
+        );
+        feeBumpTx.sign(sponsor);
+        txToSubmit = feeBumpTx;
+        stageLog.info({ stage: "fee_bump", sponsor: sponsor.publicKey() }, "transaction fee-bumped");
+    }
 
-    const sendResult = await server.sendTransaction(feeBumpTx);
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         stageLog.error(
             { stage: "submit", txHash, errorResult: JSON.stringify(sendResult.errorResult) },
@@ -448,6 +476,50 @@ export async function disputeEscrow(params: DisputeParams) {
     );
 }
 
+export interface BatchReleaseParams {
+    contractId: string;
+    /** Each entry mirrors ReleaseParams — one trade id and its revealed secret. */
+    releases: { tradeId: string; secretHex: string }[];
+}
+
+/** Encodes one (id, secret) pair as the BatchReleaseItem struct the escrow
+ * contract expects — an ScMap with keys in alphabetical field order. */
+function batchReleaseItemScVal(tradeId: string, secretHex: string): xdr.ScVal {
+    return xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("id"),
+            val: hexToBytesScVal(tradeId),
+        }),
+        new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("secret"),
+            val: hexToBytesScVal(secretHex),
+        }),
+    ]);
+}
+
+/**
+ * Testnet-only: custodial batch release (API signs). Settles many trades'
+ * payouts in a single Soroban invocation of the escrow contract's
+ * `batch_release()` — the on-chain half of provider payout batching. Each
+ * item is still verified against its own trade's secret hash on-chain, so
+ * this changes nothing about the trust model versus calling `release()`
+ * once per trade — it only reduces how many separate transactions get
+ * submitted. See docs/provider-payout-batching.md.
+ *
+ * Returns the hex trade ids that were actually released (a stale or
+ * already-settled entry is skipped by the contract, not rejected as a
+ * whole batch).
+ */
+export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<string[]> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex))
+    );
+    const result = await invokeContract(params.contractId, "batch_release", [itemsScVal], signer);
+    const releasedIds = (result as Buffer[] | undefined) ?? [];
+    return releasedIds.map((id) => Buffer.from(id).toString("hex"));
+}
+
 export interface ResolveParams {
     contractId: string;
     tradeId: string;
@@ -505,7 +577,8 @@ export async function buildRefundEscrowTransaction(params: RefundParams & { sign
  */
 export async function submitSignedTransaction(signedXdr: string): Promise<{ hash: string; status: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const sendResult = await server.sendTransaction(tx);
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const sendResult = await server.sendTransaction(txToSubmit);
     if (sendResult.status === "ERROR") {
         throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
     }

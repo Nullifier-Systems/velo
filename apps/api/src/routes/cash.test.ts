@@ -4,7 +4,7 @@ import { cashRoutes } from "./cash.js";
 import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
 import { sendRefundAlert } from "../lib/webhook.js";
-import { getCashRequest } from "../lib/store.js";
+import { getCashRequest, saveProvider } from "../lib/store.js";
 
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
@@ -130,6 +130,61 @@ describe("cashRoutes", () => {
     });
     expect(sentNotificationsQueue[0].message).toContain("released");
     expect(sentNotificationsQueue[0].message).toContain("2.5"); // stroops formatted correctly
+  });
+
+  it("queues release for a provider opted into batched payouts instead of calling releaseEscrow", async () => {
+    const seller = "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+    saveProvider({
+      id: "batched-provider-test",
+      stellarAddress: seller,
+      name: "Batched Payout Shop",
+      lat: 0,
+      lng: 0,
+      tier: "Probationary",
+      rate: "1.0",
+      status: "available",
+      kycStatus: "pending",
+      createdAt: new Date().toISOString(),
+      payoutMode: "batched",
+    });
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
+      payload: {
+        seller,
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "d".repeat(64),
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    const releaseRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "e".repeat(64) },
+    });
+
+    expect(releaseRes.statusCode).toBe(200);
+    expect(releaseRes.json()).toMatchObject({ status: "pending_batch" });
+    expect(releaseEscrow).not.toHaveBeenCalled();
+
+    const record = getCashRequest(tradeId);
+    expect(record?.status).toBe("pending_batch");
+    expect(record?.secretHex).toBe("e".repeat(64));
+
+    // Calling release again while queued is idempotent, not an error.
+    const secondRelease = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "e".repeat(64) },
+    });
+    expect(secondRelease.statusCode).toBe(200);
+    expect(secondRelease.json()).toMatchObject({ status: "pending_batch" });
+    expect(releaseEscrow).not.toHaveBeenCalled();
   });
 
   it("creates with sms opt-in and triggers sms notification on refund", async () => {

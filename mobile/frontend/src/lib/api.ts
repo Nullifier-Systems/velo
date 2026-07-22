@@ -35,13 +35,32 @@ export interface ChatMessage {
   id: string;
   tradeId: string;
   sender: string;
-  text: string;
+  ciphertext: string;
+  nonce: string;
   createdAt: string;
 }
 
 export async function fetchChatHistory(tradeId: string, participant: string): Promise<{ messages: ChatMessage[] }> {
   const res = await fetch(`${API_BASE}/api/v1/chat/${tradeId}/history?participant=${encodeURIComponent(participant)}`);
   if (!res.ok) throw new Error("chat history failed");
+  return res.json();
+}
+
+export interface KeyEntry {
+  publicKey: string;
+  updatedAt: string;
+}
+
+export async function publishChatKey(tradeId: string, participant: string, publicKey: string): Promise<KeyEntry> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/chat/${tradeId}/keys?participant=${encodeURIComponent(participant)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicKey }),
+    }
+  );
+  if (!res.ok) throw new Error("publishing chat key failed");
   return res.json();
 }
 

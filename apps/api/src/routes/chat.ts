@@ -1,7 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
+import { z } from "zod";
 import { getCashRequest, type CashRequestRecord } from "../lib/store.js";
 import { saveMessage, getMessages, type ChatMessage } from "../lib/chat-store.js";
+import { publishKey, getKey, getKeys } from "../lib/key-store.js";
+import { parseBody } from "../lib/validation.js";
+
+// X25519 public keys are 32 raw bytes -> 44 base64 chars (with padding).
+const publicKeySchema = z.object({
+  publicKey: z.string().trim().regex(/^[A-Za-z0-9+/]{42,44}={0,2}$/),
+});
 
 const tradeRooms = new Map<string, Set<WebSocket>>();
 
@@ -54,6 +62,45 @@ export async function chatRoutes(app: FastifyInstance) {
     }
   );
 
+  app.post<{ Params: { tradeId: string }; Querystring: { participant?: string }; Body: z.infer<typeof publicKeySchema> }>(
+    "/chat/:tradeId/keys",
+    async (req, reply) => {
+      const record = getCashRequest(req.params.tradeId);
+      const participant = req.query.participant ?? "";
+      const error = authorize(record, participant);
+      if (error) {
+        reply.code(403).send({ error });
+        return;
+      }
+
+      const body = parseBody(publicKeySchema, req.body, reply);
+      if (!body) return;
+
+      const entry = publishKey(req.params.tradeId, participant, body.publicKey);
+      broadcast(req.params.tradeId, { type: "peerKey", participant, publicKey: entry.publicKey });
+      return entry;
+    }
+  );
+
+  app.get<{ Params: { tradeId: string }; Querystring: { participant?: string } }>(
+    "/chat/:tradeId/keys",
+    async (req, reply) => {
+      const record = getCashRequest(req.params.tradeId);
+      const participant = req.query.participant ?? "";
+      const error = authorize(record, participant);
+      if (error) {
+        reply.code(403).send({ error });
+        return;
+      }
+
+      const keys = getKeys(req.params.tradeId);
+      return {
+        buyer: keys.get(record!.buyer) ?? null,
+        seller: keys.get(record!.seller) ?? null,
+      };
+    }
+  );
+
   app.get<{ Params: { tradeId: string }; Querystring: { participant?: string } }>(
     "/chat/:tradeId",
     { websocket: true },
@@ -72,10 +119,14 @@ export async function chatRoutes(app: FastifyInstance) {
 
       joinRoom(tradeId, socket);
 
+      const peer = participant === record!.buyer ? record!.seller : record!.buyer;
+      const peerKey = getKey(tradeId, peer);
+
       socket.send(JSON.stringify({
         type: "joined",
         tradeId,
         participant,
+        peerKey,
       }));
 
       socket.on("message", (raw: Buffer | string) => {
@@ -89,8 +140,12 @@ export async function chatRoutes(app: FastifyInstance) {
 
         if (payload.type !== "message") return;
 
-        const text = typeof payload.data?.text === "string" ? payload.data.text.trim() : "";
-        if (!text) return;
+        const ciphertext = typeof payload.data?.ciphertext === "string" ? payload.data.ciphertext.trim() : "";
+        const nonce = typeof payload.data?.nonce === "string" ? payload.data.nonce.trim() : "";
+        if (!ciphertext || !nonce) {
+          socket.send(JSON.stringify({ type: "error", message: "message must include ciphertext and nonce" }));
+          return;
+        }
 
         const current = getCashRequest(tradeId);
         if (!current || current.status !== "locked") {
@@ -98,7 +153,7 @@ export async function chatRoutes(app: FastifyInstance) {
           return;
         }
 
-        const saved = saveMessage({ tradeId, sender: participant, text });
+        const saved = saveMessage({ tradeId, sender: participant, ciphertext, nonce });
         broadcast(tradeId, { type: "message", data: saved });
       });
 

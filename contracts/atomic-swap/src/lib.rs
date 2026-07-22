@@ -202,3 +202,6 @@ fn panic_with_error(_env: &Env, err: Error) -> ! {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod property_test;

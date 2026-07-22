@@ -1,0 +1,54 @@
+{
+  "errors": {
+    "invalidRequest": "Invalid request",
+    "notFound": "Request not found",
+    "internalError": "Internal server error",
+    "rateLimited": "Rate limit exceeded. You have sent too many requests in {{after}}. Please wait before retrying.",
+    "tooManyRequests": "Too Many Requests",
+    "paymentRequired": "Payment required",
+    "paymentAlreadyUsed": "Payment already used",
+    "paymentNotSuccessful": "Payment transaction not successful",
+    "invalidPaymentMemo": "Invalid payment memo",
+    "invalidPaymentTransaction": "Invalid payment transaction",
+    "noValidPayment": "Transaction does not contain a valid payment",
+    "onlyParticipants": "Only trade participants can dispute a trade",
+    "notParticipant": "Not a participant of this trade",
+    "tradeNotFound": "Trade not found",
+    "chatOnlyWhileLocked": "Chat is only available while trade is locked",
+    "tradeNoLongerActive": "Trade is no longer active",
+    "invalidJSON": "Invalid JSON",
+    "invalidCoordinates": "Invalid numeric coordinates or radius supplied",
+    "precisionRange": "Precision must be an integer between 4 and 8",
+    "nameLatLngRequired": "Name, lat (number), and lng (number) are required",
+    "registrationLimit": "Registration limit exceeded for this network or device",
+    "contactInfoRequired": "Contact info is required when notification type is specified",
+    "invalidEmail": "Invalid email address format for contact info",
+    "invalidPhone": "Invalid phone number format for contact info",
+    "modeMustBe": "Mode must be either 'custodial' or 'non_custodial'",
+    "signedXdrRequired": "Signed XDR is required",
+    "wrongStatus": "Request is already {{status}}",
+    "wrongStatusExpected": "Request is in status {{status}}, expected {{expected}}",
+    "escrowLockFailed": "Escrow lock failed",
+    "escrowReleaseFailed": "Escrow release failed",
+    "escrowRefundFailed": "Escrow refund failed",
+    "escrowDisputeFailed": "Escrow dispute failed",
+    "transactionBuildFailed": "Failed to build transaction",
+    "transactionSubmitFailed": "Transaction submission failed",
+    "releaseSubmissionFailed": "Release submission failed",
+    "refundSubmissionFailed": "Refund submission failed",
+    "secretOrSignedXdrRequired": "Either secret or signed_xdr is required",
+    "locationRevealedOnlyAfterMatch": "Location is revealed only after a match is confirmed (escrow locked)",
+    "noProviderForTrade": "No registered provider for this trade"
+  },
+  "instructions": {
+    "showQR": "Show this QR to the cash provider to receive your cash.",
+    "signAndSubmit": "Sign the transaction with your wallet and submit to the provided endpoint."
+  },
+  "notifications": {
+    "claimUpdate": "Velo claim update: Your claim {{id}} for {{amount}} XLM/USDC has been {{status}}.",
+    "emailSubject": "Velo Claim Update: {{status}}"
+  },
+  "privacy": {
+    "note": "Locations are generalized to a geohash cell; exact coordinates are revealed only to a confirmed match."
+  }
+}
