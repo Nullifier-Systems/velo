@@ -81,6 +81,12 @@ sequenceDiagram
 9. The **Merchant** opens the **Merchant Release Terminal** on their frontend and scans the QR code.
 10. The scanning terminal extracts the `request_id` and `secret` from the QR payload.
 11. The merchant's frontend fetches transaction details from the **API Layer** (`GET /api/v1/cash/request/:id`) to display the locked amount, buyer address, and current status.
+
+The status read also compares a locked request's `timeoutLedger` with the latest
+closed Stellar ledger. Once the timeout is reached, the API records and returns
+`expired`. This is a display/workflow state only: funds are not returned until a
+caller separately invokes `POST /api/v1/cash/request/:id/refund`, after which the
+request becomes `refunded`.
 12. The **API Layer** verifies the database record and returns the metadata.
 13. The merchant terminal displays the verification screen.
 

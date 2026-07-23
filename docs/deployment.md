@@ -18,6 +18,12 @@ The deployment script checks RPC availability and account balance before submitt
 
 The API and mobile backend services should be deployed with explicit environment configuration and monitoring. The current repository expects environment variables for ports, merchant settings, and network configuration.
 
+### WebSocket chat
+
+Multi-instance chat requires a managed Redis service reachable through `REDIS_URL`. All API instances must share that Redis database and the same `CHAT_CAPABILITY_SECRET` (minimum 32 characters). Redis holds trade membership, ciphertext history, encryption public keys, sequence IDs, and Pub/Sub channels; do not use the no-Redis development fallback in serverless production.
+
+The hosting platform must support WebSocket upgrades and connection lifetimes long enough for chat. Deployments may interrupt sockets, so clients automatically reconnect and request messages after their last received ID. Keep `CHAT_CAPABILITY_TTL_SECONDS` long enough for the expected locked-trade session and rotate `CHAT_CAPABILITY_SECRET` as a coordinated deployment because rotation invalidates outstanding capabilities.
+
 ## Release Checklist
 
 - verify contract build output,

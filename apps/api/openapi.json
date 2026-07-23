@@ -270,6 +270,7 @@
                             "type": "string",
                             "enum": [
                               "locked",
+                              "expired",
                               "released",
                               "refunded"
                             ]
@@ -1002,6 +1003,7 @@
             "type": "string",
             "enum": [
               "locked",
+              "expired",
               "released",
               "refunded",
               "disputed"

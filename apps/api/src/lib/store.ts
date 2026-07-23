@@ -14,8 +14,10 @@ export interface CashRequestRecord {
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
-    status: "locked" | "released" | "refunded" | "disputed" | "pending_signature" | "pending_batch";
+    status: "locked" | "expired" | "released" | "refunded" | "disputed" | "pending_signature" | "pending_batch";
     createdAt: string;
+    /** First ledger at which the on-chain escrow can be refunded. */
+    timeoutLedger?: number;
     disputedAt?: string;
     disputedBy?: string;
     disputeReason?: string;
@@ -80,6 +82,19 @@ export function getProviderByAddress(stellarAddress: string): ProviderRecord | u
     return undefined;
 }
 
+export function getProviderById(id: string): ProviderRecord | undefined {
+    return providersStore.get(id);
+}
+
+export function setProviderVerificationStatus(
+    id: string,
+    status: ProviderRecord["kycStatus"]
+): ProviderRecord | undefined {
+    const record = providersStore.get(id);
+    if (record) record.kycStatus = status;
+    return record;
+}
+
 export function countProvidersByNetwork(ipAddress?: string, deviceId?: string): number {
     let count = 0;
     for (const record of providersStore.values()) {
@@ -102,6 +117,24 @@ export function getAllCashRequests(): CashRequestRecord[] {
 export function updateStatus(id: string, status: CashRequestRecord["status"]) {
     const record = store.get(id);
     if (record) record.status = status;
+}
+
+/**
+ * Mark an unreleased lock expired once its on-chain refund ledger is reached.
+ * This changes only API state; callers must still invoke refund() separately.
+ */
+export function expireCashRequest(
+    record: CashRequestRecord,
+    currentLedger: number,
+): CashRequestRecord {
+    if (
+        record.status === "locked" &&
+        record.timeoutLedger !== undefined &&
+        currentLedger >= record.timeoutLedger
+    ) {
+        record.status = "expired";
+    }
+    return record;
 }
 
 export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
@@ -158,6 +191,7 @@ export function getStoreStats() {
         total_providers: providersStore.size,
         cash_requests_by_status: {
             locked: requests.filter(r => r.status === "locked").length,
+            expired: requests.filter(r => r.status === "expired").length,
             released: requests.filter(r => r.status === "released").length,
             refunded: requests.filter(r => r.status === "refunded").length,
             disputed: requests.filter(r => r.status === "disputed").length,
