@@ -50,5 +50,8 @@
   },
   "privacy": {
     "note": "Locations are generalized to a geohash cell; exact coordinates are revealed only to a confirmed match."
+  },
+  "discovery": {
+    "noProvidersNearby": "Velo is not available in this area yet because there are no approved cash providers nearby. Check back later."
   }
 }
