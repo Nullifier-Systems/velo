@@ -663,7 +663,9 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.mocked(lockEscrow).mockReset().mockResolvedValue(1_000);
+    vi.mocked(releaseEscrow).mockReset().mockResolvedValue(undefined);
+    vi.mocked(refundEscrow).mockReset().mockResolvedValue(undefined);
     app = Fastify();
     registerApp(app);
   });
