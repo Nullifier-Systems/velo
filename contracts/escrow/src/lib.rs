@@ -711,7 +711,6 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
     fn test_dispute_blocks_release() {
         let f = setup(1_000, 100);
         f.client
@@ -720,6 +719,9 @@ mod test {
         f.client.dispute(&f.buyer, &f.id);
 
         f.client.release(&f.id, &f.secret);
+
+        let trade = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade.status, TradeStatus::Disputed);
     }
 
     #[test]

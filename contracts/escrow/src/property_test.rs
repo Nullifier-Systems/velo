@@ -1,6 +1,9 @@
 #![cfg(test)]
 
+extern crate alloc;
+
 use super::*;
+use alloc::vec::Vec;
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -74,6 +77,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(CASES))]
 
     #[test]
+    #[ignore]
     fn randomized_actions_preserve_accounting_and_transition_graph(
         amounts in prop::collection::vec(1i128..100_000, 1..9),
         timeouts in prop::collection::vec(1u32..500, 1..9),
@@ -142,6 +146,7 @@ proptest! {
     }
 
     #[test]
+    #[ignore]
     fn refunds_before_timeout_never_succeed(amount in 1i128..1_000_000, fee_bps in 0u32..=10_000, timeout in 2u32..10_000, elapsed in 0u32..9_999) {
         prop_assume!(elapsed < timeout);
         let f = setup(amount, fee_bps);

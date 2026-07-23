@@ -18,6 +18,8 @@
 //! swap settles the counterpart value on the other chain, not via a fee here.
 #![no_std]
 
+extern crate alloc;
+
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
