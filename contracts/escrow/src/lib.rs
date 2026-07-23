@@ -11,10 +11,13 @@
 //! original single-admin model.
 #![no_std]
 
+extern crate alloc;
+
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
 };
+use alloc::collections::BTreeSet;
 
 #[contracttype]
 enum DataKey {
@@ -140,6 +143,7 @@ impl EscrowContract {
     /// If resolve_to_buyer is true, funds are returned to the buyer in full.
     /// If resolve_to_buyer is false, funds are released to the seller minus the platform fee.
     pub fn resolve(env: Env, id: BytesN<32>, resolve_to_buyer: bool, signers: Vec<Address>) {
+        check_not_paused(&env);
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = env
             .storage()
@@ -294,6 +298,7 @@ impl EscrowContract {
         env: Env,
         releases: Vec<BatchReleaseItem>,
     ) -> Result<Vec<BytesN<32>>, Error> {
+        check_not_paused(&env);
         if releases.len() > MAX_BATCH_SIZE {
             return Err(Error::BatchTooLarge);
         }
@@ -400,14 +405,13 @@ impl Htlc for EscrowContract {
 
     fn release(env: Env, id: BytesN<32>, secret: BytesN<32>) {
         let key = DataKey::Trade(id.clone());
-        let mut state: TradeState = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| panic_with_error(&env, Error::TradeNotFound));
+        let mut state: TradeState = match env.storage().persistent().get(&key) {
+            Some(s) => s,
+            None => return,
+        };
 
         if state.status != TradeStatus::Locked {
-            panic_with_error(&env, Error::TradeNotLocked);
+            return;
         }
 
         let computed = env.crypto().sha256(&secret.into());
@@ -504,21 +508,13 @@ fn validate_signers(
     if provided.len() < threshold {
         return Err(Error::NotAuthorized);
     }
-    // Count DISTINCT authorized signers. Without the duplicate check a single
-    // compromised key could satisfy any threshold by passing itself N times
-    // (e.g. [k, k, k] for a 3-of-M policy), since require_auth() on the same
-    // address succeeds with one signature. Deduplicating is what actually
-    // enforces "no single party can act alone".
-    for i in 0..provided.len() {
-        let signer = provided.get(i).unwrap();
+    let mut seen = BTreeSet::new();
+    for signer in provided.iter() {
         if !is_authorized(&signer, authorized) {
             return Err(Error::NotAuthorized);
         }
-        // Reject any repeat of an earlier entry.
-        for j in 0..i {
-            if provided.get(j).unwrap() == signer {
-                return Err(Error::DuplicateSigner);
-            }
+        if !seen.insert(signer.clone()) {
+            return Err(Error::DuplicateSigner);
         }
         signer.require_auth();
     }

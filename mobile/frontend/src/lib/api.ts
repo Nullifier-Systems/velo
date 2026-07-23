@@ -7,8 +7,14 @@ export interface CashRequestStatus {
   buyer: string;
   amountStroops: string;
   secretHashHex: string;
-  status: "locked" | "released" | "refunded";
+  status: "locked" | "released" | "refunded" | "disputed";
   createdAt: string;
+  disputedAt?: string;
+  disputedBy?: string;
+  disputeReason?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolution?: string;
 }
 
 

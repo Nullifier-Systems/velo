@@ -34,7 +34,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/dashboard`, {
         headers: {
           'x-provider-address': providerAddress
@@ -57,7 +57,7 @@ export default function Dashboard() {
 
   const exportData = async (format: 'csv' | 'json') => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/export?format=${format}`, {
         headers: {
           'x-provider-address': address

@@ -129,7 +129,7 @@ describe("providerRoutes", () => {
     const app = Fastify();
     registerApp(app);
 
-    const validAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+    const validAddress = "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN";
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/provider/register",
@@ -183,7 +183,7 @@ describe("providerRoutes", () => {
       method: "POST",
       url: "/api/v1/provider/register",
       payload: {
-        stellar_address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH",
+        stellar_address: "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN",
         name: "Out of range rate shop",
         lat: 19.4326,
         lng: -99.1332,
@@ -214,7 +214,7 @@ describe("providerRoutes", () => {
     it("rejects an invalid payout_mode", async () => {
       const app = Fastify();
       registerApp(app);
-      const providerAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+      const providerAddress = "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN";
 
       const response = await app.inject({
         method: "POST",
@@ -234,7 +234,7 @@ describe("providerRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/provider/payout-settings",
-        headers: { "x-provider-address": "G_UNKNOWN_PAYOUT_SETTINGS_ADDR" },
+        headers: { "x-provider-address": "G2RMx5BpwMMtD2xoS5WtysX8TLYSeuztbTwRsjdJZkQbaq21GGhnJVLJ" },
         payload: { payout_mode: "batched" },
       });
 

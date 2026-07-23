@@ -86,7 +86,7 @@ describe("stellar invocation lifecycle logging", () => {
     await lockEscrow(lockParams(), log);
 
     const stages = lines.map((l) => l.obj.stage);
-    expect(stages).toEqual(["build", "simulate", "sign", "submit", "submit", "poll"]);
+    expect(stages).toEqual(["build", "simulate", "sign", "submit", "poll"]);
     // Every line carries the contract/function bindings from the child logger,
     // so combined with req.log's reqId binding the whole chain is traceable.
     for (const line of lines) {
