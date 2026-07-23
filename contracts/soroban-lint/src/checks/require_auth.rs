@@ -15,13 +15,19 @@ struct RequireAuthVisitor<'a> {
 
 impl<'a> RequireAuthVisitor<'a> {
     fn new(file_path: &'a Path) -> Self {
-        Self { file_path, warnings: 0, errors: 0 }
+        Self {
+            file_path,
+            warnings: 0,
+            errors: 0,
+        }
     }
 
     fn emit_warning(&mut self, fn_name: &str, params: &[String]) {
         println!(
             "  ⚠  {}: function `{}` has Address parameter(s) ({}) but no require_auth() call",
-            self.file_path.display(), fn_name, params.join(", ")
+            self.file_path.display(),
+            fn_name,
+            params.join(", ")
         );
         println!(
             "     │  Soroban requires explicit require_auth() on Address parameters\n\
@@ -34,12 +40,18 @@ impl<'a> RequireAuthVisitor<'a> {
 
 impl<'a> Visit<'_> for RequireAuthVisitor<'a> {
     fn visit_item_fn(&mut self, node: &ItemFn) {
-        if !matches!(node.vis, Visibility::Public(_)) { return; }
-        if node.attrs.iter().any(|a| is_test_attr(a)) { return; }
+        if !matches!(node.vis, Visibility::Public(_)) {
+            return;
+        }
+        if node.attrs.iter().any(|a| is_test_attr(a)) {
+            return;
+        }
 
         let fn_name = node.sig.ident.to_string();
         let addr_params = collect_address_params(&node.sig.inputs);
-        if addr_params.is_empty() { return; }
+        if addr_params.is_empty() {
+            return;
+        }
 
         let mut auth_visitor = AuthCallVisitor::new(&addr_params);
         auth_visitor.visit_block(&node.block);
@@ -49,12 +61,18 @@ impl<'a> Visit<'_> for RequireAuthVisitor<'a> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &ImplItemFn) {
-        if !matches!(node.vis, Visibility::Public(_)) { return; }
-        if node.attrs.iter().any(|a| is_test_attr(a)) { return; }
+        if !matches!(node.vis, Visibility::Public(_)) {
+            return;
+        }
+        if node.attrs.iter().any(|a| is_test_attr(a)) {
+            return;
+        }
 
         let fn_name = node.sig.ident.to_string();
         let addr_params = collect_address_params(&node.sig.inputs);
-        if addr_params.is_empty() { return; }
+        if addr_params.is_empty() {
+            return;
+        }
 
         let mut auth_visitor = AuthCallVisitor::new(&addr_params);
         auth_visitor.visit_block(&node.block);
@@ -64,22 +82,35 @@ impl<'a> Visit<'_> for RequireAuthVisitor<'a> {
     }
 }
 
-fn collect_address_params(inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>) -> Vec<String> {
-    inputs.iter().filter_map(|arg| {
-        if let FnArg::Typed(pt) = arg {
-            if is_address_type(&pt.ty) {
-                if let Pat::Ident(pi) = &*pt.pat { return Some(pi.ident.to_string()); }
+fn collect_address_params(
+    inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
+) -> Vec<String> {
+    inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pt) = arg {
+                if is_address_type(&pt.ty) {
+                    if let Pat::Ident(pi) = &*pt.pat {
+                        return Some(pi.ident.to_string());
+                    }
+                }
             }
-        }
-        None
-    }).collect()
+            None
+        })
+        .collect()
 }
 
-struct AuthCallVisitor { target_params: Vec<String>, found: bool }
+struct AuthCallVisitor {
+    target_params: Vec<String>,
+    found: bool,
+}
 
 impl AuthCallVisitor {
     fn new(targets: &[String]) -> Self {
-        Self { target_params: targets.to_vec(), found: false }
+        Self {
+            target_params: targets.to_vec(),
+            found: false,
+        }
     }
 }
 
@@ -100,7 +131,12 @@ impl<'a> Visit<'_> for AuthCallVisitor {
 
 fn is_address_type(ty: &Type) -> bool {
     match ty {
-        Type::Path(tp) => tp.path.segments.last().map(|s| s.ident == "Address").unwrap_or(false),
+        Type::Path(tp) => tp
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident == "Address")
+            .unwrap_or(false),
         Type::Reference(tr) => is_address_type(&tr.elem),
         _ => false,
     }
@@ -109,5 +145,7 @@ fn is_address_type(ty: &Type) -> bool {
 fn is_test_attr(attr: &Attribute) -> bool {
     if let Meta::Path(p) = &attr.meta {
         p.is_ident("test") || p.is_ident("should_panic")
-    } else { false }
+    } else {
+        false
+    }
 }
