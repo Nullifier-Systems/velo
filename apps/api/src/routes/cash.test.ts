@@ -663,7 +663,9 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.mocked(lockEscrow).mockReset().mockResolvedValue(1_000);
+    vi.mocked(releaseEscrow).mockReset().mockResolvedValue(undefined);
+    vi.mocked(refundEscrow).mockReset().mockResolvedValue(undefined);
     app = Fastify();
     registerApp(app);
   });
@@ -716,7 +718,7 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
   });
 
   it("POST /cash/request/:id/release returns 504 when releaseEscrow times out", async () => {
-    vi.mocked(lockEscrow).mockResolvedValue(undefined);
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
 
     // Create a locked trade first
     const createRes = await app.inject({
@@ -747,7 +749,7 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
   });
 
   it("POST /cash/request/:id/refund returns 504 when refundEscrow times out", async () => {
-    vi.mocked(lockEscrow).mockResolvedValue(undefined);
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
 
     const createRes = await app.inject({
       method: "POST",
