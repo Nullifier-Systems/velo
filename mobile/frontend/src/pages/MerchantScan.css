@@ -75,6 +75,12 @@
   color: var(--ink);
 }
 
+.merchant-scan-alert.uncertain {
+  background: rgba(184, 116, 27, 0.1);
+  border-color: #b8741b;
+  color: var(--ink);
+}
+
 .alert-title {
   display: block;
   font-weight: 600;
@@ -100,6 +106,27 @@
 
 .scan-retry-button:hover {
   opacity: 0.9;
+}
+
+.uncertain-retry-button {
+  margin-top: 12px;
+  background: #b8741b;
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.uncertain-retry-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.uncertain-retry-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 /* Scanner viewport and overlay */

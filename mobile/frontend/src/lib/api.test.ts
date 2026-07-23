@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { formatStroops, shortAddress } from "./api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  formatStroops,
+  reconcileAndRetryRelease,
+  releaseCashRequest,
+  shortAddress,
+} from "./api";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("formatStroops", () => {
   it("formats a typical amount", () => {
@@ -51,5 +62,104 @@ describe("shortAddress", () => {
 
   it("handles an empty string", () => {
     expect(shortAddress("")).toBe("");
+  });
+});
+
+describe("releaseCashRequest", () => {
+  it("marks a dropped response as uncertain", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            setTimeout(() => reject(new TypeError("connection dropped")), 5_000);
+          })
+      )
+    );
+
+    const release = expect(
+      releaseCashRequest("trade-1", "secret")
+    ).rejects.toMatchObject({
+      kind: "uncertain",
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await release;
+  });
+
+  it("marks an RPC timeout response as uncertain", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "rpc_timeout" }), {
+          status: 504,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    );
+
+    await expect(
+      releaseCashRequest("trade-1", "secret")
+    ).rejects.toMatchObject({
+      kind: "uncertain",
+    });
+  });
+});
+
+describe("reconcileAndRetryRelease", () => {
+  it("does not POST again when the first release already succeeded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "trade-1",
+          status: "released",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reconcileAndRetryRelease("trade-1", "secret")
+    ).resolves.toBe("already_released");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toBeUndefined();
+  });
+
+  it("retries once with the same release identity after confirming it is locked", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "trade-1",
+            status: "locked",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "trade-1", status: "released" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reconcileAndRetryRelease("trade-1", "secret")
+    ).resolves.toBe("released");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ secret: "secret" }),
+    });
   });
 });

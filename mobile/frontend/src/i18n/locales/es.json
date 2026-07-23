@@ -103,6 +103,10 @@
     "parseError": "Error al interpretar el código QR",
     "fetchError": "Error al obtener los detalles del reclamo",
     "releaseError": "Error en la solicitud de liberación",
+    "uncertainTitle": "Estado de liberación desconocido",
+    "uncertainBody": "No sabemos con certeza si la liberación se completó. Pausa la entrega de efectivo mientras Velo comprueba la solicitud antes de reintentar.",
+    "checkAndRetry": "Comprobar estado y reintentar de forma segura",
+    "checkingRelease": "Comprobando el estado de la liberación...",
     "status": "Estado"
   },
   "dashboard": {

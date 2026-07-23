@@ -5,6 +5,8 @@ import QrScanner from "qr-scanner";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
 import {
   fetchCashRequest,
+  isUncertainReleaseError,
+  reconcileAndRetryRelease,
   releaseCashRequest,
   formatStroops,
   shortAddress,
@@ -20,12 +22,14 @@ export default function MerchantScan() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  const [releaseUncertain, setReleaseUncertain] = useState(false);
   const [scannedData, setScannedData] = useState<{ id: string; secret: string } | null>(null);
   const [claimDetails, setClaimDetails] = useState<CashRequestStatus | null>(null);
   const [manualCode, setManualCode] = useState("");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scannerRef = useRef<any | null>(null);
+  const releaseInFlightRef = useRef(false);
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -132,18 +136,30 @@ export default function MerchantScan() {
     }
   };
 
-  const handleRelease = async () => {
-    if (!scannedData || !claimDetails) return;
+  const handleRelease = async (reconcileFirst = false) => {
+    if (!scannedData || !claimDetails || releaseInFlightRef.current) return;
+    releaseInFlightRef.current = true;
     setReleasing(true);
     setError(null);
+    setReleaseUncertain(false);
     try {
-      await releaseCashRequest(scannedData.id, scannedData.secret);
+      if (reconcileFirst) {
+        await reconcileAndRetryRelease(scannedData.id, scannedData.secret);
+      } else {
+        await releaseCashRequest(scannedData.id, scannedData.secret);
+      }
       setSuccessMsg(t("merchant.fundsReleased"));
-      const updatedDetails = await fetchCashRequest(scannedData.id);
-      setClaimDetails(updatedDetails);
+      setClaimDetails((current) =>
+        current ? { ...current, status: "released" } : current
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("merchant.releaseError"));
+      if (isUncertainReleaseError(err)) {
+        setReleaseUncertain(true);
+      } else {
+        setError(err instanceof Error ? err.message : t("merchant.releaseError"));
+      }
     } finally {
+      releaseInFlightRef.current = false;
       setReleasing(false);
     }
   };
@@ -152,6 +168,7 @@ export default function MerchantScan() {
     setScannedData(null);
     setClaimDetails(null);
     setSuccessMsg(null);
+    setReleaseUncertain(false);
     setError(null);
     setManualCode("");
     setScanning(true);
@@ -230,6 +247,22 @@ export default function MerchantScan() {
           <div className="merchant-scan-alert success">
             <span className="alert-title">{t("merchant.successTitle")}</span>
             <p>{successMsg}</p>
+          </div>
+        )}
+
+        {releaseUncertain && (
+          <div className="merchant-scan-alert uncertain" role="status">
+            <span className="alert-title">{t("merchant.uncertainTitle")}</span>
+            <p>{t("merchant.uncertainBody")}</p>
+            <button
+              onClick={() => handleRelease(true)}
+              disabled={releasing}
+              className="uncertain-retry-button"
+            >
+              {releasing
+                ? t("merchant.checkingRelease")
+                : t("merchant.checkAndRetry")}
+            </button>
           </div>
         )}
 
@@ -314,7 +347,7 @@ export default function MerchantScan() {
             <div className="details-actions">
               {claimDetails.status === "locked" && !successMsg ? (
                 <button
-                  onClick={handleRelease}
+                  onClick={() => handleRelease(false)}
                   disabled={releasing}
                   className="release-action-button"
                 >
