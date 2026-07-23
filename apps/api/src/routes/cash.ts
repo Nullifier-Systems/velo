@@ -25,6 +25,7 @@ import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash
 import { t } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
+import { generateRecoveryToken, encryptRecoveryToken, hashContactInfo, computeTokenExpiration } from "../lib/recovery.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -280,6 +281,15 @@ export async function cashRoutes(app: FastifyInstance) {
           return;
         }
 
+        // Generate recovery token for secret recovery (issue #237)
+        const recoveryToken = generateRecoveryToken();
+        const recoveryChallenge = contact_info || buyer; // Use contact info if provided, else buyer address
+        const encryptedRecoveryToken = encryptRecoveryToken(recoveryToken, recoveryChallenge);
+        const recoveryContactHash = hashContactInfo(
+          notification_type === "email" ? contact_info : undefined,
+          notification_type === "sms" ? contact_info : undefined
+        );
+
         saveCashRequest({
           id: tradeId,
           contractId: ESCROW_CONTRACT_ID,
@@ -294,6 +304,10 @@ export async function cashRoutes(app: FastifyInstance) {
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
+          recoveryContactHash,
+          recoveryEncryptedToken: encryptedRecoveryToken,
+          recoveryTokenExpiresAt: computeTokenExpiration(),
+          recoveryAttempts: 0,
         });
         await registerTradeForChat(getCashRequest(tradeId)!);
 
@@ -317,6 +331,15 @@ export async function cashRoutes(app: FastifyInstance) {
             signerPublicKey: buyer,
           });
 
+          // Generate recovery token for secret recovery (issue #237)
+          const recoveryToken = generateRecoveryToken();
+          const recoveryChallenge = contact_info || buyer; // Use contact info if provided, else buyer address
+          const encryptedRecoveryToken = encryptRecoveryToken(recoveryToken, recoveryChallenge);
+          const recoveryContactHash = hashContactInfo(
+            notification_type === "email" ? contact_info : undefined,
+            notification_type === "sms" ? contact_info : undefined
+          );
+
           saveCashRequest({
             id: tradeId,
             contractId: ESCROW_CONTRACT_ID,
@@ -330,6 +353,10 @@ export async function cashRoutes(app: FastifyInstance) {
             createdAt: new Date().toISOString(),
             notificationType: notification_type,
             contactInfo: contact_info,
+            recoveryContactHash,
+            recoveryEncryptedToken: encryptedRecoveryToken,
+            recoveryTokenExpiresAt: computeTokenExpiration(),
+            recoveryAttempts: 0,
           });
           await registerTradeForChat(getCashRequest(tradeId)!);
 
@@ -430,6 +457,16 @@ export async function cashRoutes(app: FastifyInstance) {
       }
 
       const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
+      
+      // Generate recovery token for secret recovery (issue #237)
+      const recoveryToken = generateRecoveryToken();
+      const recoveryChallenge = contact_info || buyer; // Use contact info if provided, else buyer address
+      const encryptedRecoveryToken = encryptRecoveryToken(recoveryToken, recoveryChallenge);
+      const recoveryContactHash = hashContactInfo(
+        notification_type === "email" ? contact_info : undefined,
+        notification_type === "sms" ? contact_info : undefined
+      );
+
       saveCashRequest({
         id: tradeId,
         contractId: ESCROW_CONTRACT_ID,
@@ -444,6 +481,10 @@ export async function cashRoutes(app: FastifyInstance) {
         createdAt: new Date().toISOString(),
         notificationType: notification_type,
         contactInfo: contact_info,
+        recoveryContactHash,
+        recoveryEncryptedToken: encryptedRecoveryToken,
+        recoveryTokenExpiresAt: computeTokenExpiration(),
+        recoveryAttempts: 0,
       });
       await registerTradeForChat(getCashRequest(tradeId)!);
 
