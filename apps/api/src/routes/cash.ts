@@ -11,16 +11,20 @@ import {
   submitReleaseTx,
   submitRefundTx,
   NETWORK_PASSPHRASE,
+  getLatestLedgerSequence,
 } from "../lib/stellar.js";
+import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
-import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork, getProviderByAddress, enqueueForBatch } from "../lib/store.js";
+import { saveCashRequest, getCashRequest, updateStatus, expireCashRequest, saveProvider, getProviders, countProvidersByNetwork, getProviderByAddress, enqueueForBatch } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
 import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash.js";
 import { t } from "../lib/i18n.js";
+import { issueChatCapability } from "../lib/chat-capability.js";
+import { registerTradeForChat } from "../lib/chat-infrastructure.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -86,7 +90,9 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!paid) return;
 
       const { lat, lng, radius, precision, k } = req.query;
-      const providers = getProviders().filter(p => p.status === "available");
+      const providers = getProviders().filter(
+        p => p.status === "available" && p.kycStatus === "approved",
+      );
       const prec = precision ? parseInt(precision, 10) : DEFAULT_PRECISION;
       const kAnon = k ? parseInt(k, 10) : 1;
 
@@ -244,8 +250,9 @@ export async function cashRoutes(app: FastifyInstance) {
       const locale = (req as any).locale ?? "en";
 
       if (mode === "custodial") {
+        let lockedAtLedger: number;
         try {
-          await lockEscrow({
+          lockedAtLedger = await lockEscrow({
             contractId: ESCROW_CONTRACT_ID,
             tradeId,
             seller,
@@ -256,11 +263,20 @@ export async function cashRoutes(app: FastifyInstance) {
           });
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
-          reply.code(502).send({
-            error: "escrow lock failed",
-            detail: String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({
+              error: "escrow lock failed",
+              detail: String(err),
+              stack: err instanceof Error ? err.stack : undefined,
+            });
+          }
           return;
         }
 
@@ -274,14 +290,17 @@ export async function cashRoutes(app: FastifyInstance) {
           secretHashHex: secret_hash,
           qrPayload,
           status: "locked",
+          timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
         });
+        await registerTradeForChat(getCashRequest(tradeId)!);
 
         reply.code(201).send({
           // The secret is held client-side and is NOT returned by the API
           claim_url: `${baseUrl}/claim/${tradeId}`,
+          chat_token: issueChatCapability(tradeId, buyer),
           qr_payload: qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -312,6 +331,7 @@ export async function cashRoutes(app: FastifyInstance) {
             notificationType: notification_type,
             contactInfo: contact_info,
           });
+          await registerTradeForChat(getCashRequest(tradeId)!);
 
           reply.code(201).send({
             request_id: tradeId,
@@ -319,6 +339,7 @@ export async function cashRoutes(app: FastifyInstance) {
             network_passphrase: NETWORK_PASSPHRASE,
             submit_url: `/api/v1/cash/request/${tradeId}/submit`,
             claim_url: `${baseUrl}/claim/${tradeId}`,
+            chat_token: issueChatCapability(tradeId, buyer),
             qr_payload: qrPayload,
             instructions: t(locale, "instructions.signAndSubmit"),
           });
@@ -377,9 +398,10 @@ export async function cashRoutes(app: FastifyInstance) {
       // generates a fresh trade ID, so it cannot be paired with a
       // signed XDR built against some other trade ID.
       const tradeId = randomHex32();
+      let lockedAtLedger: number;
 
       try {
-        await lockEscrow({
+        lockedAtLedger = await lockEscrow({
           contractId: ESCROW_CONTRACT_ID,
           tradeId,
           seller,
@@ -390,11 +412,20 @@ export async function cashRoutes(app: FastifyInstance) {
         });
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
-        reply.code(502).send({
-          error: "escrow lock failed",
-          detail: String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-        });
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply.code(502).send({
+            error: "escrow lock failed",
+            detail: String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
         return;
       }
 
@@ -409,15 +440,18 @@ export async function cashRoutes(app: FastifyInstance) {
         secretHashHex: secret_hash,
         qrPayload,
         status: "locked",
+        timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
         createdAt: new Date().toISOString(),
         notificationType: notification_type,
         contactInfo: contact_info,
       });
+      await registerTradeForChat(getCashRequest(tradeId)!);
 
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       const locale = (req as any).locale ?? "en";
       reply.code(201).send({
         claim_url: `${baseUrl}/claim/${tradeId}`,
+        chat_token: issueChatCapability(tradeId, buyer),
         qr_payload: qrPayload,
         instructions: t(locale, "instructions.showQR"),
       });
@@ -436,6 +470,11 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!record) {
         reply.code(404).send({ error: "request not found" });
         return;
+      }
+      try {
+        expireCashRequest(record, await getLatestLedgerSequence());
+      } catch (err) {
+        req.log.warn(err, "could not check cash request expiry");
       }
       const { secretHex: _omit, ...safe } = record;
       return safe;
@@ -504,6 +543,7 @@ export async function cashRoutes(app: FastifyInstance) {
           status: "locked",
           transaction_hash: null,
           claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
           qr_payload: record.qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -523,6 +563,7 @@ export async function cashRoutes(app: FastifyInstance) {
       try {
         const result = await submitSignedTransaction(signed_xdr);
         updateStatus(record.id, "locked");
+        record.timeoutLedger = result.ledger + DEFAULT_TIMEOUT_LEDGERS;
 
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
         const locale = (req as any).locale ?? "en";
@@ -531,6 +572,7 @@ export async function cashRoutes(app: FastifyInstance) {
           status: "locked",
           transaction_hash: result.hash,
           claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
           qr_payload: record.qrPayload,
           instructions: t(locale, "instructions.showQR"),
         });
@@ -544,6 +586,7 @@ export async function cashRoutes(app: FastifyInstance) {
             status: "locked",
             transaction_hash: null,
             claim_url: `${baseUrl}/claim/${record.id}`,
+            chat_token: issueChatCapability(record.id, record.buyer),
             qr_payload: record.qrPayload,
             instructions: t(locale, "instructions.showQR"),
           });
@@ -627,7 +670,16 @@ export async function cashRoutes(app: FastifyInstance) {
             return { id: record.id, status: "released" };
           }
           req.log.error(err, "releaseEscrow failed");
-          reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          }
           return;
         }
       } else {
@@ -636,7 +688,7 @@ export async function cashRoutes(app: FastifyInstance) {
       }
 
       updateStatus(record.id, "released");
-      notifyTradeStatus(record.id, "released");
+      await notifyTradeStatus(record.id, "released");
       await sendNotification(record, "released", (req as any).locale ?? "en");
       return { id: record.id, status: "released" };
     }
@@ -658,7 +710,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (record.status === "refunded") {
         return { id: record.id, status: "refunded" };
       }
-      if (record.status !== "locked") {
+      if (record.status !== "locked" && record.status !== "expired") {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
       }
@@ -694,13 +746,22 @@ export async function cashRoutes(app: FastifyInstance) {
             return { id: record.id, status: "refunded" };
           }
           req.log.error(err, "refundEscrow failed");
-          reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          }
           return;
         }
       }
 
       updateStatus(record.id, "refunded");
-      notifyTradeStatus(record.id, "refunded");
+      await notifyTradeStatus(record.id, "refunded");
       await sendNotification(record, "refunded", (req as any).locale ?? "en");
 
       sendRefundAlert({

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { providerRoutes } from "./provider.js";
+import { adminRoutes } from "./admin.js";
+import { getProviderByAddress } from "../lib/store.js";
 import { saveCashRequest, CashRequestRecord } from "../lib/store.js";
 
 describe("providerRoutes", () => {
@@ -150,6 +152,8 @@ describe("providerRoutes", () => {
     expect(body.name).toBe("Test Provider Shop");
     expect(body.rate).toBe(1.05);
     expect(body.availability).toBe("available");
+    expect(body.verification_status).toBe("pending");
+    expect(getProviderByAddress(validAddress)?.kycStatus).toBe("pending");
 
     await app.close();
   });
@@ -193,6 +197,89 @@ describe("providerRoutes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe("Validation failed");
+    await app.close();
+  });
+
+  it("uploads a valid verification document and rejects spoofed images", async () => {
+    const app = Fastify();
+    registerApp(app);
+    const address = "GAVZLKC6ZV3K6GX7VAW3JXGJH2JAWQJMD5KFEFQJTYLZTKXOK5YQY3AI";
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: { stellar_address: address, name: "Document Shop", lat: 1, lng: 2, rate: 1 },
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/verification-document",
+      headers: { "x-provider-address": address, "content-type": "image/png" },
+      payload: Buffer.from("not an image"),
+    });
+    expect(invalid.statusCode).toBe(415);
+
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const uploaded = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/verification-document",
+      headers: { "x-provider-address": address, "x-file-name": "identity.png", "content-type": "image/png" },
+      payload: png,
+    });
+    expect(uploaded.statusCode).toBe(201);
+    expect(uploaded.json()).toMatchObject({
+      file_name: "identity.png",
+      verification_status: "pending",
+      size_bytes: png.length,
+    });
+    await app.close();
+  });
+
+  it("excludes pending providers until an administrator approves them", async () => {
+    process.env.ADMIN_API_KEY = "provider-review-test";
+    const app = Fastify();
+    registerApp(app);
+    app.register(adminRoutes, { prefix: "/api/v1" });
+    const address = "GCG5UQF4Z3BLRB4C7YQYFPE3NZYUXA67HYRGX5R4TKHQOSWE2SNY2UQP";
+    const registration = await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/register",
+      payload: { stellar_address: address, name: "Approval Shop", lat: 3, lng: 4, rate: 1 },
+    });
+    const providerId = registration.json().id;
+
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/provider/verification-document",
+      headers: { "x-provider-address": address, "content-type": "image/png" },
+      payload: png,
+    });
+
+    const before = await app.inject({ method: "GET", url: "/api/v1/providers" });
+    expect(before.json().providers.some((provider: { id: string }) => provider.id === providerId)).toBe(false);
+
+    const invalidReview = await app.inject({
+      method: "POST",
+      url: `/api/v1/admin/providers/${providerId}/verification`,
+      headers: { "x-admin-api-key": "provider-review-test" },
+      payload: { status: "pending" },
+    });
+    expect(invalidReview.statusCode).toBe(400);
+
+    const approved = await app.inject({
+      method: "POST",
+      url: `/api/v1/admin/providers/${providerId}/verification`,
+      headers: { "x-admin-api-key": "provider-review-test" },
+      payload: { status: "approved" },
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(getProviderByAddress(address)?.kycStatus).toBe("approved");
+
+    const after = await app.inject({ method: "GET", url: "/api/v1/providers" });
+    expect(after.json().providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: providerId, verification_status: "approved" }),
+    ]));
+    delete process.env.ADMIN_API_KEY;
     await app.close();
   });
 

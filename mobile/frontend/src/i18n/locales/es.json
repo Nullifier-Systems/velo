@@ -47,6 +47,7 @@
     "statusReady": "Listo para recibir efectivo",
     "statusCompleted": "Completado",
     "statusRefunded": "Reembolsado",
+    "statusExpired": "Expirado",
     "statusLabel": "Estado: {{status}}",
     "showToAgent": "Muestra esto al agente de efectivo.",
     "theyScanIt": "Lo escanearán para entregarte tu efectivo.",
@@ -54,12 +55,19 @@
     "fundsReleased": "Los fondos fueron liberados al proveedor.",
     "claimRefunded": "Este reclamo fue reembolsado.",
     "fundsReturned": "Los fondos fueron devueltos al remitente.",
+    "claimExpired": "Este reclamo ha expirado.",
+    "refundRequired": "Los fondos permanecen bloqueados hasta que el reembolso se envíe por separado.",
     "chatWithProvider": "Chatear con el proveedor",
     "debugTitle": "Testnet: simular escaneo del proveedor",
     "releasing": "Liberando...",
     "confirmHandoff": "Confirmar entrega (liberar fondos)",
     "releaseFailed": "error al liberar",
-    "somethingWentWrong": "algo salió mal"
+    "somethingWentWrong": "algo salió mal",
+    "waitNormal": "Bloqueando fondos en Stellar…",
+    "waitLonger": "Está tardando un poco más de lo habitual — el nodo RPC puede estar ocupado. Tus fondos están seguros.",
+    "waitStill": "Seguimos trabajando. La transacción fue enviada; estamos esperando confirmación en la cadena.",
+    "waitCheckBack": "Esto está tardando más de lo esperado. Puedes cerrar esta página con seguridad y volver en unos minutos — si la transacción se confirmó, el estado se actualizará automáticamente.",
+    "waitElapsed": "{{seconds}}s transcurridos"
   },
   "chat": {
     "noTradeId": "No se especificó un ID de comercio.",
@@ -118,7 +126,7 @@
     "title": "Registrarse como proveedor",
     "subtitle": "Ofrece liquidez en efectivo a usuarios cercanos de Velo",
     "successTitle": "¡Registrado exitosamente!",
-    "successDescription": "Tu ubicación de provisión de efectivo ahora está activa y lista en la tabla.",
+    "successDescription": "Tu registro y documento de identidad fueron enviados para revisión manual. Aparecerás en las coincidencias después de la aprobación.",
     "stellarAddress": "Dirección de billetera Stellar (G...)",
     "businessName": "Nombre del negocio / proveedor",
     "businessNamePlaceholder": "Farmacia Guadalupe",
@@ -138,7 +146,12 @@
     "invalidLatitude": "La latitud debe ser un número válido entre -90 y 90.",
     "invalidLongitude": "La longitud debe ser un número válido entre -180 y 180.",
     "invalidRate": "La tasa de cambio debe ser un número razonable entre 0.01 y 100.0.",
-    "registrationFailed": "Error en el registro"
+    "registrationFailed": "Error en el registro",
+    "verificationDocument": "Documento de verificación de identidad",
+    "verificationDocumentHelp": "Sube una imagen JPEG, PNG o WebP clara (máximo 5 MB). Es privada y solo la revisan los administradores.",
+    "verificationDocumentRequired": "Se requiere un documento de verificación de identidad.",
+    "invalidVerificationDocument": "El documento debe ser una imagen JPEG, PNG o WebP de no más de 5 MB.",
+    "documentUploadFailed": "Se creó el registro, pero falló la carga del documento. Intenta subirlo nuevamente."
   },
   "status": {
     "title": "Estado de Velo",

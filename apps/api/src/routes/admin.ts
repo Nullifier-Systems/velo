@@ -1,11 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
-import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats } from "../lib/store.js";
+import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats, getProviderById, getProviders, setProviderVerificationStatus } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";
 import {
   getRateLimitViolations,
   resolveRateLimitViolation,
 } from "../lib/rate-limit-violations.js";
+import { getDisputeEvidence, getDisputeEvidenceForTrade } from "../lib/dispute-evidence-store.js";
+import { disputeEvidenceMetadata } from "./dispute-evidence.js";
+import { getProviderVerificationDocument, getProviderVerificationDocuments } from "../lib/provider-verification-store.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -31,6 +34,129 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: "Unauthorized access to internal ops endpoints." });
     }
   });
+
+  app.get("/admin/providers/verifications", async (_req, reply) => {
+    if ((app as any).pg) {
+      const { rows } = await (app as any).pg.query(
+        `SELECT p.id, p.stellar_address, p.name, p.verification_status,
+                d.id AS document_id, d.file_name, d.content_type, d.size_bytes, d.created_at
+         FROM providers p
+         LEFT JOIN LATERAL (
+           SELECT id, file_name, content_type, size_bytes, created_at
+           FROM provider_verification_documents
+           WHERE provider_id = p.id ORDER BY created_at DESC LIMIT 1
+         ) d ON TRUE
+         ORDER BY p.created_at DESC`,
+      );
+      return reply.send({ data: rows });
+    }
+    return reply.send({
+      data: getProviders().map(provider => {
+        const document = getProviderVerificationDocuments(provider.id)[0];
+        return {
+          id: provider.id,
+          stellar_address: provider.stellarAddress,
+          name: provider.name,
+          verification_status: provider.kycStatus,
+          document_id: document?.id,
+          file_name: document?.fileName,
+          content_type: document?.contentType,
+          size_bytes: document?.sizeBytes,
+          created_at: document?.createdAt,
+        };
+      }),
+    });
+  });
+
+  app.get<{ Params: { providerId: string; documentId: string } }>(
+    "/admin/providers/:providerId/verifications/:documentId",
+    async (req, reply) => {
+      if ((app as any).pg) {
+        const { rows } = await (app as any).pg.query(
+          "SELECT file_name, content_type, data FROM provider_verification_documents WHERE id = $1 AND provider_id = $2",
+          [req.params.documentId, req.params.providerId],
+        );
+        if (!rows[0]) return reply.code(404).send({ error: "Verification document not found" });
+        const fileName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
+        return reply.type(rows[0].content_type).header("content-disposition", `inline; filename="${fileName}"`).send(rows[0].data);
+      }
+      const document = getProviderVerificationDocument(req.params.documentId);
+      if (!document || document.providerId !== req.params.providerId) {
+        return reply.code(404).send({ error: "Verification document not found" });
+      }
+      return reply.type(document.contentType).header("content-disposition", `inline; filename="${document.fileName.replace(/[\"\r\n]/g, "_")}"`).send(document.data);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { status?: string } }>(
+    "/admin/providers/:id/verification",
+    async (req, reply) => {
+      const status = req.body?.status;
+      if (status !== "approved" && status !== "rejected") {
+        return reply.code(400).send({ error: "status must be 'approved' or 'rejected'" });
+      }
+      const operator = String(req.headers["x-admin-operator-name"] ?? "System Admin");
+      if ((app as any).pg) {
+        if (status === "approved") {
+          const documents = await (app as any).pg.query(
+            "SELECT 1 FROM provider_verification_documents WHERE provider_id = $1 LIMIT 1",
+            [req.params.id],
+          );
+          if (!documents.rows[0]) return reply.code(409).send({ error: "A submitted verification document is required before approval" });
+        }
+        const { rows } = await (app as any).pg.query(
+          `UPDATE providers SET verification_status = $1, verification_reviewed_at = NOW(),
+             verification_reviewed_by = $2, updated_at = NOW() WHERE id = $3
+           RETURNING id, verification_status`,
+          [status, operator, req.params.id],
+        );
+        if (!rows[0]) return reply.code(404).send({ error: "Provider not found" });
+      } else {
+        if (!getProviderById(req.params.id)) return reply.code(404).send({ error: "Provider not found" });
+        if (status === "approved" && getProviderVerificationDocuments(req.params.id).length === 0) {
+          return reply.code(409).send({ error: "A submitted verification document is required before approval" });
+        }
+      }
+      setProviderVerificationStatus(req.params.id, status);
+      return reply.send({ provider_id: req.params.id, verification_status: status });
+    },
+  );
+
+  app.get<{ Params: { id: string } }>("/admin/trades/:id/evidence", async (req, reply) => {
+    const trade = getCashRequest(req.params.id);
+    if (!trade) return reply.status(404).send({ error: "Trade request not found." });
+    if ((app as any).pg) {
+      const { rows } = await (app as any).pg.query(
+        `SELECT id, trade_id, uploaded_by, file_name, content_type, size_bytes, created_at
+         FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
+        [req.params.id],
+      );
+      return { data: rows };
+    }
+    return { data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) };
+  });
+
+  app.get<{ Params: { id: string; evidenceId: string } }>(
+    "/admin/trades/:id/evidence/:evidenceId",
+    async (req, reply) => {
+      if (!getCashRequest(req.params.id)) return reply.status(404).send({ error: "Trade request not found." });
+      if ((app as any).pg) {
+        const { rows } = await (app as any).pg.query(
+          `SELECT file_name, content_type, data FROM dispute_evidence WHERE id = $1 AND trade_id = $2`,
+          [req.params.evidenceId, req.params.id],
+        );
+        if (!rows[0]) return reply.status(404).send({ error: "Evidence not found." });
+        return reply.type(rows[0].content_type)
+          .header("content-disposition", `inline; filename="${String(rows[0].file_name).replace(/[\"\r\n]/g, "_")}"`)
+          .send(rows[0].data);
+      }
+      const evidence = getDisputeEvidence(req.params.evidenceId);
+      if (!evidence || evidence.tradeId !== req.params.id) return reply.status(404).send({ error: "Evidence not found." });
+      return reply.type(evidence.contentType)
+        .header("content-disposition", `inline; filename="${evidence.fileName.replace(/\"/g, "_")}"`)
+        .send(evidence.data);
+    },
+  );
 
   /**
    * GET /admin/stats — store-level statistics (in-memory replacement for DB query).

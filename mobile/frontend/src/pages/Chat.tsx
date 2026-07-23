@@ -10,12 +10,14 @@ export default function Chat() {
   const { tradeId } = useParams<{ tradeId: string }>();
   const [searchParams] = useSearchParams();
   const participant = searchParams.get("participant") ?? "";
+  const token = searchParams.get("token") ?? "";
   const navigate = useNavigate();
 
   const [input, setInput] = useState("");
   const { messages, send, connected, closed, canSend, safetyNumber, keyChanged, acknowledgeKeyChange } = useChat({
     tradeId: tradeId ?? "",
     participant,
+    token,
   });
 
   if (!tradeId) {

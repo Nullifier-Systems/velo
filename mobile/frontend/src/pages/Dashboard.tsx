@@ -8,6 +8,7 @@ interface Trade {
   amount_stroops: string;
   status: string;
   created_at: string;
+  chat_token?: string;
 }
 
 interface DashboardMetrics {
@@ -191,12 +192,12 @@ export default function Dashboard() {
                         </p>
                         {trade.status === "locked" && (
                           <a
-                            href={`/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}`}
+                            href={`/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}&token=${encodeURIComponent(trade.chat_token ?? "")}`}
                             className="text-sm text-blue-600 hover:text-blue-800 underline"
                             onClick={(e) => {
                               e.preventDefault();
                               window.open(
-                                `/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}`,
+                                `/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}&token=${encodeURIComponent(trade.chat_token ?? "")}`,
                                 "_blank",
                                 "width=460,height=700"
                               );
