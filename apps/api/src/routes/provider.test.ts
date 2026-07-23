@@ -129,7 +129,7 @@ describe("providerRoutes", () => {
     const app = Fastify();
     registerApp(app);
 
-    const validAddress = "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN";
+    const validAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/provider/register",
@@ -183,7 +183,7 @@ describe("providerRoutes", () => {
       method: "POST",
       url: "/api/v1/provider/register",
       payload: {
-        stellar_address: "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN",
+         stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         name: "Out of range rate shop",
         lat: 19.4326,
         lng: -99.1332,
@@ -234,7 +234,7 @@ describe("providerRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/provider/payout-settings",
-        headers: { "x-provider-address": "G2RMx5BpwMMtD2xoS5WtysX8TLYSeuztbTwRsjdJZkQbaq21GGhnJVLJ" },
+        headers: { "x-provider-address": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
         payload: { payout_mode: "batched" },
       });
 
@@ -245,7 +245,7 @@ describe("providerRoutes", () => {
     it("opts a registered provider into batched payouts", async () => {
       const app = Fastify();
       registerApp(app);
-      const providerAddress = "GCPAYSHPBATCHNGTEST9999999999999999999999999999999999999";
+      const providerAddress = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 
       await app.inject({
         method: "POST",
