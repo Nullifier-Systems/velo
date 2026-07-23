@@ -11,6 +11,9 @@
 //! original single-admin model.
 #![no_std]
 
+#[cfg(not(target_arch = "wasm32"))]
+extern crate std;
+
 extern crate alloc;
 
 use alloc::collections::BTreeSet;

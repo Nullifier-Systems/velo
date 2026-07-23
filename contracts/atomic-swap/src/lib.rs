@@ -18,6 +18,9 @@
 //! swap settles the counterpart value on the other chain, not via a fee here.
 #![no_std]
 
+#[cfg(not(target_arch = "wasm32"))]
+extern crate std;
+
 extern crate alloc;
 
 use htlc_core::{Htlc, TradeState, TradeStatus};
