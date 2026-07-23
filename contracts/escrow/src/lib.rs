@@ -13,11 +13,11 @@
 
 extern crate alloc;
 
+use alloc::collections::BTreeSet;
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
 };
-use alloc::collections::BTreeSet;
 
 #[contracttype]
 enum DataKey {
