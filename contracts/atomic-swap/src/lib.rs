@@ -196,8 +196,8 @@ impl Htlc for AtomicSwapContract {
     }
 }
 
-fn panic_with_error(_env: &Env, err: Error) -> ! {
-    panic!("{}", err as u32)
+fn panic_with_error(env: &Env, err: Error) -> ! {
+    soroban_sdk::panic_with_error!(env, err)
 }
 
 #[cfg(test)]

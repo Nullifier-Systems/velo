@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate alloc;
 
 use super::*;
 use proptest::prelude::*;
@@ -83,7 +84,7 @@ proptest! {
         let count = amounts.len().min(timeouts.len());
         let initial: i128 = amounts[..count].iter().sum();
         let f = setup(initial, fee_bps);
-        let mut ids = Vec::new();
+        let mut ids = alloc::vec::Vec::new();
         let mut deposited = 0;
 
         for i in 0..count {

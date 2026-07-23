@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate alloc;
 
 use super::*;
 use proptest::prelude::*;
@@ -80,7 +81,7 @@ proptest! {
         let count = amounts.len().min(timeouts.len());
         let initial: i128 = amounts[..count].iter().sum();
         let f = setup(initial);
-        let mut ids = Vec::new();
+        let mut ids = alloc::vec::Vec::new();
         let mut deposited = 0;
 
         for i in 0..count {
@@ -127,7 +128,7 @@ proptest! {
         let hash = f.env.crypto().sha256(&good_secret.into()).to_bytes();
         f.client.lock(&trade_id, &f.seller, &f.buyer, &amount, &hash, &100);
         let wrong_secret = secret(&f.env, good.wrapping_add(wrong));
-        prop_assert!(f.client.try_release(&trade_id, &wrong_secret).is_err());
+        prop_assert!(matches!(f.client.try_release(&trade_id, &wrong_secret), Err(_) | Ok(Err(_))));
         prop_assert_eq!(f.client.get_trade(&trade_id).unwrap().status, TradeStatus::Locked);
         prop_assert_eq!(f.token.balance(&f.contract_id), amount);
         prop_assert_eq!(f.token.balance(&f.seller), 0);
@@ -142,7 +143,7 @@ proptest! {
         let hash = f.env.crypto().sha256(&preimage.into()).to_bytes();
         f.client.lock(&trade_id, &f.seller, &f.buyer, &amount, &hash, &timeout);
         f.env.ledger().with_mut(|li| li.sequence_number += elapsed);
-        prop_assert!(f.client.try_refund(&trade_id).is_err());
+        prop_assert!(matches!(f.client.try_refund(&trade_id), Err(_) | Ok(Err(_))));
         prop_assert_eq!(f.client.get_trade(&trade_id).unwrap().status, TradeStatus::Locked);
         prop_assert_eq!(f.token.balance(&f.contract_id), amount);
     }

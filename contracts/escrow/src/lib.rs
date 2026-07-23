@@ -39,7 +39,7 @@ pub enum Error {
     TimeoutNotReached = 7,
     InvalidAmount = 8,
     InvalidTimeout = 9,
-    Unauthorized = 15,
+    Unauthorized = 10,
     TimeoutReached = 11,
     TradeNotDisputed = 12,
     InvalidFee = 13,
@@ -534,8 +534,8 @@ fn is_authorized(addr: &Address, authorized: &Vec<Address>) -> bool {
     false
 }
 
-fn panic_with_error(_: &Env, err: Error) -> ! {
-    panic!("{}", err as u32)
+fn panic_with_error(env: &Env, err: Error) -> ! {
+    soroban_sdk::panic_with_error!(env, err)
 }
 
 fn symbol_short(env: &Env, s: &str) -> soroban_sdk::Symbol {
