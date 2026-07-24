@@ -32,6 +32,14 @@ export interface CashRequestRecord {
     // implies (the API already sees this secret in the custodial release
     // flow either way; batching just holds it a little longer).
     batchQueuedAt?: string;
+    
+    // Recovery mechanism (issue #237): allows users to recover access to claims
+    // after losing the original link, without the backend storing the plaintext secret.
+    recoveryContactHash?: string; // hashed email or phone for deduplication
+    recoveryEncryptedToken?: string; // encrypted recovery token (encrypted with challenge derived from contact or signature)
+    recoveryTokenExpiresAt?: string; // ISO timestamp when recovery token expires
+    recoveryAttempts?: number; // counter for rate limiting (resets after 24h)
+    lastRecoveryAttemptAt?: string; // ISO timestamp of last recovery attempt
 }
 
 export interface ProviderRecord {
