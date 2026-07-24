@@ -9,6 +9,9 @@ export interface RelayerConfig {
   evmRpcUrl: string;
   evmPrivateKey: string;
   evmHtlcAddress: string;
+  relayerId: string;
+  relayerThreshold: number;
+  relayerTotal: number;
 }
 
 /**
@@ -29,6 +32,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
     evmRpcUrl: env.EVM_RPC_URL?.trim() || "",
     evmPrivateKey: env.EVM_PRIVATE_KEY?.trim() || "",
     evmHtlcAddress: env.EVM_HTLC_ADDRESS?.trim() || "",
+    relayerId: env.RELAYER_ID?.trim() || "relayer-1",
+    relayerThreshold: env.RELAYER_THRESHOLD ? Number(env.RELAYER_THRESHOLD) : 2,
+    relayerTotal: env.RELAYER_TOTAL ? Number(env.RELAYER_TOTAL) : 3,
   };
   return cfg;
 }

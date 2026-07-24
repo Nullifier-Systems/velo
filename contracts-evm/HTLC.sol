@@ -24,6 +24,16 @@ contract HTLC {
         bool exists;
     }
 
+    address public owner;
+    mapping(address => bool) public isRelayer;
+    uint256 public relayerCount;
+    uint256 public threshold; // M-of-N threshold required to accept a claim
+
+    // hashlock => relayer => hasAttested
+    mapping(bytes32 => mapping(address => bool)) public hasAttested;
+    // hashlock => number of valid attestations received
+    mapping(bytes32 => uint256) public attestationCount;
+
     // hashlock => swap
     mapping(bytes32 => Swap) public swaps;
 
@@ -36,6 +46,42 @@ contract HTLC {
     );
     event Withdrawn(bytes32 indexed hashlock, bytes32 secret);
     event Refunded(bytes32 indexed hashlock);
+    event Attested(
+        bytes32 indexed hashlock,
+        address indexed relayer,
+        uint256 attestationCount
+    );
+    event RelayersUpdated(uint256 threshold, uint256 relayerCount);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "only owner");
+        _;
+    }
+
+    constructor(address[] memory _relayers, uint256 _threshold) {
+        owner = msg.sender;
+        if (_relayers.length > 0) {
+            _setRelayers(_relayers, _threshold);
+        } else {
+            threshold = _threshold;
+        }
+    }
+
+    /// @notice Update authorized relayer set and quorum threshold.
+    function setRelayers(address[] memory _relayers, uint256 _threshold) external onlyOwner {
+        _setRelayers(_relayers, _threshold);
+    }
+
+    function _setRelayers(address[] memory _relayers, uint256 _threshold) internal {
+        require(_threshold <= _relayers.length, "threshold exceeds relayer count");
+        threshold = _threshold;
+        relayerCount = _relayers.length;
+        for (uint256 i = 0; i < _relayers.length; i++) {
+            require(_relayers[i] != address(0), "invalid relayer address");
+            isRelayer[_relayers[i]] = true;
+        }
+        emit RelayersUpdated(threshold, relayerCount);
+    }
 
     /// @notice Lock `msg.value` against `hashlock` for `recipient` until `timelock`.
     /// @param hashlock sha256(secret) — MUST equal the Soroban leg's secret_hash.
@@ -62,19 +108,41 @@ contract HTLC {
         emit Locked(hashlock, msg.sender, recipient, msg.value, timelock);
     }
 
-    /// @notice Claim a swap by revealing the preimage. Anyone may submit it (the
-    /// relayer does), but funds always go to the swap's `recipient`.
+    /// @notice Submit an attestation for a secret reveal. When threshold (M) attestations
+    /// from distinct authorized relayers are received, the swap is claimed.
     /// @param secret the 32-byte preimage; sha256(secret) selects the swap.
-    function withdraw(bytes32 secret) external {
+    function submitAttestation(bytes32 secret) public {
         bytes32 hashlock = sha256(abi.encodePacked(secret));
         Swap storage s = swaps[hashlock];
         require(s.exists, "no swap for this secret");
         require(!s.withdrawn, "already withdrawn");
         require(!s.refunded, "already refunded");
 
-        s.withdrawn = true;
-        emit Withdrawn(hashlock, secret);
-        s.recipient.transfer(s.amount);
+        if (threshold > 0) {
+            require(isRelayer[msg.sender], "caller is not an authorized relayer");
+            require(!hasAttested[hashlock][msg.sender], "relayer already attested");
+
+            hasAttested[hashlock][msg.sender] = true;
+            attestationCount[hashlock]++;
+
+            emit Attested(hashlock, msg.sender, attestationCount[hashlock]);
+
+            if (attestationCount[hashlock] >= threshold) {
+                s.withdrawn = true;
+                emit Withdrawn(hashlock, secret);
+                s.recipient.transfer(s.amount);
+            }
+        } else {
+            s.withdrawn = true;
+            emit Withdrawn(hashlock, secret);
+            s.recipient.transfer(s.amount);
+        }
+    }
+
+    /// @notice Claim a swap by revealing the preimage. Forwarded to submitAttestation.
+    /// @param secret the 32-byte preimage; sha256(secret) selects the swap.
+    function withdraw(bytes32 secret) external {
+        submitAttestation(secret);
     }
 
     /// @notice Refund to the sender after the timelock elapses.
