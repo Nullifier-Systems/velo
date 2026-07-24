@@ -45,9 +45,9 @@ Soroban (testnet):
 
 ```bash
 cd contracts
-cargo build --workspace --target wasm32-unknown-unknown --release
+cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/atomic_swap.wasm \
+  --wasm target/wasm32v1-none/release/atomic_swap.wasm \
   --source <YOUR_KEY> --network testnet
 # -> CONTRACT_ID; then initialize(admin, token):
 stellar contract invoke --id <CONTRACT_ID> --source <YOUR_KEY> --network testnet \

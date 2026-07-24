@@ -21,8 +21,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-extern crate alloc;
-
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
