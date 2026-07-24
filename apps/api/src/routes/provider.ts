@@ -213,6 +213,11 @@ export async function providerRoutes(app: FastifyInstance) {
       return;
     }
 
+    if (!providerAddress.match(/^G[1-9A-HJ-NP-Za-km-z]{55}$/)) {
+      reply.code(400).send({ error: "Invalid x-provider-address format" });
+      return;
+    }
+
     const bodySchema = z.object({ payout_mode: z.enum(["immediate", "batched"]) });
     const parsed = bodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {

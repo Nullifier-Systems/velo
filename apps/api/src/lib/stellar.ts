@@ -161,7 +161,8 @@ function wrapWithFeeBumpIfPossible(tx: Transaction | FeeBumpTransaction): Transa
         );
         feeBumpTx.sign(sponsor);
         return feeBumpTx;
-    } catch {
+    } catch (err) {
+        console.warn("fee-bump wrap skipped:", err);
         return tx;
     }
 }
@@ -466,15 +467,17 @@ export interface ReleaseParams {
     contractId: string;
     tradeId: string;
     secretHex: string;
+    signerPublicKey?: string;
 }
 
 /** Build and simulate a release() transaction, returning unsigned XDR. */
 export async function buildReleaseTx(params: ReleaseParams): Promise<BuildTxResult> {
+    const source = params.signerPublicKey || loadSignerKeypair().publicKey();
     return buildUnsignedTx(
         params.contractId,
         "release",
         [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
-        params.tradeId, // source account — any address that can pay the fee
+        source,
     );
 }
 
@@ -538,15 +541,17 @@ export async function buildReleaseEscrowTransaction(params: ReleaseParams & { si
 export interface RefundParams {
     contractId: string;
     tradeId: string;
+    signerPublicKey?: string;
 }
 
 /** Build and simulate a refund() transaction, returning unsigned XDR. */
 export async function buildRefundTx(params: RefundParams): Promise<BuildTxResult> {
+    const source = params.signerPublicKey || loadSignerKeypair().publicKey();
     return buildUnsignedTx(
         params.contractId,
         "refund",
         [hexToBytesScVal(params.tradeId)],
-        params.tradeId,
+        source,
     );
 }
 
@@ -642,9 +647,10 @@ export interface ResolveParams {
     contractId: string;
     tradeId: string;
     resolveToBuyer: boolean;
+    signers: string[];
 }
 
-/** Calls escrow's resolve(id, resolve_to_buyer). Admin-only. */
+/** Calls escrow's resolve(id, resolve_to_buyer, signers). Admin-only. */
 export async function resolveEscrow(params: ResolveParams) {
     const signer = loadSignerKeypair();
     return invokeContract(
@@ -653,6 +659,9 @@ export async function resolveEscrow(params: ResolveParams) {
         [
             hexToBytesScVal(params.tradeId),
             nativeToScVal(params.resolveToBuyer),
+            xdr.ScVal.scvVec(
+                params.signers.map((addr) => nativeToScVal(addr, { type: "address" }))
+            ),
         ],
         signer
     );

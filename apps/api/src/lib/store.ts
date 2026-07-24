@@ -60,6 +60,11 @@ export function saveCashRequest(record: CashRequestRecord) {
     store.set(record.id, record);
 }
 
+export function clearStore() {
+    store.clear();
+    providersStore.clear();
+}
+
 export function saveProvider(record: ProviderRecord) {
     providersStore.set(record.id, record);
 }

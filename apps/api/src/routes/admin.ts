@@ -20,17 +20,6 @@ interface OverrideHeader {
   'x-admin-api-key': string;
 }
 
-
-
-// Basic schema for body validation
-interface FlagRequestBody {
-  suspicious: boolean;
-  notes?: string;
-}
-
-interface OverrideHeader {
-  'x-admin-api-key': string;
-}
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     const adminKey = req.headers["x-admin-api-key"];
@@ -490,11 +479,17 @@ export async function adminRoutes(app: FastifyInstance) {
       try {
         req.log.warn(`Admin resolution initiated on-chain for trade ID ${id} (resolve_to_buyer: ${resolve_to_buyer}) by ${operatorName}`);
         
-        await resolveEscrow({
-          contractId: record.contractId,
-          tradeId: record.id,
-          resolveToBuyer: resolve_to_buyer,
-        });
+        const adminSigners = (process.env.ADMIN_STELLAR_ADDRESSES ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      await resolveEscrow({
+        contractId: record.contractId,
+        tradeId: record.id,
+        resolveToBuyer: resolve_to_buyer,
+        signers: adminSigners,
+      });
 
       } catch (err) {
         req.log.error(err, "resolveEscrow on-chain call failed");
