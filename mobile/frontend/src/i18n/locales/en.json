@@ -103,6 +103,10 @@
     "parseError": "Failed to parse QR code",
     "fetchError": "Failed to fetch claim details",
     "releaseError": "Release request failed",
+    "uncertainTitle": "Release status unknown",
+    "uncertainBody": "We are not sure whether the release went through. Keep the cash handoff paused while Velo checks the request before retrying.",
+    "checkAndRetry": "Check status and retry safely",
+    "checkingRelease": "Checking release status...",
     "status": "Status"
   },
   "dashboard": {

@@ -12,6 +12,22 @@ export interface CashRequestStatus {
   timeoutLedger?: number;
 }
 
+export type ReleaseFailureKind = "uncertain" | "failed";
+
+export class ReleaseRequestError extends Error {
+  constructor(
+    message: string,
+    readonly kind: ReleaseFailureKind,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = "ReleaseRequestError";
+  }
+}
+
+export function isUncertainReleaseError(error: unknown): error is ReleaseRequestError {
+  return error instanceof ReleaseRequestError && error.kind === "uncertain";
+}
 
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
@@ -23,15 +39,62 @@ export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
 
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ secret }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `release failed (${res.status})`);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret }),
+    });
+  } catch (cause) {
+    throw new ReleaseRequestError(
+      "The connection ended before Velo could confirm the release.",
+      "uncertain",
+      { cause }
+    );
   }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({} as { error?: string }));
+    const message = body.error ?? `release failed (${res.status})`;
+    const kind: ReleaseFailureKind =
+      res.status >= 500 || body.error === "rpc_timeout" ? "uncertain" : "failed";
+    throw new ReleaseRequestError(message, kind);
+  }
+}
+
+/**
+ * Safely retry an uncertain release.
+ *
+ * The release endpoint is idempotent for an already-released request. Checking
+ * status first avoids an unnecessary second POST; a concurrent release between
+ * this GET and POST is still handled by the endpoint's released-state guard.
+ */
+export async function reconcileAndRetryRelease(
+  id: string,
+  secret: string
+): Promise<"already_released" | "released"> {
+  let current: CashRequestStatus;
+  try {
+    current = await fetchCashRequest(id);
+  } catch (cause) {
+    throw new ReleaseRequestError(
+      "Velo could not verify the current release status. No retry was sent.",
+      "uncertain",
+      { cause }
+    );
+  }
+
+  if (current.status === "released") return "already_released";
+  if (current.status !== "locked") {
+    throw new ReleaseRequestError(
+      `This request is ${current.status} and cannot be released.`,
+      "failed"
+    );
+  }
+
+  await releaseCashRequest(id, secret);
+  return "released";
 }
 
 export interface ChatMessage {
