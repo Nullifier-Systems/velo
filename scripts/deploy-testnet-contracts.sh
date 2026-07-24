@@ -24,10 +24,11 @@ fi
 
 # Import into an ephemeral CLI config so the secret is never passed to deploy
 # commands or written to the repository. Command tracing remains disabled.
-printf '%s\n' "$STELLAR_TESTNET_DEPLOYER_SECRET" |
+CLEANED_SECRET="$(tr -d '\r\n' <<<"$STELLAR_TESTNET_DEPLOYER_SECRET")"
+printf '%s' "$CLEANED_SECRET" |
   stellar keys add ci-deployer --secret-key --config-dir "$CONFIG_DIR" >/dev/null 2>&1 ||
   fail "The configured testnet deployer key is invalid."
-unset STELLAR_TESTNET_DEPLOYER_SECRET
+unset STELLAR_TESTNET_DEPLOYER_SECRET CLEANED_SECRET
 
 deployer_address="$(stellar keys public-key ci-deployer --config-dir "$CONFIG_DIR")" ||
   fail "Could not derive the deployer account address."
@@ -40,8 +41,13 @@ stellar network health --rpc-url "$RPC_URL" \
 account_json="$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
   --connect-timeout 10 --max-time 30 "$HORIZON_URL/accounts/$deployer_address")" ||
   fail "Could not query the deployer balance. No address records were changed."
-native_balance="$(jq -er '.balances[] | select(.asset_type == "native") | .balance' <<<"$account_json")" ||
-  fail "The deployer account has no native XLM balance."
+if command -v jq >/dev/null 2>&1; then
+  native_balance="$(jq -er '.balances[] | select(.asset_type == "native") | .balance' <<<"$account_json")" ||
+    fail "The deployer account has no native XLM balance."
+else
+  native_balance="$(node -e 'const data=JSON.parse(process.argv[1]); const b=data.balances?.find(x=>x.asset_type==="native"); if(!b){process.exit(1);} console.log(b.balance);' "$account_json")" ||
+    fail "The deployer account has no native XLM balance."
+fi
 awk -v balance="$native_balance" -v minimum="$MIN_BALANCE_XLM" \
   'BEGIN { exit !(balance + 0 >= minimum + 0) }' ||
   fail "Insufficient deployer balance: at least $MIN_BALANCE_XLM XLM is required."
@@ -55,12 +61,13 @@ deploy_contract() {
     --wasm "$wasm" \
     --source-account ci-deployer \
     --network testnet \
+    --network-passphrase "Test SDF Network ; September 2015" \
     --rpc-url "$RPC_URL" \
     --config-dir "$CONFIG_DIR")" ||
     fail "$label deployment failed. No address records were changed."
 
-  output="$(tr -d '[:space:]' <<<"$output")"
-  [[ "$output" =~ ^C[A-Z2-7]{55}$ ]] ||
+  output="$(grep -oE 'C[A-Z2-7]{55}' <<<"$output" | tail -n1)"
+  [[ -n "$output" ]] ||
     fail "$label deployment returned an invalid contract address."
   printf '%s' "$output"
 }
