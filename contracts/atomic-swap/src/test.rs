@@ -2,8 +2,8 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger},
-    token, Address, BytesN, Env, TryFromVal,
+    testutils::{Address as _, Events as _, Ledger},
+    token, Address, BytesN, Env,
 };
 
 struct Fixture {
@@ -63,8 +63,12 @@ fn lock_moves_funds_into_the_contract() {
     assert_eq!(f.token.balance(&f.contract_id), 500);
 
     let trade = f.client.get_trade(&f.id).unwrap();
-    assert_eq!(trade.status, htlc_core::TradeStatus::Locked);
+    assert_eq!(trade.seller, f.seller);
+    assert_eq!(trade.buyer, f.buyer);
     assert_eq!(trade.amount, 500);
+    assert_eq!(trade.secret_hash, f.secret_hash);
+    assert_eq!(trade.timeout_ledger, 100);
+    assert_eq!(trade.status, htlc_core::TradeStatus::Locked);
 }
 
 #[test]
@@ -73,6 +77,9 @@ fn release_pays_seller_full_amount_and_reveals_secret() {
     f.client
         .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
     f.client.release(&f.id, &f.secret);
+
+    // Read events immediately after release before calling other functions that emit/clear events
+    let all_events = f.env.events().all();
 
     // Full amount to the seller, nothing left in the contract, buyer unchanged.
     assert_eq!(f.token.balance(&f.seller), 500);
@@ -85,12 +92,12 @@ fn release_pays_seller_full_amount_and_reveals_secret() {
     // The revealed secret MUST appear in an emitted event so the relayer can
     // read it and claim the counterpart leg on the other chain.
     let mut revealed = false;
-    let all = f.env.events().all();
-    for i in 0..all.len() {
-        let (_c, _topics, data) = all.get(i).unwrap();
-        if let Ok(b) = BytesN::<32>::try_from_val(&f.env, &data) {
-            if b == f.secret {
-                revealed = true;
+    for event in all_events.events() {
+        if let soroban_sdk::xdr::ContractEventBody::V0(v0) = &event.body {
+            if let soroban_sdk::xdr::ScVal::Bytes(bytes) = &v0.data {
+                if bytes.as_slice() == f.secret.to_array() {
+                    revealed = true;
+                }
             }
         }
     }

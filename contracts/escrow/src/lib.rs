@@ -741,6 +741,7 @@ mod test {
     #[should_panic(expected = "8")]
     fn test_lock_overflow_amount_panics() {
         let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let token = Address::generate(&env);
         let buyer = Address::generate(&env);
