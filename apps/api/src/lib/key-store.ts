@@ -23,3 +23,12 @@ export function getKey(tradeId: string, participant: string): KeyEntry | null {
 export function getKeys(tradeId: string): Map<string, KeyEntry> {
   return keysByTrade.get(tradeId) ?? new Map();
 }
+
+export function deleteKeysForTrade(tradeId: string): void {
+  keysByTrade.delete(tradeId);
+}
+
+export function clearKeyStore(): void {
+  keysByTrade.clear();
+}
+

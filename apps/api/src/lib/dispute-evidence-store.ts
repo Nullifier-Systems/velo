@@ -43,6 +43,18 @@ export function getDisputeEvidenceForTrade(tradeId: string): DisputeEvidenceReco
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
 
+export function deleteDisputeEvidenceForTrade(tradeId: string): number {
+  let count = 0;
+  for (const [id, record] of Array.from(evidenceStore.entries())) {
+    if (record.tradeId === tradeId) {
+      evidenceStore.delete(id);
+      count++;
+    }
+  }
+  return count;
+}
+
 export function clearDisputeEvidence(): void {
   evidenceStore.clear();
 }
+
