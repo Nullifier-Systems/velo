@@ -280,11 +280,32 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["agents"],
+                  required: ["agents", "availability"],
                   properties: {
                     agents: {
                       type: "array",
                       items: { $ref: "#/components/schemas/CashAgent" },
+                    },
+                    availability: {
+                      type: "object",
+                      required: ["state"],
+                      description:
+                        "A successful empty discovery is `no_providers_nearby`; transport and validation failures use non-200 responses instead.",
+                      properties: {
+                        state: {
+                          type: "string",
+                          enum: ["available", "no_providers_nearby"],
+                        },
+                        message: { type: "string" },
+                        suggested_action: {
+                          type: "string",
+                          enum: ["check_back_later"],
+                        },
+                        retry_after_seconds: {
+                          type: "integer",
+                          minimum: 1,
+                        },
+                      },
                     },
                   },
                 },

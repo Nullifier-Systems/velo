@@ -22,7 +22,7 @@ import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
 import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
 import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash.js";
-import { t } from "../lib/i18n.js";
+import { t, type Locale } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
 
@@ -50,6 +50,19 @@ interface RegisterProviderBody {
   lng: number;
   rate?: string;
   device_id?: string;
+}
+
+function discoveryAvailability(agentCount: number, locale: Locale) {
+  if (agentCount > 0) {
+    return { state: "available" as const };
+  }
+
+  return {
+    state: "no_providers_nearby" as const,
+    message: t(locale, "discovery.noProvidersNearby"),
+    suggested_action: "check_back_later" as const,
+    retry_after_seconds: 3600,
+  };
 }
 
 // Proximity matching is privacy-preserving: providers are generalized to a
@@ -137,13 +150,34 @@ export async function cashRoutes(app: FastifyInstance) {
 
         let agents = inRange.map(p => toPublicProvider(p, { lat: userLat, lng: userLng, precision: prec }, prec));
         agents = applyKAnonymity(agents, kAnon);
-        return { agents, privacy: privacyMeta };
+        const availability = discoveryAvailability(
+          agents.length,
+          (req as any).locale ?? "en",
+        );
+        if (availability.state === "no_providers_nearby") {
+          req.log.info(
+            {
+              event: "provider_discovery_empty",
+              search_cell: queryCell.hash,
+              radius_km: searchRadiusKm,
+            },
+            "no providers available near requester",
+          );
+        }
+        return { agents, availability, privacy: privacyMeta };
       }
 
       // Default if no coordinates are provided: still coarse, no exact coords.
       let agents = providers.map(p => toPublicProvider(p, undefined, prec));
       agents = applyKAnonymity(agents, kAnon);
-      return { agents, privacy: privacyMeta };
+      return {
+        agents,
+        availability: discoveryAvailability(
+          agents.length,
+          (req as any).locale ?? "en",
+        ),
+        privacy: privacyMeta,
+      };
     }
   );
 
