@@ -65,8 +65,8 @@ deploy_contract() {
   printf '%s' "$output"
 }
 
-readonly ESCROW_WASM="contracts/target/wasm32-unknown-unknown/release/escrow.wasm"
-readonly ATOMIC_SWAP_WASM="contracts/target/wasm32-unknown-unknown/release/atomic_swap.wasm"
+readonly ESCROW_WASM="contracts/target/wasm32v1-none/release/escrow.wasm"
+readonly ATOMIC_SWAP_WASM="contracts/target/wasm32v1-none/release/atomic_swap.wasm"
 [[ -f "$ESCROW_WASM" && -f "$ATOMIC_SWAP_WASM" ]] ||
   fail "Release WASM artifacts are missing; build the contracts before deployment."
 

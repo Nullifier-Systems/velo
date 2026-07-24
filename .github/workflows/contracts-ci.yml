@@ -20,7 +20,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
       - name: cargo fmt --check
         run: cargo fmt --all --check
       - name: cargo build (contracts compile cleanly)
@@ -30,4 +30,4 @@ jobs:
       - name: soroban-lint (Soroban-specific static analysis)
         run: cargo run -p soroban-lint -- escrow/src/lib.rs atomic-swap/src/lib.rs htlc-core/src/lib.rs
       - name: cargo build --release (wasm)
-        run: cargo build --workspace --target wasm32-unknown-unknown --release
+        run: cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release

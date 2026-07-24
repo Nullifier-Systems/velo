@@ -14,9 +14,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-extern crate alloc;
-
-use alloc::collections::BTreeSet;
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
@@ -503,7 +500,7 @@ fn require_multisig(env: &Env, provided_signers: &Vec<Address>) -> Result<(), Er
 }
 
 fn validate_signers(
-    _: &Env,
+    _env: &Env,
     provided: &Vec<Address>,
     authorized: &Vec<Address>,
     threshold: u32,
@@ -511,13 +508,15 @@ fn validate_signers(
     if provided.len() < threshold {
         return Err(Error::NotAuthorized);
     }
-    let mut seen = BTreeSet::new();
-    for signer in provided.iter() {
+    for i in 0..provided.len() {
+        let signer = provided.get(i).unwrap();
         if !is_authorized(&signer, authorized) {
             return Err(Error::NotAuthorized);
         }
-        if !seen.insert(signer.clone()) {
-            return Err(Error::DuplicateSigner);
+        for j in 0..i {
+            if provided.get(j).unwrap() == signer {
+                return Err(Error::DuplicateSigner);
+            }
         }
         signer.require_auth();
     }
