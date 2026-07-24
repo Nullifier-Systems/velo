@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { statusRoutes } from "./status.js";
 import { saveCashRequest } from "../lib/store.js";
+
+vi.mock("../lib/stellar.js", () => ({
+  server: {
+    getHealth: vi.fn().mockResolvedValue({ status: "healthy", oldestLedger: 100 }),
+    getLatestLedger: vi.fn().mockResolvedValue({ sequence: 105 }),
+  },
+  NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
+}));
 
 describe("GET /api/v1/status", () => {
   it("returns api/chain/recent_activity with no sensitive fields", async () => {
