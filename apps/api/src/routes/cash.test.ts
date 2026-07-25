@@ -13,7 +13,7 @@ vi.mock("../lib/stellar.js", () => ({
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
   disputeEscrow: vi.fn().mockResolvedValue(undefined),
-  resolveEscrow: vi.fn().mockResolvedValue(undefined),
+  resolveDisputeEscrow: vi.fn().mockResolvedValue(undefined),
   buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
   submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS", ledger: 1_000 }),
   submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
@@ -441,12 +441,12 @@ describe("cashRoutes", () => {
         "x-admin-api-key": "test-api-key",
       },
       payload: {
-        resolve_to_buyer: true,
+        buyer_share_bps: 10_000,
         notes: "Buyer provided proof of no-show",
       },
     });
     expect(resolveResponse.statusCode).toBe(200);
-    expect(resolveResponse.json().new_status).toBe("refunded");
+    expect(resolveResponse.json().new_status).toBe("resolved");
 
     await app.close();
   });

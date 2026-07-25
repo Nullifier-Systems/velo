@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, BytesN, Env, Vec as SorobanVec,
+    token, Address, BytesN, Env,
 };
 
 const CASES: u32 = 256;
@@ -26,6 +26,7 @@ fn setup(initial_balance: i128, fee_bps: u32) -> Fixture {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
     let buyer = Address::generate(&env);
     let seller = Address::generate(&env);
     let asset = env.register_stellar_asset_contract_v2(admin.clone());
@@ -33,7 +34,7 @@ fn setup(initial_balance: i128, fee_bps: u32) -> Fixture {
     token::StellarAssetClient::new(&env, &asset.address()).mint(&buyer, &initial_balance);
     let contract_id = env.register_contract(None, EscrowContract);
     let client = EscrowContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &asset.address(), &fee_bps);
+    client.initialize(&admin, &asset.address(), &fee_bps, &arbitrator);
     Fixture {
         env,
         client,
@@ -82,7 +83,7 @@ proptest! {
         amounts in prop::collection::vec(1i128..100_000, 1..9),
         timeouts in prop::collection::vec(1u32..500, 1..9),
         fee_bps in 0u32..=10_000,
-        actions in prop::collection::vec((0u8..8, 0u8..7, 0u32..600), 1..65),
+        actions in prop::collection::vec((0u8..8, 0u8..8, 0u32..600), 1..65),
     ) {
         let count = amounts.len().min(timeouts.len());
         let initial: i128 = amounts[..count].iter().sum();
@@ -106,16 +107,20 @@ proptest! {
             let before = f.client.get_trade(trade_id).unwrap();
             let balances = (f.token.balance(&f.buyer), f.token.balance(&f.seller), f.token.balance(&f.admin), f.token.balance(&f.contract_id));
             f.env.ledger().with_mut(|li| li.sequence_number = li.sequence_number.saturating_add(advance));
-            let no_signers = SorobanVec::new(&f.env);
 
-            let result = match action {
-                0 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 1)).map(|_| ()),
-                1 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 129)).map(|_| ()),
-                2 => f.client.try_refund(trade_id).map(|_| ()),
-                3 => f.client.try_dispute(&f.buyer, trade_id).map(|_| ()),
-                4 => f.client.try_dispute(&f.seller, trade_id).map(|_| ()),
-                5 => f.client.try_resolve(trade_id, &true, &no_signers).map(|_| ()),
-                _ => f.client.try_resolve(trade_id, &false, &no_signers).map(|_| ()),
+            // Every arm is normalized to Result<(), ()> — the fuzzer only cares
+            // whether the call succeeded, not the specific error shape (which
+            // differs between panic-style calls like release()/raise_dispute()
+            // and Result-returning calls like resolve_dispute()).
+            let result: Result<(), ()> = match action {
+                0 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 1)).map(|_| ()).map_err(|_| ()),
+                1 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 129)).map(|_| ()).map_err(|_| ()),
+                2 => f.client.try_refund(trade_id).map(|_| ()).map_err(|_| ()),
+                3 => f.client.try_raise_dispute(&f.buyer, trade_id).map(|_| ()).map_err(|_| ()),
+                4 => f.client.try_raise_dispute(&f.seller, trade_id).map(|_| ()).map_err(|_| ()),
+                5 => f.client.try_resolve_dispute(trade_id, &10_000).map(|_| ()).map_err(|_| ()),
+                6 => f.client.try_resolve_dispute(trade_id, &0).map(|_| ()).map_err(|_| ()),
+                _ => f.client.try_refund_after_dispute_timeout(trade_id).map(|_| ()).map_err(|_| ()),
             };
             let after = f.client.get_trade(trade_id).unwrap();
 
@@ -125,7 +130,7 @@ proptest! {
             } else {
                 let allowed = after.status == before.status
                     || (before.status == TradeStatus::Locked && matches!(after.status, TradeStatus::Released | TradeStatus::Refunded | TradeStatus::Disputed))
-                    || (before.status == TradeStatus::Disputed && matches!(after.status, TradeStatus::Released | TradeStatus::Refunded));
+                    || (before.status == TradeStatus::Disputed && matches!(after.status, TradeStatus::Resolved | TradeStatus::Refunded));
                 prop_assert!(allowed, "invalid transition {:?} -> {:?}", before.status, after.status);
             }
             assert_accounting(&f, &ids, deposited, initial);
