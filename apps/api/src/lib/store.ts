@@ -7,6 +7,9 @@
  */
 export interface CashRequestRecord {
     id: string; // trade id, hex
+    /** Normalized asset key used to select the escrow contract for this trade. */
+    settlementAsset?: string;
+    /** Immutable contract binding retained for the entire trade lifecycle. */
     contractId: string;
     seller: string;
     buyer: string;

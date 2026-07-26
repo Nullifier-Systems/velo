@@ -4,6 +4,9 @@ The contract workspace in this repository currently includes the core escrow imp
 
 ## Escrow Contract
 
+Multiple token-bound and versioned escrow instances are supported through the
+[escrow contract registry and migration strategy](escrow-contract-versioning.md).
+
 The escrow contract implements a simple HTLC-style release flow. It locks stablecoin funds from a buyer and allows them to be transferred to a seller only when the correct secret is revealed.
 
 It also exposes `batch_release()`, which settles many trades' payouts in a single invocation — the on-chain half of opt-in provider payout batching. See [docs/provider-payout-batching.md](provider-payout-batching.md).

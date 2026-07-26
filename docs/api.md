@@ -13,6 +13,7 @@ The API is implemented with Fastify and is intended to expose payment-aware rout
 | GET    | `/health`                     | Free         | Health check                    |
 | GET    | `/api/v1/openapi.json`        | Free         | OpenAPI 3.1 specification       |
 | GET    | `/api/v1/services`            | Free         | Service catalog                 |
+| GET    | `/api/v1/cash/contracts`      | Free         | Active escrow routes by asset   |
 | GET    | `/api/v1/cash/agents`         | 0.001        | Provider discovery              |
 | POST   | `/api/v1/cash/request`        | 0.01         | Create a cash request           |
 | GET    | `/api/v1/cash/request/:id`    | Free         | Poll request status             |
@@ -30,6 +31,7 @@ All API endpoints are rate-limited per IP address to prevent abuse. The followin
 | `GET /health`                        | 100 req / 1 min       | Infrastructure health check      |
 | `GET /api/v1/openapi.json`           | 60 req / 1 min        | Free specification endpoint      |
 | `GET /api/v1/services`               | 60 req / 1 min        | Free catalog endpoint            |
+| `GET /api/v1/cash/contracts`         | framework default     | Free contract discovery          |
 | `GET /api/v1/cash/agents`            | 30 req / 1 min        | Paid discovery; limit abuse      |
 | `POST /api/v1/cash/request`          | 20 req / 1 min        | Paid escrow lock (costly)        |
 | `GET /api/v1/cash/request/:id`       | 60 req / 1 min        | Free polling                     |
@@ -87,6 +89,10 @@ The current implementation uses an x402-style challenge mechanism. When a valid 
 ## Configuration
 
 The API reads environment variables from the local environment or `.env` file. The most important values include the port, merchant address, and network configuration.
+
+Escrow deployments are configured through `ESCROW_CONTRACTS_JSON`. See
+[Escrow contract versioning and migration](escrow-contract-versioning.md) for
+the registry format, rollout states, and in-flight trade guarantees.
 
 ## Fee Sponsorship for Users Without XLM
 

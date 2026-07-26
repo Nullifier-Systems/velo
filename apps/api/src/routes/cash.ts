@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { CONTRACTS } from "@velo/shared";
 import {
   lockEscrow,
   releaseEscrow,
@@ -25,8 +24,12 @@ import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash
 import { t } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
+import {
+  DEFAULT_SETTLEMENT_ASSET,
+  loadEscrowContractRegistry,
+  UnsupportedSettlementAssetError,
+} from "../lib/escrow-contract-registry.js";
 
-const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
 
 const cashRequestSchema = z.object({
@@ -40,9 +43,8 @@ const cashRequestSchema = z.object({
   notification_type: z.enum(["email", "sms", "none"]).optional(),
   contact_info: z.string().optional(),
   signed_xdr: z.string().optional(),
+  settlement_asset: z.string().trim().min(1).max(64).optional(),
 });
-
-type CashRequestBody = z.infer<typeof cashRequestSchema>;
 
 interface RegisterProviderBody {
   name: string;
@@ -78,6 +80,33 @@ interface RegisterProviderBody {
  *                                    if the trade times out or fails (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
+  const escrowContracts = loadEscrowContractRegistry();
+  const resolveEscrowContract = (asset: string, reply: any) => {
+    try {
+      return escrowContracts.resolve(asset);
+    } catch (error) {
+      if (error instanceof UnsupportedSettlementAssetError) {
+        reply.code(400).send({
+          error: "unsupported settlement asset",
+          settlement_asset: error.asset,
+          supported_assets: escrowContracts
+            .listActive()
+            .map((deployment) => deployment.asset),
+        });
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
+  app.get("/cash/contracts", async () => ({
+    contracts: escrowContracts.listActive().map((deployment) => ({
+      settlement_asset: deployment.asset,
+      contract_id: deployment.contractId,
+      version: deployment.version,
+    })),
+  }));
+
   app.get<{ Querystring: { lat?: string; lng?: string; radius?: string; precision?: string; k?: string } }>(
     "/cash/agents",
     {
@@ -184,13 +213,6 @@ export async function cashRoutes(app: FastifyInstance) {
       reply.code(201).send(provider);
   });
 
-  const requestSchema = z.object({
-    seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
-    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
-    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
-  });
-
   const prepareLockSchema = z.object({
     seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
     buyer: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
@@ -201,6 +223,7 @@ export async function cashRoutes(app: FastifyInstance) {
     mode: z.string().trim().optional(),
     notification_type: z.enum(["email", "sms", "none"]).optional(),
     contact_info: z.string().optional(),
+    settlement_asset: z.string().trim().min(1).max(64).optional(),
   });
 
   app.post<{ Body: z.infer<typeof prepareLockSchema> }>(
@@ -217,7 +240,21 @@ export async function cashRoutes(app: FastifyInstance) {
       const body = parseBody(prepareLockSchema, req.body, reply);
       if (!body) return;
 
-      const { seller, buyer, amount_stroops, secret_hash, mode: rawMode, notification_type, contact_info } = body;
+      const {
+        seller,
+        buyer,
+        amount_stroops,
+        secret_hash,
+        mode: rawMode,
+        notification_type,
+        contact_info,
+      } = body;
+      const escrowDeployment = resolveEscrowContract(
+        body.settlement_asset ?? DEFAULT_SETTLEMENT_ASSET,
+        reply,
+      );
+      if (!escrowDeployment) return;
+      const { asset: settlementAsset, contractId } = escrowDeployment;
       const mode = rawMode ?? "custodial";
       if (mode !== "custodial" && mode !== "non_custodial") {
         reply.code(400).send({ error: "mode must be either 'custodial' or 'non_custodial'" });
@@ -245,7 +282,7 @@ export async function cashRoutes(app: FastifyInstance) {
       }
 
       const tradeId = randomHex32();
-      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
+      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${contractId}`;
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       const locale = (req as any).locale ?? "en";
 
@@ -253,7 +290,7 @@ export async function cashRoutes(app: FastifyInstance) {
         let lockedAtLedger: number;
         try {
           lockedAtLedger = await lockEscrow({
-            contractId: ESCROW_CONTRACT_ID,
+            contractId,
             tradeId,
             seller,
             buyer,
@@ -282,7 +319,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
         saveCashRequest({
           id: tradeId,
-          contractId: ESCROW_CONTRACT_ID,
+          contractId,
+          settlementAsset,
           seller,
           buyer,
           amountStroops: amount_stroops,
@@ -299,6 +337,9 @@ export async function cashRoutes(app: FastifyInstance) {
 
         reply.code(201).send({
           // The secret is held client-side and is NOT returned by the API
+          request_id: tradeId,
+          contract_id: contractId,
+          settlement_asset: settlementAsset,
           claim_url: `${baseUrl}/claim/${tradeId}`,
           chat_token: issueChatCapability(tradeId, buyer),
           qr_payload: qrPayload,
@@ -307,7 +348,7 @@ export async function cashRoutes(app: FastifyInstance) {
       } else {
         try {
           const unsignedXdr = await buildLockEscrowTransaction({
-            contractId: ESCROW_CONTRACT_ID,
+            contractId,
             tradeId,
             seller,
             buyer,
@@ -319,7 +360,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
           saveCashRequest({
             id: tradeId,
-            contractId: ESCROW_CONTRACT_ID,
+            contractId,
+            settlementAsset,
             seller,
             buyer,
             amountStroops: amount_stroops,
@@ -335,6 +377,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
           reply.code(201).send({
             request_id: tradeId,
+            contract_id: contractId,
+            settlement_asset: settlementAsset,
             unsigned_xdr: unsignedXdr,
             network_passphrase: NETWORK_PASSPHRASE,
             submit_url: `/api/v1/cash/request/${tradeId}/submit`,
@@ -370,7 +414,20 @@ export async function cashRoutes(app: FastifyInstance) {
       const body = parseBody(cashRequestSchema, req.body, reply);
       if (!body) return;
 
-      const { seller, buyer, amount_stroops, secret_hash, notification_type, contact_info } = body;
+      const {
+        seller,
+        buyer,
+        amount_stroops,
+        secret_hash,
+        notification_type,
+        contact_info,
+      } = body;
+      const escrowDeployment = resolveEscrowContract(
+        body.settlement_asset ?? DEFAULT_SETTLEMENT_ASSET,
+        reply,
+      );
+      if (!escrowDeployment) return;
+      const { asset: settlementAsset, contractId } = escrowDeployment;
 
       if (notification_type && notification_type !== "none") {
         if (!contact_info) {
@@ -402,7 +459,7 @@ export async function cashRoutes(app: FastifyInstance) {
 
       try {
         lockedAtLedger = await lockEscrow({
-          contractId: ESCROW_CONTRACT_ID,
+          contractId,
           tradeId,
           seller,
           buyer,
@@ -429,10 +486,11 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
+      const qrPayload = `velo://claim?request_id=${tradeId}&contract=${contractId}`;
       saveCashRequest({
         id: tradeId,
-        contractId: ESCROW_CONTRACT_ID,
+        contractId,
+        settlementAsset,
         seller,
         buyer,
         amountStroops: amount_stroops,
@@ -450,6 +508,9 @@ export async function cashRoutes(app: FastifyInstance) {
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
       const locale = (req as any).locale ?? "en";
       reply.code(201).send({
+        request_id: tradeId,
+        contract_id: contractId,
+        settlement_asset: settlementAsset,
         claim_url: `${baseUrl}/claim/${tradeId}`,
         chat_token: issueChatCapability(tradeId, buyer),
         qr_payload: qrPayload,

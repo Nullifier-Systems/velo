@@ -296,6 +296,42 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/cash/contracts": {
+      get: {
+        operationId: "listEscrowContracts",
+        tags: ["cash"],
+        summary: "List active escrow contract routes",
+        description:
+          "Returns the active contract version selected for each supported settlement asset.",
+        responses: {
+          "200": {
+            description: "Active settlement-asset routes.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["contracts"],
+                  properties: {
+                    contracts: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        required: ["settlement_asset", "contract_id", "version"],
+                        properties: {
+                          settlement_asset: { type: "string", examples: ["USDC"] },
+                          contract_id: { type: "string", description: "Soroban contract id (C...)." },
+                          version: { type: "string", examples: ["2.0.0"] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     "/api/v1/cash/request/prepare": {
       post: {
         operationId: "prepareCashRequest",
@@ -653,12 +689,32 @@ export const openApiDocument = {
             description: "64-character hex SHA-256 hash of the client-held redemption secret.",
             pattern: "^[0-9a-fA-F]{64}$",
           },
+          settlement_asset: {
+            type: "string",
+            default: "USDC",
+            description:
+              "Settlement asset used to select the active escrow contract deployment.",
+            examples: ["USDC", "XLM"],
+          },
         },
       },
       CashRequestCreated: {
         type: "object",
-        required: ["claim_url", "qr_payload", "instructions"],
+        required: [
+          "request_id",
+          "contract_id",
+          "settlement_asset",
+          "claim_url",
+          "qr_payload",
+          "instructions",
+        ],
         properties: {
+          request_id: { type: "string", description: "Trade id (64-character hex)." },
+          contract_id: {
+            type: "string",
+            description: "Immutable escrow contract selected for this trade.",
+          },
+          settlement_asset: { type: "string", examples: ["USDC"] },
           claim_url: {
             type: "string",
             description: "URL the buyer opens/shares to claim the cash.",
@@ -688,6 +744,10 @@ export const openApiDocument = {
         ],
         properties: {
           id: { type: "string", description: "Trade id (64-char hex)." },
+          settlementAsset: {
+            type: "string",
+            description: "Normalized settlement asset selected at creation.",
+          },
           contractId: { type: "string", description: "Escrow contract id (C...)." },
           seller: { type: "string" },
           buyer: { type: "string" },

@@ -7,6 +7,10 @@ import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notificat
 import { sendRefundAlert } from "../lib/webhook.js";
 import { getCashRequest, saveProvider } from "../lib/store.js";
 
+const USDC_CONTRACT = `C${"A".repeat(55)}`;
+const XLM_CONTRACT = `C${"B".repeat(55)}`;
+const XLM_V2_CONTRACT = `C${"D".repeat(55)}`;
+
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
   lockEscrow: vi.fn().mockResolvedValue(1_000),
@@ -54,6 +58,20 @@ describe("cashRoutes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearNotificationQueue();
+    process.env.ESCROW_CONTRACTS_JSON = JSON.stringify([
+      {
+        asset: "USDC",
+        contractId: USDC_CONTRACT,
+        version: "1.0.0",
+        status: "active",
+      },
+      {
+        asset: "XLM",
+        contractId: XLM_CONTRACT,
+        version: "1.0.0",
+        status: "active",
+      },
+    ]);
 
     app = Fastify();
     registerApp(app);
@@ -87,6 +105,132 @@ describe("cashRoutes", () => {
     expect(response.statusCode).toBe(201);
     expect(response.json()).toHaveProperty("claim_url");
     expect(lockEscrow).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes new requests by settlement asset and reports the selected contract", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+        settlement_asset: "xlm",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      contract_id: XLM_CONTRACT,
+      settlement_asset: "XLM",
+    });
+    expect(lockEscrow).toHaveBeenCalledWith(
+      expect.objectContaining({ contractId: XLM_CONTRACT }),
+    );
+
+    const tradeId = response.json().request_id;
+    expect(getCashRequest(tradeId)).toMatchObject({
+      contractId: XLM_CONTRACT,
+      settlementAsset: "XLM",
+    });
+  });
+
+  it("rejects a settlement asset without an active deployment", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+        settlement_asset: "EURC",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "unsupported settlement asset",
+      settlement_asset: "EURC",
+      supported_assets: ["USDC", "XLM"],
+    });
+    expect(lockEscrow).not.toHaveBeenCalled();
+  });
+
+  it("lists the active contract route for each supported settlement asset", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/cash/contracts",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().contracts).toEqual([
+      {
+        settlement_asset: "USDC",
+        contract_id: USDC_CONTRACT,
+        version: "1.0.0",
+      },
+      {
+        settlement_asset: "XLM",
+        contract_id: XLM_CONTRACT,
+        version: "1.0.0",
+      },
+    ]);
+  });
+
+  it("keeps in-flight trades bound to their original contract after migration", async () => {
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+        settlement_asset: "XLM",
+      },
+    });
+    const tradeId = createResponse.json().request_id;
+
+    process.env.ESCROW_CONTRACTS_JSON = JSON.stringify([
+      {
+        asset: "USDC",
+        contractId: USDC_CONTRACT,
+        version: "1.0.0",
+        status: "active",
+      },
+      {
+        asset: "XLM",
+        contractId: XLM_CONTRACT,
+        version: "1.0.0",
+        status: "draining",
+      },
+      {
+        asset: "XLM",
+        contractId: XLM_V2_CONTRACT,
+        version: "2.0.0",
+        status: "active",
+      },
+    ]);
+    await app.close();
+    app = Fastify();
+    registerApp(app);
+    vi.mocked(releaseEscrow).mockClear();
+
+    const releaseResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "c".repeat(64) },
+    });
+
+    expect(releaseResponse.statusCode).toBe(200);
+    expect(releaseEscrow).toHaveBeenCalledWith(
+      expect.objectContaining({ contractId: XLM_CONTRACT }),
+    );
   });
 
   it("creates with email opt-in and triggers email notification on release", async () => {
