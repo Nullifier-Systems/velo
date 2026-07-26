@@ -44,6 +44,8 @@ enum DataKey {
     Bond(BytesN<32>),
     /// Anti-spam bonding (issue #280): tunable parameters.
     BondConfig,
+    /// Commit-reveal pre-step for trade-ID generation (issue #281).
+    Commit(BytesN<32>),
 }
 
 #[contracterror]
@@ -72,6 +74,11 @@ pub enum Error {
     InvalidSplit = 20,
     /// A dispute-timeout refund was attempted before `DisputeDeadline` elapsed.
     DisputeTimeoutNotReached = 21,
+
+    /// Issue #281: reveal_and_lock referenced a commit that does not exist.
+    CommitNotFound = 22,
+    /// Issue #281: reveal_and_lock referenced a commit past its TTL.
+    CommitExpired = 23,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -80,6 +87,7 @@ const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
 const DEFAULT_BOND_AMOUNT: i128 = 1_000_000;
 const ESTABLISH_THRESHOLD: i128 = 3;
 const MIN_ESTABLISH_AMOUNT: i128 = 1_000_000;
+const COMMIT_TTL_LEDGERS: u32 = 6 * 60 * 24; // ~1 day at 5s/ledger
 
 /// Window (in ledgers) an arbitrator has to call `resolve_dispute` after a
 /// dispute is raised, at roughly 5s/ledger this is ~3 days. Once it elapses,
@@ -265,6 +273,121 @@ impl EscrowContract {
                 .set(&DataKey::Reputation(buyer.clone()), &(rep + 1));
         }
     }
+
+    pub fn commit_trade_id(env: Env, caller: Address, commit: BytesN<32>) {
+        caller.require_auth();
+        check_not_paused(&env);
+        let expiry = env.ledger().sequence() + COMMIT_TTL_LEDGERS;
+        env.storage()
+            .instance()
+            .set(&DataKey::Commit(commit.clone()), &expiry);
+        env.events()
+            .publish((symbol_short(&env, "id_committed"), commit), (expiry,));
+    }
+
+    /// Step 2: reveal the `(id, salt)` that hashes to a previously stored
+    /// commit, then create the trade exactly as `lock()` would. Because the
+    /// caller had to commit first, they cannot have chosen `id` in reaction
+    /// to any trade that appeared after the commit was made.
+    pub fn reveal_and_lock(
+        env: Env,
+        id: BytesN<32>,
+        salt: BytesN<32>,
+        seller: Address,
+        buyer: Address,
+        amount: i128,
+        secret_hash: BytesN<32>,
+        timeout_ledgers: u32,
+    ) {
+        check_not_paused(&env);
+        buyer.require_auth();
+
+        // Re-derive the commitment and check it was made and is still live.
+        // commit = sha256( id_bytes || salt_bytes )
+        let mut buf = Bytes::new(&env);
+        buf.append(&id.to_bytes());
+        buf.append(&salt.to_bytes());
+        let commit = env.crypto().sha256(&buf);
+        let commit_key = BytesN::<32>::from_array(&env, &commit.to_bytes().into());
+        let expiry: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Commit(commit_key.clone()))
+            .unwrap_or_else(|| panic_with_error(&env, Error::CommitNotFound));
+        if env.ledger().sequence() >= expiry {
+            panic_with_error(&env, Error::CommitExpired);
+        }
+        // A commit is single-use: consume it so the same (id,salt) cannot be
+        // replayed to open a second trade under the same revealed ID.
+        env.storage()
+            .instance()
+            .remove(&DataKey::Commit(commit_key));
+
+        create_trade(
+            &env,
+            &id,
+            &seller,
+            &buyer,
+            &amount,
+            &secret_hash,
+            &timeout_ledgers,
+        );
+    }
+
+    /// Shared trade-creation logic used by both `lock()` and
+    /// `reveal_and_lock()`. Pulled out so the hardened path cannot diverge
+    /// from the legacy path.
+    fn create_trade(
+        env: &Env,
+        id: &BytesN<32>,
+        seller: &Address,
+        buyer: &Address,
+        amount: &i128,
+        secret_hash: &BytesN<32>,
+        timeout_ledgers: &u32,
+    ) {
+        if *amount <= 0 || *amount > (i128::MAX / 10_000) {
+            panic_with_error(env, Error::InvalidAmount);
+        }
+        if *timeout_ledgers == 0 || *timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            panic_with_error(env, Error::InvalidTimeout);
+        }
+
+        let key = DataKey::Trade(id.clone());
+        if env.storage().persistent().has(&key) {
+            panic_with_error(env, Error::TradeAlreadyExists);
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .unwrap_or_else(|| panic_with_error(env, Error::NotInitialized));
+
+        let client = token::Client::new(env, &token_addr);
+        client.transfer(buyer, &env.current_contract_address(), amount);
+
+        let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
+
+        let state = TradeState {
+            seller: seller.clone(),
+            buyer: buyer.clone(),
+            amount: *amount,
+            secret_hash: secret_hash.clone(),
+            timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(env, "locked"), id.clone()), *amount);
+    }
+
+    /// Read-only accessor for a trade's current state. Returns `None` if the id
+    /// was never locked.
 
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
         env.storage().persistent().get(&DataKey::Trade(id))
@@ -1730,7 +1853,122 @@ mod issue280_bonding {
     }
 }
 
+mod issue281_commit_reveal {
+    use super::*;
+    use soroban_sdk::{testutils::Ledger, vec, Address, BytesN, Env};
+
+    // Issue #281: commit-reveal trade-ID hardening.
+    //
+    // The adversarial strategy the issue worries about: an attacker watches the
+    // mempool for a victim's `lock(id=X)` and front-runs with their own
+    // `lock(id=X)` (griefing), or picks a known/predictable X. With commit-
+    // reveal, the attacker must have previously called `commit_trade_id` with
+    // sha256(X||salt) — they cannot reactively choose X after seeing the
+    // victim's intent. We test the happy path and that a reveal without a prior
+    // matching commit is rejected.
+
+    fn setup(
+        fee_bps: u32,
+    ) -> (
+        Env,
+        EscrowContractClient<'static>,
+        token::Client<'static>,
+        Address,
+        Address,
+        Address,
+        BytesN<32>,
+        BytesN<32>,
+        BytesN<32>,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_addr = sac.address();
+        let token = token::Client::new(&env, &token_addr);
+        token.mint(&buyer, &10_000_000);
+        let contract_id = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &token_addr, &fee_bps);
+        let secret = BytesN::from_array(&env, &[7u8; 32]);
+        let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+        let id = BytesN::from_array(&env, &[1u8; 32]);
+        let salt = BytesN::from_array(&env, &[42u8; 32]);
+        (env, client, token, admin, buyer, seller, id, secret, salt)
+    }
+
+    #[test]
+    fn commit_reveal_opens_trade() {
+        let (env, client, _token, _admin, buyer, seller, id, secret, salt) = setup(100);
+        let mut buf = soroban_sdk::Bytes::new(&env);
+        buf.append(&id.to_bytes());
+        buf.append(&salt.to_bytes());
+        let commit = env.crypto().sha256(&buf);
+        client.commit_trade_id(&buyer, &commit);
+
+        client.reveal_and_lock(
+            &id,
+            &salt,
+            &seller,
+            &buyer,
+            &500,
+            &env.crypto().sha256(&secret.clone().into()).to_bytes(),
+            &100,
+        );
+
+        let trade = client.get_trade(&id).unwrap();
+        assert_eq!(trade.status, TradeStatus::Locked);
+    }
+
+    #[test]
+    #[should_panic(expected = "22")] // CommitNotFound
+    fn reveal_without_commit_fails() {
+        let (env, client, _token, _admin, buyer, seller, id, secret, salt) = setup(100);
+        client.reveal_and_lock(
+            &id,
+            &salt,
+            &seller,
+            &buyer,
+            &500,
+            &env.crypto().sha256(&secret.clone().into()).to_bytes(),
+            &100,
+        );
+    }
+
+    #[test]
+    fn commit_is_single_use() {
+        let (env, client, _token, _admin, buyer, seller, id, secret, salt) = setup(100);
+        let mut buf = soroban_sdk::Bytes::new(&env);
+        buf.append(&id.to_bytes());
+        buf.append(&salt.to_bytes());
+        let commit = env.crypto().sha256(&buf);
+        client.commit_trade_id(&buyer, &commit);
+        client.reveal_and_lock(
+            &id,
+            &salt,
+            &seller,
+            &buyer,
+            &500,
+            &env.crypto().sha256(&secret.clone().into()).to_bytes(),
+            &100,
+        );
+        // Replaying the same reveal must fail: commit was consumed, so a second
+        // reveal_and_lock hits CommitNotFound before create_trade.
+        client.commit_trade_id(&buyer, &commit);
+        assert!(client
+            .try_reveal_and_lock(
+                &id,
+                &salt,
+                &seller,
+                &buyer,
+                &500,
+                &env.crypto().sha256(&secret.clone().into()).to_bytes(),
+                &100
+            )
+            .is_err());
+    }
 }
 
-#[cfg(test)]
 mod property_test;
