@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { ApiError } from "../lib/errors.js";
 import { refundEscrow, resolveDisputeEscrow, submitRefundTx } from "../lib/stellar.js";
 import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats, getProviderById, getProviders, setProviderVerificationStatus } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";

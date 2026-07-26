@@ -9,8 +9,8 @@ import {
   merkleRoot,
   verifyFileIntegrity,
   blindSecret,
-} from "../../../lib/crypto/evidence-vault";
-import { issueGrantToken, verifyGrantToken } from "../../../lib/crypto/grant-token";
+} from "../../lib/crypto/evidence-vault.js";
+import { issueGrantToken, verifyGrantToken } from "../../lib/crypto/grant-token.js";
 
 /* ------------------------------------------------------------------ */
 /*  Evidence Vault                                                    */
@@ -174,8 +174,7 @@ describe("GrantToken", () => {
   });
 
   it("verifyGrantToken rejects expired token", () => {
-    const past = Date.now() - 10_000;
-    const token = issueGrantToken(tradeSecret, tradeId, grantee, "view", past, 1);
+    const token = issueGrantToken(tradeSecret, tradeId, grantee, "view", Date.now() - 10_000, -1);
     const payload = verifyGrantToken(token, "test-master-secret-for-grant-token-testing");
     expect(payload).toBeNull();
   });

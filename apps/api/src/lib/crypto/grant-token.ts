@@ -14,7 +14,7 @@
  */
 
 import crypto from "crypto";
-import { deriveKEK, blindSecret } from "./evidence-vault";
+import { deriveKEK, blindSecret } from "./evidence-vault.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -143,5 +143,5 @@ export function kekFromBlindedSecret(blindedSecretHex: string, tradeId: string):
   // The blinded secret is already an HKDF output — we derive a KEK from it
   // using the same salt (tradeId) to ensure forward secrecy.
   const blinded = Buffer.from(blindedSecretHex, "hex");
-  return crypto.hkdfSync("sha256", blinded, Buffer.from(tradeId), "velo-evidence-v1", 32);
+  return Buffer.from(crypto.hkdfSync("sha256", blinded, Buffer.from(tradeId), "velo-evidence-v1", 32));
 }

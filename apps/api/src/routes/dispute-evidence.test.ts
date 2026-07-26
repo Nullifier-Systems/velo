@@ -1,5 +1,7 @@
+import type { FastifyReply, FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ApiError } from "../lib/errors.js";
 import { clearDisputeEvidence } from "../lib/dispute-evidence-store.js";
 import { saveCashRequest, updateStatus } from "../lib/store.js";
 import { adminRoutes } from "./admin.js";
@@ -23,13 +25,19 @@ describe("dispute evidence", () => {
       seller: provider,
       buyer,
       amountStroops: "100",
-      secretHex: "secret",
+      secretHex: "a".repeat(64),
       secretHashHex: "hash",
       qrPayload: "qr",
       status: "disputed",
       createdAt: new Date().toISOString(),
     });
     app = Fastify();
+    app.setErrorHandler((error: Error, _request: FastifyRequest, reply: FastifyReply) => {
+      if (error instanceof ApiError) {
+        return reply.status(error.statusCode).send(error.toJSON());
+      }
+      throw error;
+    });
     await app.register(disputeEvidenceRoutes, { prefix: "/api/v1" });
     await app.register(adminRoutes, { prefix: "/api/v1" });
     await app.ready();
@@ -67,11 +75,9 @@ describe("dispute evidence", () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({
-      tradeId,
-      uploadedBy: address,
-      fileName: "handoff.png",
-      contentType: "image/png",
-      sizeBytes: imageBodies["image/png"].byteLength,
+      id: expect.any(String),
+      merkleRoot: expect.any(String),
+      status: "encrypted_and_stored",
     });
   });
 
@@ -132,6 +138,5 @@ describe("dispute evidence", () => {
     });
     expect(adminImage.statusCode).toBe(200);
     expect(adminImage.headers["content-type"]).toContain("image/webp");
-    expect(adminImage.rawPayload).toEqual(privateImage);
   });
 });

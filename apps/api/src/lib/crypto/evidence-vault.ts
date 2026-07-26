@@ -58,7 +58,7 @@ export function deriveKEK(tradeSecretHex: string, tradeId: string): Buffer {
   if (secret.length !== KEY_BYTES) {
     throw new Error(`tradeSecretHex must be ${KEY_BYTES} bytes (64 hex chars)`);
   }
-  return crypto.hkdfSync(HKDF_HASH, secret, Buffer.from(tradeId), HKDF_INFO, KEY_BYTES);
+  return Buffer.from(crypto.hkdfSync(HKDF_HASH, secret, Buffer.from(tradeId), HKDF_INFO, KEY_BYTES));
 }
 
 /**
@@ -70,7 +70,7 @@ export function deriveKEK(tradeSecretHex: string, tradeId: string): Buffer {
  */
 export function blindSecret(tradeSecretHex: string): Buffer {
   const secret = Buffer.from(tradeSecretHex, "hex");
-  return crypto.hkdfSync(HKDF_HASH, secret, Buffer.from("blinding"), PEpper, KEY_BYTES);
+  return Buffer.from(crypto.hkdfSync(HKDF_HASH, secret, Buffer.from("blinding"), PEpper, KEY_BYTES));
 }
 
 /* ------------------------------------------------------------------ */
