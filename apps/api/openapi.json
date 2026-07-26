@@ -822,38 +822,19 @@
       }
     },
     "schemas": {
-      "ApiError": {
+      "Error": {
         "type": "object",
         "required": [
-          "error",
-          "code",
-          "statusCode",
-          "retryable"
+          "error"
         ],
         "properties": {
           "error": {
             "type": "string",
             "description": "Human-readable error message."
           },
-          "code": {
-            "type": "string",
-            "description": "Machine-readable error code for programmatic handling."
-          },
-          "statusCode": {
-            "type": "integer",
-            "description": "HTTP status code."
-          },
-          "retryable": {
-            "type": "boolean",
-            "description": "Whether an AI agent can safely retry this request."
-          },
           "detail": {
             "type": "string",
             "description": "Optional underlying error detail."
-          },
-          "requestId": {
-            "type": "string",
-            "description": "Request identifier for correlation."
           }
         }
       },

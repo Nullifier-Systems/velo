@@ -714,7 +714,7 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
     });
 
     expect(res.statusCode).toBe(504);
-    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "lock/poll" });
+    expect(res.json()).toMatchObject({ code: "RPC_TIMEOUT", statusCode: 504 });
   });
 
   it("POST /cash/request/:id/release returns 504 when releaseEscrow times out", async () => {
