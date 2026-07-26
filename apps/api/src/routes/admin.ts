@@ -10,6 +10,7 @@ import { getDisputeEvidence, getDisputeEvidenceForTrade } from "../lib/dispute-e
 import { disputeEvidenceMetadata } from "./dispute-evidence.js";
 import { getProviderVerificationDocument, getProviderVerificationDocuments } from "../lib/provider-verification-store.js";
 import { ApiError } from "../lib/errors.js";
+import { issueGrantToken } from "../lib/crypto/grant-token.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -555,4 +556,27 @@ export async function adminRoutes(app: FastifyInstance) {
       store: getStoreStats(),
     };
   });
+
+  // Issue a time-bounded grant token for evidence access (#307).
+  app.post<{ Params: { id: string }; Body: { grantee: string; purpose?: string } }>(
+    "/admin/trades/:id/grant-token",
+    async (req, reply) => {
+      const trade = getCashRequest(req.params.id);
+      if (!trade) throw new ApiError(404, "TRADE_NOT_FOUND", "Trade request not found.");
+      if (!trade.secretHex) throw new ApiError(400, "MISSING_FIELD", "Trade has no secret for key derivation.");
+
+      const { grantee, purpose } = req.body;
+      if (!grantee) throw new ApiError(400, "MISSING_FIELD", "grantee (Stellar address) is required.");
+
+      const token = issueGrantToken(
+        trade.secretHex,
+        trade.id,
+        grantee,
+        purpose === "upload" ? "upload" : "view",
+        trade.disputedAt ? Date.parse(trade.disputedAt) : Date.now(),
+      );
+
+      return { token };
+    },
+  );
 }
