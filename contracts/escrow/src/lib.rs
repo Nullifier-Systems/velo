@@ -32,6 +32,10 @@ enum DataKey {
     /// Ledger sequence after which an unresolved dispute becomes
     /// permissionlessly refundable to the buyer in full.
     DisputeDeadline(BytesN<32>),
+    /// Sequential trade counter for enumeration (#283).
+    TradeCounter,
+    /// Maps sequential index to trade hash ID (#283).
+    TradeId(u32),
 }
 
 #[contracterror]
@@ -160,6 +164,21 @@ impl EscrowContract {
     /// was never locked.
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
         env.storage().persistent().get(&DataKey::Trade(id))
+    }
+
+    /// Issue #283: Get the total number of trades recorded.
+    pub fn get_trade_count(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TradeCounter)
+            .unwrap_or(0)
+    }
+
+    /// Issue #283: Get the trade ID at a sequential index (1-indexed).
+    pub fn get_trade_by_index(env: Env, index: u32) -> Option<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TradeId(index))
     }
 
     /// Flag a trade as disputed before its timeout. Can be called by either
@@ -522,6 +541,20 @@ impl Htlc for EscrowContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, 100_000, 100_000);
+
+        // Issue #283: Record trade in sequential index for reputation scanning.
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeCounter)
+            .unwrap_or(0);
+        let next_idx = counter + 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeCounter, &next_idx);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeId(next_idx), &id);
 
         env.events()
             .publish((symbol_short(&env, "locked"), id), amount);
