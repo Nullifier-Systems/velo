@@ -38,6 +38,12 @@ enum DataKey {
     TradeId(u32),
     /// Issue #284 — side-channel mitigation. Synthetic key touched by flatten_branch_cost.
     CostPad,
+    /// Anti-spam bonding (issue #280): per-address successful-completion count.
+    Reputation(Address),
+    /// Anti-spam bonding (issue #280): bond escrowed with a trade.
+    Bond(BytesN<32>),
+    /// Anti-spam bonding (issue #280): tunable parameters.
+    BondConfig,
 }
 
 #[contracterror]
@@ -70,6 +76,11 @@ pub enum Error {
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
 
+/// Issue #280 — anti-spam bonding constants.
+const DEFAULT_BOND_AMOUNT: i128 = 1_000_000;
+const ESTABLISH_THRESHOLD: i128 = 3;
+const MIN_ESTABLISH_AMOUNT: i128 = 1_000_000;
+
 /// Window (in ledgers) an arbitrator has to call `resolve_dispute` after a
 /// dispute is raised, at roughly 5s/ledger this is ~3 days. Once it elapses,
 /// `refund_after_dispute_timeout` lets anyone return the full amount to the
@@ -92,6 +103,59 @@ const MAX_BATCH_SIZE: u32 = 25;
 pub struct BatchReleaseItem {
     pub id: BytesN<32>,
     pub secret: BytesN<32>,
+}
+
+/// Issue #280 — tunable anti-spam bond parameters.
+#[derive(Clone)]
+#[contracttype]
+pub struct BondParams {
+    pub bond_amount: i128,
+    pub establish_threshold: i128,
+    pub min_establish_amount: i128,
+}
+
+pub fn set_bond_config(env: Env, params: BondParams, signers: Vec<Address>) -> Result<(), Error> {
+    require_multisig(&env, &signers)?;
+    if params.bond_amount < 0 || params.establish_threshold < 0 || params.min_establish_amount < 0 {
+        return Err(Error::InvalidAmount);
+    }
+    env.storage().instance().set(&DataKey::BondConfig, &params);
+    Ok(())
+}
+
+/// Read an address's current successful-completion count.
+pub fn get_reputation(env: Env, addr: Address) -> i128 {
+    read_reputation(&env, &addr)
+}
+
+/// Current bond escrowed with a trade, or 0 if none.
+pub fn get_bond(env: Env, id: BytesN<32>) -> i128 {
+    read_bond(&env, &id)
+}
+
+fn read_reputation(env: &Env, addr: &Address) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::Reputation(addr.clone()))
+        .unwrap_or(0)
+}
+
+fn read_bond(env: &Env, id: &BytesN<32>) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::Bond(id.clone()))
+        .unwrap_or(0)
+}
+
+fn bond_params(env: &Env) -> BondParams {
+    env.storage()
+        .instance()
+        .get(&DataKey::BondConfig)
+        .unwrap_or(BondParams {
+            bond_amount: DEFAULT_BOND_AMOUNT,
+            establish_threshold: ESTABLISH_THRESHOLD,
+            min_establish_amount: MIN_ESTABLISH_AMOUNT,
+        })
 }
 
 // Invariant: funds can only ever leave this contract's balance through
@@ -176,6 +240,30 @@ impl EscrowContract {
         env.storage()
             .instance()
             .set(&DataKey::CostPad, &(n.wrapping_add(1)));
+    /// Issue #280: on a successful completion of trade `id` by `buyer`, refund any
+    /// escrowed bond and count the completion toward "established" (unless it was
+    /// dust, which can't be gamed to reach the threshold cheaply). Refunding the
+    /// bond here is what makes legitimate first-time use effectively free.
+    fn complete_with_bond_refund(env: &Env, id: &BytesN<32>, buyer: &Address, amount: i128) {
+        if let Some(bond) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::Bond(id.clone()))
+        {
+            if bond > 0 {
+                let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+                let client = token::Client::new(env, &token_addr);
+                client.transfer(&env.current_contract_address(), buyer, &bond);
+                env.storage().instance().remove(&DataKey::Bond(id.clone()));
+            }
+        }
+        let params = bond_params(env);
+        if amount >= params.min_establish_amount {
+            let rep = read_reputation(env, buyer);
+            env.storage()
+                .instance()
+                .set(&DataKey::Reputation(buyer.clone()), &(rep + 1));
+        }
     }
 
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
@@ -579,6 +667,15 @@ impl Htlc for EscrowContract {
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&buyer, &env.current_contract_address(), &amount);
+
+        // Issue #280: an "unestablished" buyer posts a refundable bond.
+        let params = bond_params(&env);
+        if params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold {
+            client.transfer(&buyer, &env.current_contract_address(), &params.bond_amount);
+            env.storage()
+                .instance()
+                .set(&DataKey::Bond(id.clone()), &params.bond_amount);
+        }
 
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
@@ -1533,6 +1630,106 @@ mod cost_side_channel {
             "no-op branch must still do constant work (guard)"
         );
     }
+}
+
+mod issue280_bonding {
+    use super::*;
+    use soroban_sdk::{testutils::Ledger, Address, BytesN, Env};
+
+    // Issue #280: contract-level anti-spam bonding.
+    //
+    // - A new (unestablished) buyer must post a bond on lock(); it is refunded
+    //   on successful completion.
+    // - Reaching ESTABLISH_THRESHOLD successful non-dust completions makes the
+    //   address established, after which no bond is taken.
+    // - The threshold cannot be gamed with dust trades (below MIN_ESTABLISH_AMOUNT).
+
+    fn setup() -> (
+        Env,
+        EscrowContractClient<'static>,
+        token::Client<'static>,
+        Address,
+        Address,
+        Address,
+        BytesN<32>,
+        BytesN<32>,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_addr = sac.address();
+        let token = token::Client::new(&env, &token_addr);
+        token.mint(&buyer, &100_000_000);
+        let contract_id = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &token_addr, &100);
+        let secret = BytesN::from_array(&env, &[7u8; 32]);
+        let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+        (
+            env,
+            client,
+            token,
+            admin,
+            buyer,
+            seller,
+            secret,
+            secret_hash,
+        )
+    }
+
+    #[test]
+    fn unestablished_buyer_posts_and_gets_refunded_bond() {
+        let (env, client, token, _admin, buyer, seller, secret, secret_hash) = setup();
+        let id = BytesN::from_array(&env, &[1u8; 32]);
+        let bal_before = token.balance(&buyer);
+
+        client.lock(&id, &seller, &buyer, &1_000_000, &secret_hash, &100);
+
+        assert_eq!(client.get_bond(&id), 1_000_000);
+        assert!(token.balance(&buyer) < bal_before);
+
+        client.release(&id, &secret);
+        assert_eq!(client.get_bond(&id), 0);
+        assert_eq!(token.balance(&buyer), bal_before - 10_000); // fee only (1%)
+        assert_eq!(client.get_reputation(buyer), 1);
+    }
+
+    #[test]
+    fn established_buyer_pays_no_bond() {
+        let (env, client, token, _admin, buyer, seller, secret, secret_hash) = setup();
+        for i in 1u8..=3 {
+            let id = BytesN::from_array(&env, &[i; 32]);
+            client.lock(&id, &seller, &buyer, &1_000_000, &secret_hash, &100);
+            client.release(&id, &secret);
+        }
+        assert_eq!(client.get_reputation(buyer), 3);
+
+        let id4 = BytesN::from_array(&env, &[99u8; 32]);
+        let bal_before = token.balance(&buyer);
+        client.lock(&id4, &seller, &buyer, &1_000_000, &secret_hash, &100);
+        assert_eq!(client.get_bond(&id4), 0);
+        assert_eq!(token.balance(&buyer), bal_before - 1_000_000);
+    }
+
+    #[test]
+    fn dust_trades_do_not_establish() {
+        let (env, client, _token, _admin, buyer, seller, secret, secret_hash) = setup();
+        for i in 1u8..=3 {
+            let id = BytesN::from_array(&env, &[i; 32]);
+            client.lock(&id, &seller, &buyer, &10, &secret_hash, &100); // dust
+            client.release(&id, &secret);
+        }
+        assert_eq!(client.get_reputation(buyer), 0);
+
+        let id4 = BytesN::from_array(&env, &[99u8; 32]);
+        client.lock(&id4, &seller, &buyer, &1_000_000, &secret_hash, &100);
+        assert_eq!(client.get_bond(&id4), 1_000_000);
+    }
+}
+
 }
 
 #[cfg(test)]
