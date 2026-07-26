@@ -4,8 +4,8 @@ import { issueChatCapability } from "../lib/chat-capability.js";
 import { randomUUID } from "crypto";
 import { getProviderTrades, saveProvider, getProviders, getProviderByAddress, setProviderPayoutMode, ProviderRecord } from "../lib/store.js";
 import { toPublicProvider, DEFAULT_PRECISION } from "../utils/privacy.js";
-import {
 import { ApiError } from "../lib/errors.js";
+import {
   ALLOWED_VERIFICATION_DOCUMENT_TYPES,
   MAX_VERIFICATION_DOCUMENT_BYTES,
   saveProviderVerificationDocument,
@@ -155,19 +155,19 @@ export async function providerRoutes(app: FastifyInstance) {
       const provider = address ? getProviderByAddress(address) : undefined;
       if (!provider) return reply.code(address ? 404 : 401).send({ error: address ? "Provider not found" : "Missing x-provider-address header" });
       if (provider.kycStatus === "approved") {
-        return throw new ApiError(409, "CONFLICT", "Approved providers cannot replace their verification document.");}
+        throw new ApiError(409, "CONFLICT", "Approved providers cannot replace their verification document.");}
 
       const contentType = req.headers["content-type"]?.split(";", 1)[0].toLowerCase();
       if (!contentType || !ALLOWED_VERIFICATION_DOCUMENT_TYPES.has(contentType)) {
-        return throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Verification document must be a JPEG, PNG, or WebP image.");}
+        throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Verification document must be a JPEG, PNG, or WebP image.");}
       if (!Buffer.isBuffer(req.body) || req.body.byteLength === 0) {
-        return throw new ApiError(400, "MISSING_FIELD", "A verification document image is required.");}
+        throw new ApiError(400, "MISSING_FIELD", "A verification document image is required.");}
       const signatures: Record<string, boolean> = {
         "image/jpeg": req.body.length >= 3 && req.body.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
         "image/png": req.body.length >= 8 && req.body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
         "image/webp": req.body.length >= 12 && req.body.subarray(0, 4).toString("ascii") === "RIFF" && req.body.subarray(8, 12).toString("ascii") === "WEBP",
       };
-      if (!signatures[contentType]) return throw new ApiError(415, "INVALID_IMAGE_CONTENT", "The file content does not match its declared image type.");const document = saveProviderVerificationDocument({
+      if (!signatures[contentType]) throw new ApiError(415, "INVALID_IMAGE_CONTENT", "The file content does not match its declared image type.");const document = saveProviderVerificationDocument({
         providerId: provider.id,
         fileName: String(req.headers["x-file-name"] ?? "identity-document").replace(/[\\/\r\n]/g, "_").slice(0, 255),
         contentType,

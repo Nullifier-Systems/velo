@@ -5,8 +5,8 @@ import { getCashRequest } from "../lib/store.js";
 import type { ChatMessage } from "../lib/chat-store.js";
 import { parseBody } from "../lib/validation.js";
 import { verifyChatCapability } from "../lib/chat-capability.js";
-import {
 import { ApiError } from "../lib/errors.js";
+import {
   getChatInfrastructure,
   type ChatInfrastructure,
   type SharedTrade,
@@ -91,7 +91,7 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
     "/chat/:tradeId/history",
     async (req, reply) => {
       const auth = await authenticate(infrastructure, req.params.tradeId, bearerToken(req));
-      if (!auth) return throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");return { messages: await infrastructure.getMessages(req.params.tradeId, req.query.after) };
+      if (!auth) throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");return { messages: await infrastructure.getMessages(req.params.tradeId, req.query.after) };
     },
   );
 
@@ -99,7 +99,7 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
     "/chat/:tradeId/keys",
     async (req, reply) => {
       const auth = await authenticate(infrastructure, req.params.tradeId, bearerToken(req));
-      if (!auth) return throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");const body = parseBody(publicKeySchema, req.body, reply);
+      if (!auth) throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");const body = parseBody(publicKeySchema, req.body, reply);
       if (!body) return;
       await infrastructure.setKey(req.params.tradeId, auth.participant, body.publicKey);
       await infrastructure.publish(req.params.tradeId, { type: "peerKey", participant: auth.participant, publicKey: body.publicKey });
@@ -109,7 +109,7 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
 
   app.get<{ Params: { tradeId: string } }>("/chat/:tradeId/keys", async (req, reply) => {
     const auth = await authenticate(infrastructure, req.params.tradeId, bearerToken(req));
-    if (!auth) return throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");return {
+    if (!auth) throw new ApiError(401, "INVALID_CHAT_CAPABILITY", "Invalid or expired chat capability");return {
       buyer: await infrastructure.getKey(req.params.tradeId, auth.trade.buyer),
       seller: await infrastructure.getKey(req.params.tradeId, auth.trade.seller),
     };

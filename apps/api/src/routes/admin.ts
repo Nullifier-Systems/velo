@@ -77,12 +77,12 @@ export async function adminRoutes(app: FastifyInstance) {
           "SELECT file_name, content_type, data FROM provider_verification_documents WHERE id = $1 AND provider_id = $2",
           [req.params.documentId, req.params.providerId],
         );
-        if (!rows[0]) return throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");const fileName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
+        if (!rows[0]) throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");const fileName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
         return reply.type(rows[0].content_type).header("content-disposition", `inline; filename="${fileName}"`).send(rows[0].data);
       }
       const document = getProviderVerificationDocument(req.params.documentId);
       if (!document || document.providerId !== req.params.providerId) {
-        return throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");}
+        throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");}
       return reply.type(document.contentType).header("content-disposition", `inline; filename="${document.fileName.replace(/[\"\r\n]/g, "_")}"`).send(document.data);
     },
   );
@@ -92,7 +92,7 @@ export async function adminRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const status = req.body?.status;
       if (status !== "approved" && status !== "rejected") {
-        return throw new ApiError(400, "INVALID_PARAMETER", "status must be 'approved' or 'rejected'");}
+        throw new ApiError(400, "INVALID_PARAMETER", "status must be 'approved' or 'rejected'");}
       const operator = String(req.headers["x-admin-operator-name"] ?? "System Admin");
       if ((app as any).pg) {
         if (status === "approved") {
@@ -100,16 +100,17 @@ export async function adminRoutes(app: FastifyInstance) {
             "SELECT 1 FROM provider_verification_documents WHERE provider_id = $1 LIMIT 1",
             [req.params.id],
           );
-          if (!documents.rows[0]) return throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
+          if (!documents.rows[0]) throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
         const { rows } = await (app as any).pg.query(
           `UPDATE providers SET verification_status = $1, verification_reviewed_at = NOW(),
              verification_reviewed_by = $2, updated_at = NOW() WHERE id = $3
            RETURNING id, verification_status`,
           [status, operator, req.params.id],
         );
-        if (!rows[0]) return throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");} else {
-        if (!getProviderById(req.params.id)) return throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");if (status === "approved" && getProviderVerificationDocuments(req.params.id).length === 0) {
-          return throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
+        if (!rows[0]) throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");
+} else {
+        if (!getProviderById(req.params.id)) throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");if (status === "approved" && getProviderVerificationDocuments(req.params.id).length === 0) {
+          throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
       }
       setProviderVerificationStatus(req.params.id, status);
       return reply.send({ provider_id: req.params.id, verification_status: status });
