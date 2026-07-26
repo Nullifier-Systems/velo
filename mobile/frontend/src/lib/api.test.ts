@@ -9,7 +9,6 @@ import {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  vi.useRealTimers();
 });
 
 describe("formatStroops", () => {
@@ -67,25 +66,16 @@ describe("shortAddress", () => {
 
 describe("releaseCashRequest", () => {
   it("marks a dropped response as uncertain", async () => {
-    vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>((_resolve, reject) => {
-            setTimeout(() => reject(new TypeError("connection dropped")), 5_000);
-          })
-      )
+      vi.fn(() => Promise.reject(new TypeError("connection dropped")))
     );
 
-    const release = expect(
+    await expect(
       releaseCashRequest("trade-1", "secret")
     ).rejects.toMatchObject({
       kind: "uncertain",
     });
-    await vi.advanceTimersByTimeAsync(5_000);
-
-    await release;
   });
 
   it("marks an RPC timeout response as uncertain", async () => {
