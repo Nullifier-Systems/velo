@@ -5,6 +5,7 @@
  * synchronizes CRDT message states when connectivity is restored.
  */
 
+import type { StoredMessage } from "./store";
 import { getPendingOps, getMessages, putMessages, clearAllData } from "./store";
 import { mergeMessages, mergeClock } from "./crdt";
 import { flushQueue } from "./queue";

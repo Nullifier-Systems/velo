@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import type { StoredMessage } from "../store";
 import { createMessage, mergeMessages, compareMessages, mergeClock, resetClock, tickClock } from "../crdt";
 
 describe("CRDT — Lamport clock", () => {
@@ -55,7 +56,7 @@ describe("CRDT — mergeMessages", () => {
   });
 
   it("returns sorted by clock ascending", () => {
-    const msgs = [tickClock() && createMessage("t1", "m1", "a", "c", "n", "a")].filter(Boolean);
+    const msgs = [tickClock() && createMessage("t1", "m1", "a", "c", "n", "a")].filter(Boolean) as StoredMessage[];
     resetClock();
     const msg1 = createMessage("t1", "m2", "b", "c", "n", "b");
     const msg2 = createMessage("t1", "m3", "c", "c", "n", "c");
