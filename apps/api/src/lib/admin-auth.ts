@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { ApiError } from "./errors";
+import { ApiError } from "./errors.js";
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 

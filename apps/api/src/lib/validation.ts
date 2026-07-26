@@ -1,6 +1,6 @@
 import type { FastifyReply } from "fastify";
 import { z, type ZodTypeAny } from "zod";
-import { ApiError } from "./errors";
+import { ApiError } from "./errors.js";
 
 export function parseBody<T extends ZodTypeAny>(schema: T, body: unknown, reply: FastifyReply) {
   const result = schema.safeParse(body);
