@@ -16,7 +16,7 @@ extern crate std;
 
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Vec,
 };
 
 #[contracttype]
@@ -347,6 +347,134 @@ impl EscrowContract {
 
         Ok(released)
     }
+
+    /// Atomically releases `release_trade_id` and re-locks the payout it
+    /// would have paid out directly into a brand-new trade, instead of
+    /// transferring it to a wallet first. This is how a cash provider who
+    /// just received funds in one trade re-circulates that same value into
+    /// a new trade without it ever sitting outside the contract.
+    ///
+    /// # Authorization
+    ///
+    /// Plain `release()` is permissionless: whoever supplies the correct
+    /// `secret` triggers payout to `release_trade_id`'s `seller`, no matter
+    /// who calls it. Chaining is a materially different action — it
+    /// redirects that same payout into a *new* trade of the caller's
+    /// choosing (a different counterparty, secret hash and timeout) rather
+    /// than paying it to the wallet the seller expects. That decision
+    /// belongs only to the party the funds are owed to, so this function
+    /// requires `seller.require_auth()` in addition to the secret check.
+    /// Without that, anyone who merely observed `release_secret` (e.g. by
+    /// watching it get revealed at hand-off) could hijack someone else's
+    /// incoming payout into a trade they control — exactly the redirection
+    /// this gate exists to prevent.
+    ///
+    /// `release_trade_id`'s `buyer` needs no additional say here: from
+    /// their point of view chaining is indistinguishable from an ordinary
+    /// `release()` — the same secret is checked against the same hash and
+    /// their trade ends up `Released` either way. The new trade's `buyer`
+    /// is always `release_trade_id`'s `seller` (the party recirculating
+    /// its own incoming funds); `new_seller` is the counterparty they're
+    /// choosing for the new trade.
+    ///
+    /// Returns the new trade's id, deterministically derived from
+    /// `release_trade_id` and `new_secret_hash` so callers can look it up
+    /// without the contract needing an extra explicit id argument.
+    pub fn chain_release_to_lock(
+        env: Env,
+        release_trade_id: BytesN<32>,
+        release_secret: BytesN<32>,
+        new_seller: Address,
+        new_secret_hash: BytesN<32>,
+        new_timeout_ledgers: u32,
+    ) -> Result<BytesN<32>, Error> {
+        check_not_paused(&env);
+
+        let release_key = DataKey::Trade(release_trade_id.clone());
+        let mut release_state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&release_key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if release_state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        let computed = env.crypto().sha256(&release_secret.into());
+        if computed.to_bytes() != release_state.secret_hash {
+            return Err(Error::InvalidSecret);
+        }
+
+        // Only the party a plain release() would have paid may redirect
+        // that payout into a new trade instead of their wallet — see the
+        // Authorization section in the doc comment above.
+        release_state.seller.require_auth();
+
+        if new_timeout_ledgers == 0 || new_timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            return Err(Error::InvalidTimeout);
+        }
+
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(0);
+        let fee = (release_state.amount * fee_bps as i128) / 10_000;
+        let payout = release_state.amount - fee;
+        if payout <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let new_id = chained_trade_id(&env, &release_trade_id, &new_secret_hash);
+        let new_key = DataKey::Trade(new_id.clone());
+        if env.storage().persistent().has(&new_key) {
+            return Err(Error::TradeAlreadyExists);
+        }
+
+        // CEI pattern: both trades' state is finalized before the only
+        // external transfer this call makes (the platform fee, if any).
+        // The payout itself never leaves the contract's token balance — it
+        // simply becomes the new trade's escrowed amount instead of an
+        // outbound transfer to release_state.seller's wallet, which is the
+        // property this function exists to provide.
+        release_state.status = TradeStatus::Released;
+        env.storage().persistent().set(&release_key, &release_state);
+
+        let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
+        let new_state = TradeState {
+            seller: new_seller,
+            buyer: release_state.seller.clone(),
+            amount: payout,
+            secret_hash: new_secret_hash,
+            timeout_ledger: new_timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+        env.storage().persistent().set(&new_key, &new_state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&new_key, 100_000, 100_000);
+
+        if fee > 0 {
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        // Two distinguishable events rather than "released" + "locked" —
+        // off-chain systems need to tell a chained operation apart from
+        // two independent ones. Each cross-references the other trade's
+        // id so a listener can reconstruct the link from either event.
+        env.events().publish(
+            (symbol_short(&env, "chain_rel"), release_trade_id),
+            (new_id.clone(), payout),
+        );
+        env.events()
+            .publish((symbol_short(&env, "chain_lock"), new_id.clone()), payout);
+
+        Ok(new_id)
+    }
 }
 
 #[contractimpl]
@@ -472,6 +600,21 @@ impl Htlc for EscrowContract {
     }
 }
 
+/// Derives the id for a trade created via `chain_release_to_lock()`:
+/// sha256(release_trade_id || new_secret_hash). Deterministic rather than
+/// caller-supplied so the function's signature needs no extra id argument;
+/// collisions are not a practical concern (sha256 preimage) and the
+/// `TradeAlreadyExists` check still guards against one regardless.
+fn chained_trade_id(
+    env: &Env,
+    release_trade_id: &BytesN<32>,
+    new_secret_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let mut msg: Bytes = release_trade_id.clone().into();
+    msg.append(&new_secret_hash.clone().into());
+    env.crypto().sha256(&msg).to_bytes()
+}
+
 fn check_not_paused(env: &Env) {
     if let Some(paused) = env
         .storage()
@@ -544,8 +687,8 @@ fn symbol_short(env: &Env, s: &str) -> soroban_sdk::Symbol {
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
-        token, vec, Address, BytesN, Env,
+        testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+        token, vec, Address, BytesN, Env, IntoVal,
     };
 
     struct Fixture {
@@ -993,6 +1136,196 @@ mod test {
             });
         }
         assert!(f.client.try_batch_release(&releases).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // Escrow-to-escrow atomic trade chaining (issue #271).
+    //
+    // chain_release_to_lock() releases trade A's logic and re-locks the
+    // same payout directly into a new trade B, so a cash provider can
+    // re-circulate incoming funds without them ever landing in a wallet.
+    // ------------------------------------------------------------------
+
+    fn new_secret_and_hash(env: &Env, byte: u8) -> (BytesN<32>, BytesN<32>) {
+        let secret = BytesN::from_array(env, &[byte; 32]);
+        let hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+        (secret, hash)
+    }
+
+    #[test]
+    fn chain_release_to_lock_relocks_the_payout_without_an_external_transfer() {
+        let f = setup(1_000, 100); // 1% fee
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // Trade A is released...
+        let trade_a = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade_a.status, TradeStatus::Released);
+
+        // ...but its seller never received a wallet transfer: the payout
+        // went straight into trade B instead.
+        assert_eq!(f.token.balance(&f.seller), 0);
+
+        // Trade B exists, Locked, funded for the same payout (amount minus
+        // fee), with f.seller as its buyer and new_seller as its seller.
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Locked);
+        assert_eq!(trade_b.seller, new_seller);
+        assert_eq!(trade_b.buyer, f.seller);
+        assert_eq!(trade_b.amount, 495); // 500 - 1%
+        assert_eq!(trade_b.secret_hash, new_secret_hash);
+
+        // Only the platform fee ever left the contract; the rest of trade
+        // A's escrowed amount is still inside the contract, now backing
+        // trade B.
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 495);
+
+        // Sanity: trade B's own secret unlocks it exactly like any trade.
+        f.client.release(&new_id, &new_secret);
+        assert_eq!(f.token.balance(&new_seller), 491); // 495 - 1% (fee truncates down)
+    }
+
+    #[test]
+    fn chain_release_to_lock_requires_release_trade_sellers_authorization() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let outsider = Address::generate(&f.env);
+
+        let invoke = MockAuthInvoke {
+            contract: &f.contract_id,
+            fn_name: "chain_release_to_lock",
+            args: (
+                f.id.clone(),
+                f.secret.clone(),
+                new_seller.clone(),
+                new_secret_hash.clone(),
+                50u32,
+            )
+                .into_val(&f.env),
+            sub_invokes: &[],
+        };
+
+        // An outsider — someone who merely knows the secret but is not
+        // trade A's seller — cannot authorize the chain.
+        let result = f
+            .client
+            .mock_auths(&[MockAuth {
+                address: &outsider,
+                invoke: &invoke,
+            }])
+            .try_chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+        assert!(result.is_err());
+
+        // Trade A is untouched — the rejected attempt didn't partially
+        // apply.
+        let trade_a = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade_a.status, TradeStatus::Locked);
+
+        // The legitimate recipient (trade A's seller) can authorize it.
+        let new_id = f
+            .client
+            .mock_auths(&[MockAuth {
+                address: &f.seller,
+                invoke: &invoke,
+            }])
+            .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Locked);
+    }
+
+    #[test]
+    fn chain_release_to_lock_rejects_wrong_secret() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let wrong_secret = BytesN::from_array(&f.env, &[0u8; 32]);
+
+        assert!(f
+            .client
+            .try_chain_release_to_lock(&f.id, &wrong_secret, &new_seller, &new_secret_hash, &50)
+            .is_err());
+    }
+
+    #[test]
+    fn chain_release_to_lock_cannot_be_replayed_against_an_already_released_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        f.client
+            .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // Trying to chain the same, now-Released trade again must fail —
+        // it is no longer Locked.
+        let (_again_secret, again_hash) = new_secret_and_hash(&f.env, 43);
+        assert!(f
+            .client
+            .try_chain_release_to_lock(&f.id, &f.secret, &new_seller, &again_hash, &50)
+            .is_err());
+    }
+
+    #[test]
+    fn chained_trade_can_be_refunded_after_its_own_timeout_like_any_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        f.env.ledger().with_mut(|li| li.sequence_number += 51);
+        f.client.refund(&new_id);
+
+        // f.seller is trade B's buyer, so a timed-out trade B refunds back
+        // to f.seller exactly as an ordinary trade would.
+        assert_eq!(f.token.balance(&f.seller), 495);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Refunded);
+    }
+
+    #[test]
+    fn chained_trade_can_be_disputed_and_resolved_like_any_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // f.seller is trade B's buyer, and can dispute it exactly like any
+        // other trade's buyer.
+        f.client.dispute(&f.seller, &new_id);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Disputed);
+
+        f.client.resolve(&new_id, &true, &Vec::new(&f.env));
+        assert_eq!(f.token.balance(&f.seller), 495);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Refunded);
     }
 }
 

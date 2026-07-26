@@ -32,6 +32,13 @@ export interface CashRequestRecord {
     // implies (the API already sees this secret in the custodial release
     // flow either way; batching just holds it a little longer).
     batchQueuedAt?: string;
+    // Escrow-to-escrow chaining (see chain_release_to_lock() in the escrow
+    // contract). Set on trade A once its release was chained directly into
+    // a new trade B, rather than paid out to a wallet.
+    chainedToId?: string;
+    // Set on trade B when it was created by chaining trade A's release
+    // into it, rather than by an ordinary lock().
+    chainedFromId?: string;
 }
 
 export interface ProviderRecord {

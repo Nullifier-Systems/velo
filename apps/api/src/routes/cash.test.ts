@@ -18,6 +18,16 @@ vi.mock("../lib/stellar.js", () => ({
   submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS", ledger: 1_000 }),
   submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
   submitRefundTx: vi.fn().mockResolvedValue({ hash: "dummy_refund_hash" }),
+  buildChainReleaseToLockTransaction: vi.fn().mockResolvedValue("dummy_chain_unsigned_xdr"),
+  submitChainReleaseToLockTx: vi.fn().mockResolvedValue({ hash: "dummy_chain_hash", newTradeId: "b".repeat(64) }),
+  getTradeState: vi.fn().mockResolvedValue({
+    seller: "GNEWSELLERNEWSELLERNEWSELLERNEWSELLERNEWSELLERNEWSELLERNEW",
+    buyer: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    amountStroops: "9900000",
+    secretHashHex: "b".repeat(64),
+    timeoutLedger: 1_100,
+    status: "Locked",
+  }),
   getLatestLedgerSequence: vi.fn().mockResolvedValue(1_000),
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
@@ -449,6 +459,199 @@ describe("cashRoutes", () => {
     expect(resolveResponse.json().new_status).toBe("refunded");
 
     await app.close();
+  });
+
+  describe("POST /cash/request/:id/chain — escrow-to-escrow chaining", () => {
+    const sellerAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const buyerAddress = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const newSellerAddress = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+
+    async function lockTrade() {
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: sellerAddress,
+          buyer: buyerAddress,
+          amount_stroops: "10000000",
+          secret_hash: "a".repeat(64),
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      return createRes.json().claim_url.split("/").pop() as string;
+    }
+
+    it("returns an unsigned transaction when no signed_xdr is supplied yet", async () => {
+      const tradeId = await lockTrade();
+      const { buildChainReleaseToLockTransaction } = await import("../lib/stellar.js");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "d".repeat(64),
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        id: tradeId,
+        status: "locked",
+        unsigned_xdr: "dummy_chain_unsigned_xdr",
+        submit_url: `/api/v1/cash/request/${tradeId}/chain`,
+      });
+      expect(buildChainReleaseToLockTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          releaseTradeId: tradeId,
+          releaseSecretHex: "c".repeat(64),
+          newSeller: newSellerAddress,
+          newSecretHashHex: "d".repeat(64),
+          signerPublicKey: sellerAddress, // the release trade's seller, not the caller
+        })
+      );
+
+      // Nothing committed yet — the trade is still locked.
+      expect(getCashRequest(tradeId)?.status).toBe("locked");
+    });
+
+    it("submits the signed transaction, releases trade A, and creates trade B", async () => {
+      const tradeId = await lockTrade();
+      const { submitChainReleaseToLockTx } = await import("../lib/stellar.js");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "b".repeat(64),
+          signed_xdr: "seller_signed_xdr",
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).toMatchObject({
+        id: tradeId,
+        status: "released",
+        chained_to: "b".repeat(64),
+      });
+      expect(body.new_trade).toMatchObject({ id: "b".repeat(64) });
+      expect(submitChainReleaseToLockTx).toHaveBeenCalledWith("seller_signed_xdr");
+
+      // Trade A is released and remembers what it chained into.
+      const tradeA = getCashRequest(tradeId);
+      expect(tradeA?.status).toBe("released");
+      expect(tradeA?.chainedToId).toBe("b".repeat(64));
+
+      // Trade B was created, funded from trade A's on-chain payout, and
+      // remembers where it came from.
+      const tradeB = getCashRequest("b".repeat(64));
+      expect(tradeB).toMatchObject({
+        seller: newSellerAddress,
+        buyer: sellerAddress, // trade A's seller re-circulating their funds
+        amountStroops: "9900000",
+        status: "locked",
+        chainedFromId: tradeId,
+      });
+    });
+
+    it("treats an already-released (non-chained) trade idempotently, without attempting a new chain", async () => {
+      const tradeId = await lockTrade();
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/release`,
+        payload: { secret: "c".repeat(64) },
+      });
+
+      const { buildChainReleaseToLockTransaction } = await import("../lib/stellar.js");
+      vi.mocked(buildChainReleaseToLockTransaction).mockClear();
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "d".repeat(64),
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: tradeId, status: "released" });
+      expect(res.json().chained_to).toBeUndefined();
+      expect(buildChainReleaseToLockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects chaining a trade that is disputed", async () => {
+      const tradeId = await lockTrade();
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/dispute`,
+        payload: { caller: buyerAddress },
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "d".repeat(64),
+        },
+      });
+
+      expect(res.statusCode).toBe(409);
+    });
+
+    it("replaying the submit step after a chain already completed returns the same result idempotently", async () => {
+      const tradeId = await lockTrade();
+
+      const first = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "b".repeat(64),
+          signed_xdr: "seller_signed_xdr",
+        },
+      });
+      expect(first.statusCode).toBe(200);
+
+      const second = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "c".repeat(64),
+          new_seller: newSellerAddress,
+          new_secret_hash: "b".repeat(64),
+        },
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json()).toMatchObject({
+        id: tradeId,
+        status: "released",
+        chained_to: "b".repeat(64),
+      });
+    });
+
+    it("returns 400 for a malformed chain request body", async () => {
+      const tradeId = await lockTrade();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/chain`,
+        payload: {
+          release_secret: "not-hex",
+          new_seller: "not-a-stellar-address",
+          new_secret_hash: "d".repeat(64),
+        },
+      });
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   describe("idempotency — duplicate Stellar calls return correct state", () => {
