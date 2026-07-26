@@ -585,16 +585,80 @@ export interface DisputeParams {
     caller: string;
 }
 
-/** Calls escrow's dispute(caller, id). Flagged by either buyer or seller. */
+/** Calls escrow's raise_dispute(caller, id). Flagged by either buyer or seller. */
 export async function disputeEscrow(params: DisputeParams) {
     const signer = loadSignerKeypair();
     return invokeContract(
         params.contractId,
-        "dispute",
+        "raise_dispute",
         [
             nativeToScVal(params.caller, { type: "address" }),
             hexToBytesScVal(params.tradeId),
         ],
+        signer
+    );
+}
+
+/**
+ * Loads the arbitrator keypair — the on-chain signer that resolves disputes.
+ * Deliberately separate from `loadSignerKeypair()` (the buyer/deployer key):
+ * the arbitrator is its own role in the escrow contract, distinct from the
+ * admin that only ever collects fees.
+ */
+function loadArbitratorKeypair(): Keypair {
+    const secret = process.env.ARBITRATOR_SECRET_KEY;
+    if (!secret) {
+        throw new Error(
+            "ARBITRATOR_SECRET_KEY not set — see apps/api/.env.example."
+        );
+    }
+    return Keypair.fromSecret(secret);
+}
+
+export interface ResolveDisputeParams {
+    contractId: string;
+    tradeId: string;
+    /** Buyer's share of the locked amount, in basis points (0-10000). */
+    buyerShareBps: number;
+}
+
+/**
+ * Calls escrow's resolve_dispute(id, buyer_share_bps) — arbitrator-only.
+ * Splits the locked amount atomically between buyer and seller according to
+ * buyerShareBps (0 = seller gets everything minus the platform fee, same as
+ * release(); 10_000 = buyer gets a full refund, same as refund(); anything
+ * in between is a genuine partial split).
+ */
+export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
+    const signer = loadArbitratorKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve_dispute",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.buyerShareBps, { type: "u32" }),
+        ],
+        signer
+    );
+}
+
+export interface RefundAfterDisputeTimeoutParams {
+    contractId: string;
+    tradeId: string;
+}
+
+/**
+ * Calls escrow's refund_after_dispute_timeout(id) — permissionless. Only
+ * succeeds once the dispute-resolution window has elapsed without the
+ * arbitrator resolving, so any signer can submit this (it does not use the
+ * arbitrator or buyer/seller keys).
+ */
+export async function refundAfterDisputeTimeoutEscrow(params: RefundAfterDisputeTimeoutParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "refund_after_dispute_timeout",
+        [hexToBytesScVal(params.tradeId)],
         signer
     );
 }

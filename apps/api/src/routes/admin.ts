@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
+import { refundEscrow, resolveDisputeEscrow, submitRefundTx } from "../lib/stellar.js";
 import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats, getProviderById, getProviders, setProviderVerificationStatus } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";
 import {
@@ -450,17 +450,24 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /**
    * POST /admin/trades/:id/resolve
-   * Acceptance Criteria: Resolve a disputed trade.
+   * Acceptance Criteria: Resolve a disputed trade, splitting the locked
+   * amount between buyer and seller via the escrow contract's
+   * resolve_dispute(). `buyer_share_bps` is the buyer's cut in basis points:
+   * 0 behaves like a plain release() (seller gets everything minus the fee),
+   * 10000 behaves like a plain refund() (buyer gets everything back), and
+   * anything in between is a genuine partial split. This calls the contract
+   * as the arbitrator, not the admin — resolving a dispute's outcome and
+   * collecting platform fees are deliberately separate roles on-chain.
    */
-  app.post<{ Params: { id: string }; Body: { resolve_to_buyer: boolean; notes?: string } }>(
+  app.post<{ Params: { id: string }; Body: { buyer_share_bps: number; notes?: string } }>(
     "/admin/trades/:id/resolve",
     async (req, reply) => {
       const { id } = req.params;
-      const { resolve_to_buyer, notes } = req.body ?? {};
+      const { buyer_share_bps, notes } = req.body ?? {};
       const operatorName = req.headers["x-admin-operator-name"] || "System Admin";
 
-      if (typeof resolve_to_buyer !== "boolean") {
-        return reply.status(400).send({ error: "Field 'resolve_to_buyer' (boolean) is required." });
+      if (typeof buyer_share_bps !== "number" || !Number.isInteger(buyer_share_bps) || buyer_share_bps < 0 || buyer_share_bps > 10_000) {
+        return reply.status(400).send({ error: "Field 'buyer_share_bps' (integer, 0-10000) is required." });
       }
 
       // 1. Check local state store for validity
@@ -475,59 +482,56 @@ export async function adminRoutes(app: FastifyInstance) {
         });
       }
 
-      // 2. Perform on-chain resolution via Soroban contract calling resolve
+      // 2. Perform on-chain resolution via the escrow contract's resolve_dispute
       try {
-        req.log.warn(`Admin resolution initiated on-chain for trade ID ${id} (resolve_to_buyer: ${resolve_to_buyer}) by ${operatorName}`);
-        
-        const adminSigners = (process.env.ADMIN_STELLAR_ADDRESSES ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+        req.log.warn(`Admin resolution initiated on-chain for trade ID ${id} (buyer_share_bps: ${buyer_share_bps}) by ${operatorName}`);
 
-      await resolveEscrow({
-        contractId: record.contractId,
-        tradeId: record.id,
-        resolveToBuyer: resolve_to_buyer,
-        signers: adminSigners,
-      });
+        await resolveDisputeEscrow({
+          contractId: record.contractId,
+          tradeId: record.id,
+          buyerShareBps: buyer_share_bps,
+        });
 
       } catch (err) {
-        req.log.error(err, "resolveEscrow on-chain call failed");
+        req.log.error(err, "resolveDisputeEscrow on-chain call failed");
         return reply.status(502).send({
           error: "On-chain resolve execution failed",
           detail: String(err)
         });
       }
 
-      const newStatus = resolve_to_buyer ? "refunded" : "released";
+      const newStatus = "resolved" as const;
 
       // 3. Keep DB audit trail clean & up-to-date
       try {
         if ((app as any).pg) {
           const query = `
             UPDATE cash_requests
-            SET 
+            SET
               status = $1,
               resolved_at = NOW(),
               resolved_by = $2,
               resolution = $3,
+              buyer_share_bps = $4,
               updated_at = NOW()
-            WHERE id = $4;
+            WHERE id = $5;
           `;
-          await (app as any).pg.query(query, [newStatus, operatorName, notes || null, id]);
+          await (app as any).pg.query(query, [newStatus, operatorName, notes || null, buyer_share_bps, id]);
         }
-        
+
         // Keep memory/store helper synced
         updateStatus(id, newStatus);
         record.resolvedAt = new Date().toISOString();
         record.resolvedBy = String(operatorName);
         record.resolution = notes || "";
+        record.buyerShareBps = buyer_share_bps;
 
         return reply.status(200).send({
           status: "success",
           message: "Dispute resolved successfully.",
           trade_id: id,
-          new_status: newStatus
+          new_status: newStatus,
+          buyer_share_bps
         });
 
       } catch (dbErr) {
@@ -537,7 +541,8 @@ export async function adminRoutes(app: FastifyInstance) {
         record.resolvedAt = new Date().toISOString();
         record.resolvedBy = String(operatorName);
         record.resolution = notes || "";
-        
+        record.buyerShareBps = buyer_share_bps;
+
         return reply.status(500).send({
           error: "Resolution successful on-chain, but local database status sync failed. Manual sync needed.",
           trade_id: id,
