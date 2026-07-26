@@ -25,6 +25,7 @@ import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash
 import { t, type Locale } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
+import { ApiError } from "../lib/errors.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -110,8 +111,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const kAnon = k ? parseInt(k, 10) : 1;
 
       if (Number.isNaN(prec) || prec < 4 || prec > 8) {
-        reply.code(400).send({ error: "precision must be an integer between 4 and 8" });
-        return;
+        throw new ApiError(400, "INVALID_PRECISION", "precision must be an integer between 4 and 8");return;
       }
 
       const privacyMeta = {
@@ -130,8 +130,7 @@ export async function cashRoutes(app: FastifyInstance) {
         const searchRadiusKm = radius ? parseFloat(radius) : 5.0; // Default to 5km radius if not provided
 
         if (isNaN(userLat) || isNaN(userLng) || isNaN(searchRadiusKm)) {
-          reply.code(400).send({ error: "Invalid numeric coordinates or radius supplied" });
-          return;
+          throw new ApiError(400, "INVALID_COORDINATES", "Invalid numeric coordinates or radius supplied");return;
         }
 
         // Filter at cell granularity (never by exact distance), then sort by the
@@ -188,15 +187,13 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const { name, lat, lng, rate, device_id } = req.body ?? ({} as RegisterProviderBody);
       if (!name || typeof lat !== "number" || typeof lng !== "number") {
-          reply.code(400).send({ error: "name, lat (number), and lng (number) are required" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "name, lat (number), and lng (number) are required");return;
       }
       
       // Network Fingerprinting
       const networkCount = countProvidersByNetwork(req.ip, device_id);
       if (networkCount >= 2) {
-          reply.code(403).send({ error: "Registration limit exceeded for this network or device" });
-          return;
+          throw new ApiError(403, "REGISTRATION_LIMIT_EXCEEDED", "Registration limit exceeded for this network or device");return;
       }
 
       const id = randomHex32();
@@ -254,26 +251,22 @@ export async function cashRoutes(app: FastifyInstance) {
       const { seller, buyer, amount_stroops, secret_hash, mode: rawMode, notification_type, contact_info } = body;
       const mode = rawMode ?? "custodial";
       if (mode !== "custodial" && mode !== "non_custodial") {
-        reply.code(400).send({ error: "mode must be either 'custodial' or 'non_custodial'" });
-        return;
+        throw new ApiError(400, "INVALID_MODE", "mode must be either 'custodial' or 'non_custodial'");return;
       }
 
       if (notification_type && notification_type !== "none") {
         if (!contact_info) {
-          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "contact_info is required when notification_type is specified");return;
         }
         if (notification_type === "email") {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid email address format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_EMAIL", "Invalid email address format for contact_info");return;
           }
         } else if (notification_type === "sms") {
           const phoneRegex = /^\+?[1-9]\d{5,14}$/;
           if (!phoneRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_PHONE", "Invalid phone number format for contact_info");return;
           }
         }
       }
@@ -298,20 +291,12 @@ export async function cashRoutes(app: FastifyInstance) {
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
           if (err instanceof RpcTimeoutError) {
-            reply.code(504).send({
-              error: "rpc_timeout",
+            throw new ApiError(504, "RPC_TIMEOUT", "RPC timeout", {
+              extra: { operation: err.operation, elapsed_ms: err.elapsedMs },
               detail: err.message,
-              operation: err.operation,
-              elapsed_ms: err.elapsedMs,
-            });
-          } else {
-            reply.code(502).send({
-              error: "escrow lock failed",
-              detail: String(err),
-              stack: err instanceof Error ? err.stack : undefined,
             });
           }
-          return;
+          throw new ApiError(502, "ESCROW_LOCK_FAILED", "Escrow lock failed", { detail: String(err) });
         }
 
         saveCashRequest({
@@ -408,20 +393,17 @@ export async function cashRoutes(app: FastifyInstance) {
 
       if (notification_type && notification_type !== "none") {
         if (!contact_info) {
-          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "contact_info is required when notification_type is specified");return;
         }
         if (notification_type === "email") {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid email address format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_EMAIL", "Invalid email address format for contact_info");return;
           }
         } else if (notification_type === "sms") {
           const phoneRegex = /^\+?[1-9]\d{5,14}$/;
           if (!phoneRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_PHONE", "Invalid phone number format for contact_info");return;
           }
         }
       }
@@ -502,8 +484,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       try {
         expireCashRequest(record, await getLatestLedgerSequence());
@@ -529,8 +510,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       const matched = record.status === "locked" || record.status === "released" || record.status === "disputed";
       if (!matched) {
@@ -542,8 +522,7 @@ export async function cashRoutes(app: FastifyInstance) {
       }
       const provider = getProviderByAddress(record.seller);
       if (!provider) {
-        reply.code(404).send({ error: "no registered provider for this trade" });
-        return;
+        throw new ApiError(404, "PROVIDER_NOT_FOUND", "no registered provider for this trade");return;
       }
       return {
         request_id: record.id,
@@ -566,8 +545,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       if (record.status === "locked") {
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
@@ -590,8 +568,7 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const { signed_xdr } = req.body ?? {};
       if (!signed_xdr) {
-        reply.code(400).send({ error: "signed_xdr is required" });
-        return;
+        throw new ApiError(400, "MISSING_SIGNED_XDR", "signed_xdr is required");return;
       }
 
       try {
@@ -643,8 +620,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       if (record.status === "released") {
         return { id: record.id, status: "released" };
@@ -717,8 +693,7 @@ export async function cashRoutes(app: FastifyInstance) {
           return;
         }
       } else {
-        reply.code(400).send({ error: "either secret or signed_xdr is required" });
-        return;
+        throw new ApiError(400, "MISSING_SECRET_OR_XDR", "either secret or signed_xdr is required");return;
       }
 
       updateStatus(record.id, "released");
@@ -738,8 +713,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       if (record.status === "refunded") {
         return { id: record.id, status: "refunded" };
@@ -819,8 +793,7 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
       if (record.status === "disputed") {
         return {
@@ -849,8 +822,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const { caller, reason } = disputeBody;
 
       if (caller !== record.buyer && caller !== record.seller) {
-        reply.code(403).send({ error: "Only trade participants can dispute a trade" });
-        return;
+        throw new ApiError(403, "NOT_TRADE_PARTICIPANT", "Only trade participants can dispute a trade");return;
       }
 
       try {

@@ -5,6 +5,7 @@ import websocket from "@fastify/websocket";
 import { randomUUID } from "crypto";
 import "dotenv/config";
 import { resolveLocale, t } from "./lib/i18n.js";
+import { ApiError } from "./lib/errors.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
@@ -134,6 +135,38 @@ app.register(rateLimit, {
 });
 
 /**
+ * Centralized error handler (#242).
+ * Every ApiError thrown in a route handler is caught here and serialized
+ * to the standard { error, code, statusCode, retryable, requestId } shape.
+ */
+app.setErrorHandler((error, request, reply) => {
+  const requestId = request.id as string;
+  if (error instanceof ApiError) {
+    return reply.status(error.statusCode).send(error.toJSON(requestId));
+  }
+  // Fastify validation errors (schema-driven)
+  if ("validation" in error && Array.isArray((error as any).validation)) {
+    return reply.status(400).send({
+      error: "Request validation failed",
+      code: "VALIDATION_ERROR",
+      statusCode: 400,
+      retryable: false,
+      detail: (error as any).validation.map((v: any) => v.message).join("; "),
+      requestId,
+    });
+  }
+  // Unknown errors — log and return generic 500
+  request.log.error(error, "Unhandled error");
+  return reply.status(500).send({
+    error: "An unexpected error occurred",
+    code: "INTERNAL_ERROR",
+    statusCode: 500,
+    retryable: false,
+    requestId,
+  });
+});
+
+/**
  * x402 gate — every paid route calls this. If no valid X-Payment header
  * is present, respond 402 with a challenge describing what to pay and
  * where. This is the entire "auth" system: payment IS authentication,
@@ -154,50 +187,41 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
   }
 
   if (usedPayments.has(payment)) {
-    reply.code(402).send({ error: "Payment already used" });
-    return false;
+    throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
   }
 
   try {
     const txResponse = await server.getTransaction(payment);
     if (txResponse.status !== "SUCCESS") {
-      reply.code(402).send({ error: "Payment transaction not successful" });
-      return false;
+      throw new ApiError(402, "PAYMENT_NOT_SUCCESSFUL", "Payment transaction not successful");
     }
 
     const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
     const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
     
-    // Check memo
     if (tx.memo.value?.toString() !== "velo:request") {
-        reply.code(402).send({ error: "Invalid payment memo" });
-        return false;
+      throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
 
-    // Check operation
-    // For simplicity, assuming a standard native payment or path payment operation.
-    // In production, you would check the exact asset matches USDC, and destination matches merchantAddress.
     const hasPayment = tx.operations.some(op => {
-        if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
-            const dest = (op as any).destination;
-            const amt = (op as any).amount;
-            // A production app must also check (op as any).asset is USDC!
-            return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
-        }
-        return false;
+      if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
+        const dest = (op as any).destination;
+        const amt = (op as any).amount;
+        return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
+      }
+      return false;
     });
 
     if (!hasPayment) {
-        reply.code(402).send({ error: "Transaction does not contain a valid payment" });
-        return false;
+      throw new ApiError(402, "INVALID_PAYMENT_TX", "Transaction does not contain a valid payment");
     }
 
     usedPayments.add(payment);
     return true;
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     req.log.error(err, "payment verification failed");
-    reply.code(402).send({ error: "Invalid payment transaction" });
-    return false;
+    throw new ApiError(402, "INVALID_PAYMENT_TX", "Invalid payment transaction");
   }
 });
 
