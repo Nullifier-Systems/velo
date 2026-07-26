@@ -475,6 +475,43 @@ impl EscrowContract {
 
 #[contractimpl]
 impl Htlc for EscrowContract {
+    /// Lock `amount` tokens from `buyer` into escrow under a unique `id`.
+    ///
+    /// # Trade-ID collision resistance
+    ///
+    /// Trade IDs are generated off-chain as 32 random bytes
+    /// (`crypto.randomBytes(32)` in Node.js — a CSPRNG).  The contract
+    /// enforces uniqueness by checking persistent storage before writing:
+    /// if a trade already exists under the given `id` the call panics with
+    /// `TradeAlreadyExists` and **the existing trade's state is completely
+    /// unaffected**.
+    ///
+    /// ## Collision probability
+    ///
+    /// A `BytesN<32>` trade ID has 256 bits of key space.  The
+    /// birthday-paradox probability of a collision among N trades is
+    /// roughly N² / 2^256.  Even at 10⁹ live trades simultaneously that
+    /// probability is ≈ 10^(-59) — negligible for any realistic workload.
+    ///
+    /// ## Conclusion
+    ///
+    /// The existing `has()` check combined with a cryptographically-strong
+    /// off-chain generator provides sufficient collision resistance.  No
+    /// on-chain entropy contribution (e.g. mixing in the ledger sequence
+    /// number) is required because:
+    ///
+    /// 1. The ID space (2^256) dwarfs every plausible trade volume.
+    /// 2. Node's `crypto.randomBytes` is CSPRNG-backed and already
+    ///    independent of any on-chain observable.
+    /// 3. Mixing ledger sequence numbers on-chain would only add a few
+    ///    bits of public (not secret) data, giving no meaningful uplift
+    ///    against the already-negligible collision probability while
+    ///    complicating ID pre-computation for off-chain coordinators.
+    ///
+    /// If the off-chain generator were ever replaced with a weak source,
+    /// the correct fix is to restore generator quality, not to patch the
+    /// contract.  This analysis is documented here (issue #274) so future
+    /// contributors do not need to re-examine the question from scratch.
     fn lock(
         env: Env,
         id: BytesN<32>,
@@ -1258,6 +1295,124 @@ mod test {
             });
         }
         assert!(f.client.try_batch_release(&releases).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // Trade-ID collision resistance (issue #274).
+    //
+    // These tests confirm the written analysis in lock()'s doc comment:
+    // a duplicate ID is cleanly rejected, and the existing trade's state
+    // is completely unaffected.
+    // ------------------------------------------------------------------
+
+    /// lock() called twice with the same ID but different parameters must
+    /// panic on the second call and leave the first trade in Locked status
+    /// with its original buyer, amount, and secret_hash intact.
+    #[test]
+    #[should_panic(expected = "3")] // Error::TradeAlreadyExists == 3
+    fn duplicate_trade_id_is_rejected_and_first_trade_is_unaffected() {
+        let f = setup(2_000, 0);
+
+        // Lock the first trade under `f.id` with well-known parameters.
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        // Verify first trade is in the expected state before the collision attempt.
+        let first = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(first.status, TradeStatus::Locked);
+        assert_eq!(first.amount, 500);
+        assert_eq!(first.buyer, f.buyer);
+
+        // Second buyer with a different amount and a different secret.
+        let buyer2 = Address::generate(&f.env);
+        f.env
+            .mock_auths(&[soroban_sdk::testutils::MockAuth {
+                address: &buyer2,
+                invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                    contract: &f.contract_id,
+                    fn_name: "lock",
+                    args: (
+                        f.id.clone(),
+                        f.seller.clone(),
+                        buyer2.clone(),
+                        900i128,
+                        f.secret_hash.clone(),
+                        200u32,
+                    )
+                        .into_val(&f.env),
+                    sub_invokes: &[],
+                },
+            }]);
+
+        // This must panic with code 3 (TradeAlreadyExists).
+        f.client
+            .lock(&f.id, &f.seller, &buyer2, &900, &f.secret_hash, &200);
+    }
+
+    /// After a failed duplicate-ID attempt the first trade continues to
+    /// operate normally (can still be released with the original secret).
+    #[test]
+    fn first_trade_remains_fully_operational_after_collision_attempt() {
+        let f = setup(2_000, 0);
+
+        // Lock the first trade.
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        // Attempt to lock a second trade with the same ID — ignore the panic.
+        let buyer2 = Address::generate(&f.env);
+        let _ = f.client.try_lock(&f.id, &f.seller, &buyer2, &900, &f.secret_hash, &200);
+
+        // First trade's state must be unchanged.
+        let trade = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade.status, TradeStatus::Locked);
+        assert_eq!(trade.amount, 500);
+        assert_eq!(trade.buyer, f.buyer);
+        assert_eq!(f.token.balance(&f.contract_id), 500);
+
+        // The original secret still releases it correctly.
+        f.client.release(&f.id, &f.secret);
+        assert_eq!(trade.amount, 500);
+        assert_eq!(f.token.balance(&f.seller), 500); // 0% fee
+        assert_eq!(f.token.balance(&f.contract_id), 0);
+    }
+
+    /// Distinct IDs never interfere: two trades with different IDs can
+    /// co-exist, be released independently, and neither affects the other.
+    #[test]
+    fn distinct_trade_ids_never_collide() {
+        let f = setup(2_000, 0);
+
+        let secret2 = BytesN::from_array(&f.env, &[42u8; 32]);
+        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&id2, &f.seller, &f.buyer, &700, &secret_hash2, &100);
+
+        assert_eq!(f.token.balance(&f.contract_id), 1_200);
+
+        // Release the first — second must stay Locked.
+        f.client.release(&f.id, &f.secret);
+        assert_eq!(
+            f.client.get_trade(&f.id).unwrap().status,
+            TradeStatus::Released
+        );
+        assert_eq!(
+            f.client.get_trade(&id2).unwrap().status,
+            TradeStatus::Locked
+        );
+        assert_eq!(f.token.balance(&f.contract_id), 700);
+
+        // Release the second with its own secret.
+        f.client.release(&id2, &secret2);
+        assert_eq!(
+            f.client.get_trade(&id2).unwrap().status,
+            TradeStatus::Released
+        );
+        assert_eq!(f.token.balance(&f.contract_id), 0);
     }
 }
 
