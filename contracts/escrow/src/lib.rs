@@ -44,6 +44,13 @@ enum DataKey {
     Bond(BytesN<32>),
     /// Anti-spam bonding (issue #280): tunable parameters.
     BondConfig,
+    /// MEV protection: pending commit-reveal escrow awaiting reveal.
+    /// Stores CommitmentState keyed by commitment hash.
+    Commitment(BytesN<32>),
+    /// MEV protection: accumulated locked liquidity for dynamic fee calculation.
+    LockedLiquidity,
+    /// MEV protection: dynamic fee curve parameters (base fee, gamma, alpha, target).
+    DynamicFeeConfig,
 }
 
 #[contracterror]
@@ -73,6 +80,18 @@ pub enum Error {
     /// A dispute-timeout refund was attempted before `DisputeDeadline` elapsed.
     DisputeTimeoutNotReached = 21,
     EmptyBatch = 22,
+    /// Commitment hash already exists (replay prevention).
+    CommitmentAlreadyExists = 23,
+    /// Commitment not found or already revealed/expired.
+    CommitmentNotFound = 24,
+    /// Reveal parameters don't match commitment hash.
+    CommitmentMismatch = 25,
+    /// Reveal window exceeded (Nmax blocks).
+    RevealWindowClosed = 26,
+    /// Reveal window not yet opened (Nmin blocks not reached).
+    RevealWindowNotOpen = 27,
+    /// Collateral bond forfeited due to expired commitment.
+    CollateralForfeited = 28,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -95,6 +114,39 @@ const DISPUTE_RESOLUTION_WINDOW_LEDGERS: u32 = 12 * 60 * 24 * 3;
 /// usage rather than relying on the caller to behave. See
 /// docs/provider-payout-batching.md for the reasoning behind this figure.
 const MAX_BATCH_SIZE: u32 = 25;
+
+/// MEV Protection: Commitment state in Phase 1 of commit-reveal protocol.
+#[derive(Clone)]
+#[contracttype]
+pub struct CommitmentState {
+    /// Buyer who committed funds and collateral bond.
+    pub buyer: Address,
+    /// Collateral amount (refunded on successful reveal, forfeited on expiry).
+    pub collateral: i128,
+    /// Trade amount locked.
+    pub amount: i128,
+    /// Ledger when commitment was created (for window enforcement).
+    pub committed_at_ledger: u32,
+    /// Reveal window must open after Nmin blocks.
+    pub reveal_window_min_ledgers: u32,
+    /// Reveal window must close before Nmax blocks (commits expire after this).
+    pub reveal_window_max_ledgers: u32,
+}
+
+/// Dynamic fee curve parameters for MEV protection.
+#[derive(Clone)]
+#[contracttype]
+pub struct DynamicFeeConfig {
+    /// Base fee in basis points (bps). When L ≈ 0, fee = base_fee_bps.
+    pub base_fee_bps: u32,
+    /// Exponential factor γ in fee formula: Fee = base_fee × (1 + γ × (L/Ltarget)^α)
+    /// Stored as fixed-point (10000 = 1.0) to avoid floats.
+    pub gamma_fp: u32,
+    /// Exponent α in fee formula.
+    pub alpha: u32,
+    /// Target liquidity threshold (in stroops) — threshold for fee curve inflection.
+    pub target_liquidity: i128,
+}
 
 /// One entry in a `batch_release()` call: the trade to release and the
 /// secret that unlocks it. Mirrors the arguments `release()` already takes,
@@ -177,6 +229,22 @@ fn bond_params(env: &Env) -> BondParams {
 // contract calls `token::Client::transfer`.
 #[contract]
 pub struct EscrowContract;
+
+/// Window constraints for commit-reveal protocol (MEV protection).
+/// Reveal must open after Nmin blocks and close before Nmax blocks.
+const COMMIT_REVEAL_WINDOW_MIN_LEDGERS: u32 = 2;      // ~10 seconds (2 ledgers)
+const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100;    // ~15 minutes (same as lock timeout for P2P)
+
+/// Collateral multiplier: bond required to make commit is % of trade amount.
+/// Stored as fixed-point (10000 = 100%, 500 = 5%).
+const COMMIT_COLLATERAL_RATE_FP: u32 = 500; // 5% collateral requirement
+
+/// Default dynamic fee configuration.
+/// Prevents transaction spam when pending escrow volume is high.
+const DEFAULT_DYNAMIC_FEE_BASE_BPS: u32 = 100;      // 1% base fee
+const DEFAULT_DYNAMIC_FEE_GAMMA_FP: u32 = 2000;     // γ = 0.2 (fixed-point)
+const DEFAULT_DYNAMIC_FEE_ALPHA: u32 = 2;           // α = 2 (quadratic)
+const DEFAULT_DYNAMIC_FEE_TARGET_LIQUIDITY: i128 = 1_000_000_000_000; // 10M USDC target
 
 #[contractimpl]
 impl EscrowContract {
@@ -666,6 +734,241 @@ impl EscrowContract {
         }
 
         Ok(())
+    }
+
+    /// MEV Protection: Phase 1 — Commit escrow creation.
+    /// Buyer submits cryptographic commitment: SHA256(buyer || seller || amount || secret_hash || salt)
+    /// along with collateral bond (% of trade amount).
+    ///
+    /// Commitment is locked in storage. Reveal must happen within [Nmin, Nmax] blocks.
+    /// After Nmax blocks, commitment expires and collateral is forfeited to fee pool.
+    pub fn commit_escrow(
+        env: Env,
+        commitment_hash: BytesN<32>, // SHA256(buyer || seller || amount || secret_hash || salt)
+        amount: i128,                // Trade amount (not the commitment hash)
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+        flatten_branch_cost(&env);
+
+        // Buyer must authorize spending collateral
+        let buyer = env.invoker();
+        buyer.require_auth();
+
+        if amount <= 0 || amount > (i128::MAX / 10_000) {
+            return Err(Error::InvalidAmount);
+        }
+
+        // Check commitment doesn't already exist (replay prevention)
+        let commitment_key = DataKey::Commitment(commitment_hash.clone());
+        if env.storage().persistent().has(&commitment_key) {
+            return Err(Error::CommitmentAlreadyExists);
+        }
+
+        // Calculate and collect collateral bond (5% of amount)
+        let collateral = (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000;
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .unwrap_or_else(|| return Err(Error::NotInitialized));
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&buyer, &env.current_contract_address(), &collateral);
+
+        // Store commitment state
+        let commitment_state = CommitmentState {
+            buyer,
+            collateral,
+            amount,
+            committed_at_ledger: env.ledger().sequence(),
+            reveal_window_min_ledgers: COMMIT_REVEAL_WINDOW_MIN_LEDGERS,
+            reveal_window_max_ledgers: COMMIT_REVEAL_WINDOW_MAX_LEDGERS,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&commitment_key, &commitment_state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&commitment_key, COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100, COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100);
+
+        // Update accumulated locked liquidity for dynamic fee calculation
+        let current_liquidity: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LockedLiquidity)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::LockedLiquidity, &(current_liquidity + amount));
+
+        env.events()
+            .publish((symbol_short(&env, "commit"), commitment_hash), amount);
+
+        Ok(())
+    }
+
+    /// MEV Protection: Phase 2 — Reveal and complete escrow creation.
+    /// Buyer reveals cleartext parameters. Contract verifies commitment hash matches,
+    /// transfers collateral + amount to escrow, and proceeds with standard lock.
+    pub fn reveal_escrow(
+        env: Env,
+        id: BytesN<32>,                // Trade ID for the final escrow
+        seller: Address,
+        amount: i128,
+        secret_hash: BytesN<32>,
+        salt: BytesN<32>,              // Commitment salt (reveals hash = SHA256(buyer || seller || ...))
+        timeout_ledgers: u32,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+        flatten_branch_cost(&env);
+
+        let buyer = env.invoker();
+        buyer.require_auth();
+
+        // Recompute commitment hash from parameters
+        let commitment_input = (buyer.clone(), seller.clone(), amount, secret_hash.clone(), salt);
+        let serialized = env.crypto().sha256(&(commitment_input,).into());
+        let commitment_hash = serialized.clone();
+
+        // Fetch commitment state
+        let commitment_key = DataKey::Commitment(commitment_hash.clone());
+        let commitment_state: CommitmentState = env
+            .storage()
+            .persistent()
+            .get(&commitment_key)
+            .ok_or(Error::CommitmentNotFound)?;
+
+        // Verify commitment hasn't expired
+        let current_ledger = env.ledger().sequence();
+        let committed_at = commitment_state.committed_at_ledger;
+        let reveal_deadline = committed_at + commitment_state.reveal_window_max_ledgers;
+
+        if current_ledger >= reveal_deadline {
+            // Commitment expired — collateral is forfeited
+            env.storage().persistent().remove(&commitment_key);
+
+            // Remove from liquidity tracking
+            let current_liquidity: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::LockedLiquidity)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::LockedLiquidity, &(current_liquidity - commitment_state.amount));
+
+            return Err(Error::RevealWindowClosed);
+        }
+
+        // Verify reveal window is open (Nmin has passed)
+        let reveal_open_at = committed_at + commitment_state.reveal_window_min_ledgers;
+        if current_ledger < reveal_open_at {
+            return Err(Error::RevealWindowNotOpen);
+        }
+
+        // Verify revealed parameters match commitment
+        if commitment_state.amount != amount
+            || commitment_state.buyer != buyer
+            || commitment_state.collateral
+                != (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000
+        {
+            return Err(Error::CommitmentMismatch);
+        }
+
+        // Proceed with standard lock (equivalent to original lock() path)
+        if timeout_ledgers == 0 || timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            return Err(Error::InvalidTimeout);
+        }
+
+        let key = DataKey::Trade(id.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(Error::TradeAlreadyExists);
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .unwrap_or_else(|| Err(Error::NotInitialized))?;
+
+        let client = token::Client::new(&env, &token_addr);
+
+        // Transfer trade amount (collateral is already escrowed)
+        client.transfer(&buyer, &env.current_contract_address(), &amount);
+
+        // Refund collateral to buyer (reveal succeeded)
+        client.transfer(&env.current_contract_address(), &buyer, &commitment_state.collateral);
+
+        let timeout_ledger = current_ledger + timeout_ledgers;
+        let state = TradeState {
+            seller,
+            buyer,
+            amount,
+            secret_hash,
+            timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        // Remove commitment from storage
+        env.storage().persistent().remove(&commitment_key);
+
+        // Note: LockedLiquidity already incremented during commit; stays until release/refund
+        // (This will be decremented separately in release/refund logic if implemented)
+
+        env.events()
+            .publish((symbol_short(&env, "reveal"), id), amount);
+
+        Ok(())
+    }
+
+    /// Calculate dynamic fee based on current locked liquidity.
+    /// Fee(L) = BaseFee × (1 + γ × (L / Ltarget)^α)
+    fn calculate_dynamic_fee(env: &Env, amount: i128) -> u32 {
+        // Get dynamic fee config or use defaults
+        let fee_config: DynamicFeeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::DynamicFeeConfig)
+            .unwrap_or(DynamicFeeConfig {
+                base_fee_bps: DEFAULT_DYNAMIC_FEE_BASE_BPS,
+                gamma_fp: DEFAULT_DYNAMIC_FEE_GAMMA_FP,
+                alpha: DEFAULT_DYNAMIC_FEE_ALPHA,
+                target_liquidity: DEFAULT_DYNAMIC_FEE_TARGET_LIQUIDITY,
+            });
+
+        let current_liquidity: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LockedLiquidity)
+            .unwrap_or(0);
+
+        // Calculate L / Ltarget (fixed-point: 10000 = 1.0)
+        let liquidity_ratio_fp = if fee_config.target_liquidity > 0 {
+            ((current_liquidity as u128 * 10_000) / (fee_config.target_liquidity as u128)) as u32
+        } else {
+            10_000 // Default to 1.0 if target is zero
+        };
+
+        // Calculate (L / Ltarget)^α (simplified for α=2: just square it)
+        let power_term = if fee_config.alpha == 2 {
+            ((liquidity_ratio_fp as u128 * liquidity_ratio_fp as u128) / 10_000) as u32
+        } else if fee_config.alpha == 1 {
+            liquidity_ratio_fp
+        } else {
+            // For other exponents, use simplified iteration or cap
+            liquidity_ratio_fp // Fallback: linear
+        };
+
+        // Fee = base_fee × (1 + γ × power_term / 10000)
+        let multiplier_fp = 10_000 + ((fee_config.gamma_fp as u128 * power_term as u128) / 10_000) as u32;
+        ((fee_config.base_fee_bps as u128 * multiplier_fp as u128) / 10_000) as u32
     }
 }
 
@@ -2041,3 +2344,7 @@ mod issue280_bonding {
 
 #[cfg(test)]
 mod property_test;
+
+#[cfg(test)]
+mod mev_protection;
+
