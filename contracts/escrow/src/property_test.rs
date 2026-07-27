@@ -164,4 +164,43 @@ proptest! {
         prop_assert_eq!(f.client.get_trade(&trade_id).unwrap().status, TradeStatus::Locked);
         prop_assert_eq!(f.token.balance(&f.contract_id), amount);
     }
+
+    #[test]
+    fn fee_arithmetic_properties(
+        amount in 1i128..=(i128::MAX / 10_000),
+        fee_bps in 0u32..=10_000,
+        buyer_share_bps in 0u32..=10_000,
+    ) {
+        // 1. Release Math properties
+        let fee = (amount * fee_bps as i128) / 10_000;
+        let payout = amount - fee;
+
+        prop_assert!(fee >= 0);
+        prop_assert!(payout >= 0);
+        prop_assert_eq!(payout + fee, amount);
+        
+        // Exact rounding check (truncation/dust favors the seller, i.e., actual fee <= ideal fee)
+        prop_assert!(fee * 10_000 <= amount * fee_bps as i128);
+        prop_assert!(amount * fee_bps as i128 - fee * 10_000 < 10_000);
+
+        // 2. Resolve Dispute Math properties
+        let buyer_amount = (amount * buyer_share_bps as i128) / 10_000;
+        let seller_gross = amount - buyer_amount;
+        let dispute_fee = (seller_gross * fee_bps as i128) / 10_000;
+        let seller_payout = seller_gross - dispute_fee;
+
+        prop_assert!(buyer_amount >= 0);
+        prop_assert!(seller_gross >= 0);
+        prop_assert!(dispute_fee >= 0);
+        prop_assert!(seller_payout >= 0);
+        prop_assert_eq!(buyer_amount + seller_payout + dispute_fee, amount);
+
+        // Rounding checks for buyer share
+        prop_assert!(buyer_amount * 10_000 <= amount * buyer_share_bps as i128);
+        prop_assert!(amount * buyer_share_bps as i128 - buyer_amount * 10_000 < 10_000);
+
+        // Rounding checks for dispute fee
+        prop_assert!(dispute_fee * 10_000 <= seller_gross * fee_bps as i128);
+        prop_assert!(seller_gross * fee_bps as i128 - dispute_fee * 10_000 < 10_000);
+    }
 }
