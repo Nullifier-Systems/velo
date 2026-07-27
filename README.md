@@ -200,6 +200,7 @@ docs/                contributor and architecture documentation
 
 - [docs/request-flow.md](docs/request-flow.md) (End-to-End Request Flow Diagram)
 - [docs/architecture.md](docs/architecture.md)
+- [docs/scaling-plan.md](docs/scaling-plan.md) (API Load Testing Benchmark & Architectural Scaling Plan)
 - [docs/smart-contracts.md](docs/smart-contracts.md)
 - [docs/api.md](docs/api.md)
 - [docs/development.md](docs/development.md)
