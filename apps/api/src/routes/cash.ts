@@ -12,6 +12,7 @@ import {
   submitRefundTx,
   NETWORK_PASSPHRASE,
   getLatestLedgerSequence,
+  getTradeOnChain,
 } from "../lib/stellar.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
@@ -649,6 +650,13 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitReleaseTx(signed_xdr);
         } catch (err) {
+          const onChainTrade = await getTradeOnChain(record.contractId, record.id);
+          if (onChainTrade?.status === "released") {
+            updateStatus(record.id, "released");
+            await notifyTradeStatus(record.id, "released");
+            await sendNotification(record, "released", (req as any).locale ?? "en");
+            return { id: record.id, status: "released" };
+          }
           const current = getCashRequest(record.id);
           if (current && current.status === "released") {
             return { id: record.id, status: "released" };
@@ -675,6 +683,13 @@ export async function cashRoutes(app: FastifyInstance) {
             secretHex: secret,
           });
         } catch (err) {
+          const onChainTrade = await getTradeOnChain(record.contractId, record.id);
+          if (onChainTrade?.status === "released") {
+            updateStatus(record.id, "released");
+            await notifyTradeStatus(record.id, "released");
+            await sendNotification(record, "released", (req as any).locale ?? "en");
+            return { id: record.id, status: "released" };
+          }
           const current = getCashRequest(record.id);
           if (current && current.status === "released") {
             return { id: record.id, status: "released" };
@@ -734,6 +749,19 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitRefundTx(refundBody.signed_xdr);
         } catch (err) {
+          const onChainTrade = await getTradeOnChain(record.contractId, record.id);
+          if (onChainTrade?.status === "refunded") {
+            updateStatus(record.id, "refunded");
+            await notifyTradeStatus(record.id, "refunded");
+            await sendNotification(record, "refunded", (req as any).locale ?? "en");
+            sendRefundAlert({
+              tradeId: record.id,
+              amountStroops: record.amountStroops,
+              buyer: record.buyer,
+              seller: record.seller,
+            });
+            return { id: record.id, status: "refunded" };
+          }
           const current = getCashRequest(record.id);
           if (current && current.status === "refunded") {
             return { id: record.id, status: "refunded" };
@@ -749,6 +777,19 @@ export async function cashRoutes(app: FastifyInstance) {
             tradeId: record.id,
           });
         } catch (err) {
+          const onChainTrade = await getTradeOnChain(record.contractId, record.id);
+          if (onChainTrade?.status === "refunded") {
+            updateStatus(record.id, "refunded");
+            await notifyTradeStatus(record.id, "refunded");
+            await sendNotification(record, "refunded", (req as any).locale ?? "en");
+            sendRefundAlert({
+              tradeId: record.id,
+              amountStroops: record.amountStroops,
+              buyer: record.buyer,
+              seller: record.seller,
+            });
+            return { id: record.id, status: "refunded" };
+          }
           const current = getCashRequest(record.id);
           if (current && current.status === "refunded") {
             return { id: record.id, status: "refunded" };

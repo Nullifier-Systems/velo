@@ -762,3 +762,55 @@ export async function submitSignedTransaction(signedXdr: string): Promise<{ hash
 
     return { hash: sendResult.hash, status: getResult.status, ledger: getResult.ledger };
 }
+
+/**
+ * Query the on-chain status of a trade by simulating get_trade().
+ * Returns { status: string } where status is the lowercase variant name (e.g. "locked", "released", "refunded", "disputed").
+ * Returns null if the trade is not found or simulation fails.
+ */
+export async function getTradeOnChain(
+    contractId: string,
+    tradeId: string,
+): Promise<{ status: string } | null> {
+    try {
+        const signer = loadSignerKeypair();
+        const account = await server.getAccount(signer.publicKey());
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: contractId,
+                    function: "get_trade",
+                    args: [hexToBytesScVal(tradeId)],
+                })
+            )
+            .setTimeout(30)
+            .build();
+
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            return null;
+        }
+        if (!sim.result) {
+            return null;
+        }
+
+        const nativeVal = scValToNative(sim.result.retval);
+        if (!nativeVal) {
+            return null;
+        }
+
+        const rawStatus = nativeVal.status;
+        if (typeof rawStatus === "string") {
+            return { status: rawStatus.toLowerCase() };
+        } else if (rawStatus && typeof rawStatus === "object" && "name" in rawStatus) {
+            return { status: String((rawStatus as any).name).toLowerCase() };
+        }
+        return { status: String(rawStatus).toLowerCase() };
+    } catch {
+        return null;
+    }
+}
+

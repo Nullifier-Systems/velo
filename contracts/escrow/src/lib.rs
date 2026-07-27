@@ -927,6 +927,130 @@ mod test {
         assert_eq!(trade.status, TradeStatus::Released);
     }
 
+    /// Front-running / griefing resistance test for release().
+    ///
+    /// Simulates two near-simultaneous release() calls for the same trade
+    /// with the same valid secret — the second call must fail cleanly and
+    /// cheaply with TradeNotLocked, with no unexpected side effects.
+    ///
+    /// This formally verifies the analysis in issue #272: front-running a
+    /// release() with the same secret is unprofitable (attacker pays gas to
+    /// execute the victim's intent; payout destination is immutable) and the
+    /// victim's transaction fails early at the status check with minimal cost.
+    #[test]
+    fn test_release_front_running_resistance_same_secret() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        // First release succeeds (simulates the front-runner's transaction
+        // confirming first, or the legitimate transaction confirming first).
+        f.client.release(&f.id, &f.secret);
+
+        // Verify the payout went to the correct (immutable) seller.
+        assert_eq!(f.token.balance(&f.seller), 495);
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 0);
+
+        // Second release with the SAME valid secret — simulates the other
+        // transaction attempting to execute after the first has confirmed.
+        // Must fail with TradeNotLocked, not InvalidSecret or any other error.
+        let result = f.client.try_release(&f.id, &f.secret);
+        assert!(result.is_err(), "second release must fail");
+
+        // The error must be TradeNotLocked (error code 5), proving the
+        // failure happens at the status check BEFORE secret verification.
+        // This confirms: cheap failure, no token transfers, no state corruption.
+        let err = result.unwrap_err();
+        assert_eq!(err, Error::TradeNotLocked);
+
+        // Balances must be unchanged — no double-payout, no fee duplication.
+        assert_eq!(f.token.balance(&f.seller), 495);
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 0);
+
+        // Trade status must remain Released.
+        let trade = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade.status, TradeStatus::Released);
+    }
+
+    /// Griefing test: front-running with an INVALID secret.
+    ///
+    /// Attacker sees valid release in mempool, submits invalid secret first.
+    /// Must fail at secret verification (InvalidSecret), then legitimate
+    /// transaction succeeds normally.
+    #[test]
+    fn test_release_griefing_resistance_invalid_secret() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        // Attacker front-runs with an invalid secret.
+        let wrong_secret = BytesN::from_array(&f.env, &[9u8; 32]);
+        let result = f.client.try_release(&f.id, &wrong_secret);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::InvalidSecret);
+
+        // Legitimate release with correct secret must still succeed.
+        f.client.release(&f.id, &f.secret);
+
+        assert_eq!(f.token.balance(&f.seller), 495);
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 0);
+
+        let trade = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade.status, TradeStatus::Released);
+    }
+
+    /// Front-running resistance for batch_release(): each item is independent.
+    ///
+    /// A front-runner submitting a batch containing one valid and one invalid
+    /// item for the same trade should not be able to block or corrupt the
+    /// valid item's payout.
+    #[test]
+    fn test_batch_release_front_running_independence() {
+        let f = setup(2_000, 100);
+        let seller2 = Address::generate(&f.env);
+        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+        // Batch with one valid secret (for id) and one invalid secret (for id2).
+        let wrong_secret = BytesN::from_array(&f.env, &[9u8; 32]);
+        let releases = vec![
+            &f.env,
+            BatchReleaseItem {
+                id: f.id.clone(),
+                secret: f.secret.clone(),
+            },
+            BatchReleaseItem {
+                id: id2.clone(),
+                secret: wrong_secret,
+            },
+        ];
+
+        let released = f.client.batch_release(&releases);
+
+        // Only the valid item should be released.
+        assert_eq!(released.len(), 1);
+        assert_eq!(released.get(0).unwrap(), f.id.clone());
+
+        assert_eq!(f.token.balance(&f.seller), 495);
+        assert_eq!(f.token.balance(&seller2), 0); // invalid secret skipped
+        assert_eq!(f.token.balance(&f.admin), 5); // only one fee collected
+
+        // The invalid item's trade must remain Locked (untouched).
+        assert_eq!(
+            f.client.get_trade(&id2).unwrap().status,
+            TradeStatus::Locked
+        );
+    }
+
     #[test]
     fn test_lock_and_refund() {
         let f = setup(1_000, 100);
@@ -1444,6 +1568,7 @@ mod test {
     }
 
     // ------------------------------------------------------------------
+<<<<<<< Updated upstream
     // Trade-ID collision resistance (issue #274).
     //
     // These tests confirm the written analysis in lock()'s doc comment:
@@ -1531,30 +1656,177 @@ mod test {
         let f = setup(2_000, 0);
 
         let secret2 = BytesN::from_array(&f.env, &[42u8; 32]);
+=======
+    // Front-running / griefing resistance for release() (issue #272).
+    //
+    // These tests formally verify that the contract's logic is immune to
+    // front-running and griefing attacks when the secret is revealed in
+    // the mempool. The threat model: an attacker observes a pending
+    // release(id, secret) transaction and attempts to front-run it.
+    //
+    // The contract is safe because:
+    //   1. Payout destination (seller) is immutable — fixed at lock().
+    //   2. CEI pattern: state updated to Released BEFORE external calls.
+    //   3. Secret verification happens BEFORE state change.
+    //   4. Any second attempt (front-run or retry) fails fast at the
+    //      status check with TradeNotLocked — cheap revert, no side effects.
+    // ------------------------------------------------------------------
+
+    /// Front-runner submits the SAME valid secret for the same trade.
+    /// Attacker's tx confirms first, pays out to the legitimate seller.
+    /// Legitimate tx then fails fast with TradeNotLocked (cheap revert).
+    /// Attacker gains nothing, spends gas to do seller's work.
+    #[test]
+    fn release_front_run_same_valid_secret_attacker_pays_seller_legit_fails_fast() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        // Attacker front-runs with the same valid secret
+        f.client.release(&f.id, &f.secret);
+
+        // Seller gets paid (attacker's tx executed the payout)
+        assert_eq!(f.token.balance(&f.seller), 495); // 500 - 1% fee
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 0);
+
+        // Trade state is Released
+        assert_eq!(
+            f.client.get_trade(&f.id).unwrap().status,
+            TradeStatus::Released
+        );
+
+        // Legitimate caller's subsequent attempt fails fast with TradeNotLocked
+        // (simulated by calling release again — in reality this would be a
+        // separate transaction that reverts at the status check)
+        let result = f.client.try_release(&f.id, &f.secret);
+        assert!(result.is_err(), "second release must fail");
+        // The error is TradeNotLocked (10) — status check fails before any
+        // crypto or token operations, so revert is cheap.
+    }
+
+    /// Griefing attempt: front-runner submits an INVALID secret for the
+    /// same trade. Attacker's tx fails at secret verification (InvalidSecret)
+    /// BEFORE any state change. Legitimate tx then succeeds normally.
+    /// Attacker wastes gas; legitimate party unaffected.
+    #[test]
+    fn release_front_run_invalid_secret_griefing_fails_fast_legit_succeeds() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let invalid_secret = BytesN::from_array(&f.env, &[99u8; 32]);
+
+        // Attacker's griefing attempt fails at secret verification
+        let grief_result = f.client.try_release(&f.id, &invalid_secret);
+        assert!(grief_result.is_err(), "invalid secret must fail");
+
+        // Trade state UNCHANGED — still Locked, funds still escrowed
+        assert_eq!(
+            f.client.get_trade(&f.id).unwrap().status,
+            TradeStatus::Locked
+        );
+        assert_eq!(f.token.balance(&f.contract_id), 500);
+        assert_eq!(f.token.balance(&f.seller), 0);
+
+        // Legitimate release now succeeds normally
+        f.client.release(&f.id, &f.secret);
+
+        assert_eq!(f.token.balance(&f.seller), 495);
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(
+            f.client.get_trade(&f.id).unwrap().status,
+            TradeStatus::Released
+        );
+    }
+
+    /// Batch release front-running resistance: attacker includes a valid
+    /// secret for a target trade in a batch, hoping to front-run the
+    /// legitimate single release. The batch item succeeds, pays the
+    /// legitimate seller. Legitimate single release then fails fast.
+    /// No value extraction possible.
+    #[test]
+    fn batch_release_front_run_valid_secret_pays_seller_legit_fails_fast() {
+        let f = setup(2_000, 100);
+        let seller2 = Address::generate(&f.env);
+        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+>>>>>>> Stashed changes
         let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
         let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
 
         f.client
             .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
         f.client
+<<<<<<< Updated upstream
             .lock(&id2, &f.seller, &f.buyer, &700, &secret_hash2, &100);
 
         assert_eq!(f.token.balance(&f.contract_id), 1_200);
 
         // Release the first — second must stay Locked.
         f.client.release(&f.id, &f.secret);
+=======
+            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+        // Attacker front-runs by including target trade in a batch
+        let releases = vec![
+            &f.env,
+            BatchReleaseItem {
+                id: f.id.clone(),
+                secret: f.secret.clone(),
+            },
+        ];
+        let released = f.client.batch_release(&releases);
+
+        assert_eq!(released.len(), 1);
+        assert_eq!(released.get(0).unwrap(), f.id.clone());
+
+        // Seller paid by attacker's batch tx
+        assert_eq!(f.token.balance(&f.seller), 495);
+>>>>>>> Stashed changes
         assert_eq!(
             f.client.get_trade(&f.id).unwrap().status,
             TradeStatus::Released
         );
+<<<<<<< Updated upstream
+=======
+
+        // Legitimate single release fails fast
+        let result = f.client.try_release(&f.id, &f.secret);
+        assert!(result.is_err());
+    }
+
+    /// Secret revelation in mempool does not compromise other trades.
+    /// Each trade has independent secret_hash; knowing one secret gives
+    /// zero advantage for any other trade.
+    #[test]
+    fn release_secret_revelation_does_not_compromise_other_trades() {
+        let f = setup(2_000, 100);
+        let seller2 = Address::generate(&f.env);
+        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+        // Attacker learns secret for trade 1 (from mempool observation)
+        // but cannot use it for trade 2
+        let bad_attempt = f.client.try_release(&id2, &f.secret); // wrong secret for id2
+        assert!(bad_attempt.is_err());
+
+        // Trade 2 still locked, funds safe
         assert_eq!(
             f.client.get_trade(&id2).unwrap().status,
             TradeStatus::Locked
         );
+        assert_eq!(f.token.balance(&seller2), 0);
         assert_eq!(f.token.balance(&f.contract_id), 700);
 
-        // Release the second with its own secret.
+        // Legitimate release of trade 2 still works with its own secret
         f.client.release(&id2, &secret2);
+        assert_eq!(f.token.balance(&seller2), 297); // 300 - 1%
         assert_eq!(
             f.client.get_trade(&id2).unwrap().status,
             TradeStatus::Released
@@ -1728,8 +2000,6 @@ mod issue280_bonding {
         client.lock(&id4, &seller, &buyer, &1_000_000, &secret_hash, &100);
         assert_eq!(client.get_bond(&id4), 1_000_000);
     }
-}
-
 }
 
 #[cfg(test)]
