@@ -10,7 +10,6 @@ import {
 import { getDisputeEvidence, getDisputeEvidenceForTrade } from "../lib/dispute-evidence-store.js";
 import { disputeEvidenceMetadata } from "./dispute-evidence.js";
 import { getProviderVerificationDocument, getProviderVerificationDocuments } from "../lib/provider-verification-store.js";
-import { ApiError } from "../lib/errors.js";
 import { issueGrantToken } from "../lib/crypto/grant-token.js";
 
 // Basic schema for body validation

@@ -6,7 +6,6 @@ import { randomUUID } from "crypto";
 import "dotenv/config";
 import { ApiError } from "./lib/errors.js";
 import { resolveLocale, t } from "./lib/i18n.js";
-import { ApiError } from "./lib/errors.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
