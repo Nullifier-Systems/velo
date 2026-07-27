@@ -16,7 +16,7 @@ import {
   getLatestLedgerSequence,
   getTradeOnChain,
 } from "../lib/stellar.js";
-import { CASH_CASH_DEFAULT_TIMEOUT_LEDGERS } from "../lib/timeouts.js";
+import { CASH_DEFAULT_TIMEOUT_LEDGERS } from "../lib/timeouts.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";

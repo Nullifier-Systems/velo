@@ -1,8 +1,15 @@
 import { Server, Api } from "@stellar/stellar-sdk/rpc";
+import { Horizon } from "@stellar/stellar-sdk";
 
 const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const RPC_ALLOW_HTTP = RPC_URL.startsWith("http://");
 export const server = new Server(RPC_URL, { allowHttp: RPC_ALLOW_HTTP });
+
+// Horizon API for Stellar DEX operations
+const HORIZON_URL = process.env.STELLAR_NETWORK === "PUBLIC" 
+  ? "https://horizon.stellar.org"
+  : "https://horizon-testnet.stellar.org";
+const horizonServer = new Horizon.Server(HORIZON_URL);
 
 // Stellar DEX USDC/XLM pool ID (testnet - replace with mainnet pool ID in production)
 const USDC_XLM_POOL_ID = process.env.USDC_XLM_POOL_ID || "";
@@ -44,10 +51,10 @@ export async function getStellarDexRate(): Promise<RateSource> {
   }
 
   try {
-    const pool = await server.getLiquidityPool(USDC_XLM_POOL_ID);
+    // Use Horizon API to fetch liquidity pool data
+    const pool = await horizonServer.liquidityPools().liquidityPoolId(USDC_XLM_POOL_ID).call();
     
     // Calculate spot price from reserves
-    // Assuming USDC is reserve_a and XLM is reserve_b
     const reserves = pool.reserves;
     if (!reserves || reserves.length < 2) {
       throw new Error("Invalid pool reserves");

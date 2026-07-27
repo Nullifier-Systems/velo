@@ -7,6 +7,7 @@ import {
   compareClocks,
   canDeliver,
   normalizeClock,
+  VectorClock,
 } from "./vector-clock.js";
 
 describe("Vector Clock Operations", () => {
@@ -212,7 +213,7 @@ describe("Vector Clock Operations", () => {
   describe("High-Concurrency Scenario", () => {
     it("recovers causal order from 100 interleaved messages", () => {
       // Simulate rapid concurrent sends
-      const clocks: Array<[string, typeof compareClocks]> = [];
+      const clocks: Array<[string, VectorClock]> = [];
       let buyerCount = 0;
       let sellerCount = 0;
 
@@ -221,8 +222,8 @@ describe("Vector Clock Operations", () => {
         if (sender === "buyer") buyerCount++;
         else sellerCount++;
 
-        const clock = { buyer: buyerCount, seller: sellerCount };
-        clocks.push([JSON.stringify(clock), compareClocks]);
+        const clock: VectorClock = { buyer: buyerCount, seller: sellerCount };
+        clocks.push([JSON.stringify(clock), clock]);
       }
 
       // Shuffle them
@@ -230,7 +231,7 @@ describe("Vector Clock Operations", () => {
 
       // Parse back and verify they can be re-sorted
       const parsed = shuffled.map(
-        ([json]) => JSON.parse(json) as typeof compareClocks,
+        ([json]) => JSON.parse(json) as VectorClock,
       );
       const resorted = parsed.sort(compareClocks);
 
