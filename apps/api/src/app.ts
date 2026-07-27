@@ -10,6 +10,7 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
+import { sessionRoutes } from "./routes/session.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 
@@ -149,3 +150,4 @@ app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
+app.register(sessionRoutes, { prefix: "/api/v1" });

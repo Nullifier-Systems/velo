@@ -416,3 +416,217 @@ export async function submitSignedTransaction(signedXdr: string): Promise<{ hash
 
     return { hash: sendResult.hash, status: getResult.status };
 }
+
+// ---------------------------------------------------------------------------
+// Session Account Contract Functions
+// ---------------------------------------------------------------------------
+
+export interface SessionAccountParams {
+    contractId: string;
+    mainAccount: string;
+}
+
+export interface CreateSessionKeyParams {
+    contractId: string;
+    sessionKey: string;
+    spendingCap: bigint;
+    durationDays: number;
+    startDelayDays: number;
+}
+
+export interface RevokeSessionKeyParams {
+    contractId: string;
+    sessionKey: string;
+}
+
+export interface UpdateSpendingCapParams {
+    contractId: string;
+    sessionKey: string;
+    newSpendingCap: bigint;
+}
+
+/** Initialize the session account contract with the main account. */
+export async function initializeSessionAccount(params: SessionAccountParams): Promise<{ hash: string }> {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "initialize",
+        [nativeToScVal(params.mainAccount, { type: "address" })],
+        signer,
+    ) as Promise<{ hash: string }>;
+}
+
+/** Build an unsigned transaction to initialize the session account. */
+export async function buildInitializeSessionAccountTx(params: SessionAccountParams & { signerPublicKey: string }): Promise<string> {
+    const account = await server.getAccount(params.signerPublicKey);
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+        .addOperation(
+            Operation.invokeContractFunction({
+                contract: params.contractId,
+                function: "initialize",
+                args: [nativeToScVal(params.mainAccount, { type: "address" })],
+            })
+        )
+        .setTimeout(30)
+        .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    const prepared = assembleTransaction(tx, sim).build();
+    return prepared.toXDR();
+}
+
+/** Create a new session key with spending cap and time window. */
+export async function createSessionKey(params: CreateSessionKeyParams): Promise<{ hash: string }> {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "create_session_key",
+        [
+            nativeToScVal(params.sessionKey, { type: "address" }),
+            nativeToScVal(params.spendingCap, { type: "i128" }),
+            nativeToScVal(params.durationDays, { type: "u32" }),
+            nativeToScVal(params.startDelayDays, { type: "u32" }),
+        ],
+        signer,
+    ) as Promise<{ hash: string }>;
+}
+
+/** Build an unsigned transaction to create a session key. */
+export async function buildCreateSessionKeyTx(params: CreateSessionKeyParams & { signerPublicKey: string }): Promise<string> {
+    const account = await server.getAccount(params.signerPublicKey);
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+        .addOperation(
+            Operation.invokeContractFunction({
+                contract: params.contractId,
+                function: "create_session_key",
+                args: [
+                    nativeToScVal(params.sessionKey, { type: "address" }),
+                    nativeToScVal(params.spendingCap, { type: "i128" }),
+                    nativeToScVal(params.durationDays, { type: "u32" }),
+                    nativeToScVal(params.startDelayDays, { type: "u32" }),
+                ],
+            })
+        )
+        .setTimeout(30)
+        .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    const prepared = assembleTransaction(tx, sim).build();
+    return prepared.toXDR();
+}
+
+/** Revoke a session key immediately. */
+export async function revokeSessionKey(params: RevokeSessionKeyParams): Promise<{ hash: string }> {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "revoke_session_key",
+        [nativeToScVal(params.sessionKey, { type: "address" })],
+        signer,
+    ) as Promise<{ hash: string }>;
+}
+
+/** Build an unsigned transaction to revoke a session key. */
+export async function buildRevokeSessionKeyTx(params: RevokeSessionKeyParams & { signerPublicKey: string }): Promise<string> {
+    const account = await server.getAccount(params.signerPublicKey);
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+        .addOperation(
+            Operation.invokeContractFunction({
+                contract: params.contractId,
+                function: "revoke_session_key",
+                args: [nativeToScVal(params.sessionKey, { type: "address" })],
+            })
+        )
+        .setTimeout(30)
+        .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    const prepared = assembleTransaction(tx, sim).build();
+    return prepared.toXDR();
+}
+
+/** Update the spending cap of an existing session key. */
+export async function updateSpendingCap(params: UpdateSpendingCapParams): Promise<{ hash: string }> {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "update_spending_cap",
+        [
+            nativeToScVal(params.sessionKey, { type: "address" }),
+            nativeToScVal(params.newSpendingCap, { type: "i128" }),
+        ],
+        signer,
+    ) as Promise<{ hash: string }>;
+}
+
+/** Build an unsigned transaction to update a session key's spending cap. */
+export async function buildUpdateSpendingCapTx(params: UpdateSpendingCapParams & { signerPublicKey: string }): Promise<string> {
+    const account = await server.getAccount(params.signerPublicKey);
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+        .addOperation(
+            Operation.invokeContractFunction({
+                contract: params.contractId,
+                function: "update_spending_cap",
+                args: [
+                    nativeToScVal(params.sessionKey, { type: "address" }),
+                    nativeToScVal(params.newSpendingCap, { type: "i128" }),
+                ],
+            })
+        )
+        .setTimeout(30)
+        .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    const prepared = assembleTransaction(tx, sim).build();
+    return prepared.toXDR();
+}
+
+/** Get information about a session key. */
+export async function getSessionKeyInfo(contractId: string, sessionKey: string): Promise<any> {
+    const result = await invokeContract(
+        contractId,
+        "get_session_key",
+        [nativeToScVal(sessionKey, { type: "address" })],
+        loadSignerKeypair(),
+    );
+    return result;
+}
+
+/** Get the total amount spent by a session key. */
+export async function getSessionKeySpent(contractId: string, sessionKey: string): Promise<bigint> {
+    const result = await invokeContract(
+        contractId,
+        "get_spent",
+        [nativeToScVal(sessionKey, { type: "address" })],
+        loadSignerKeypair(),
+    );
+    return result as bigint;
+}
