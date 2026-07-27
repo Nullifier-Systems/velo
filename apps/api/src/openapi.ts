@@ -110,7 +110,8 @@ export const openApiDocument = {
   tags: [
     { name: "meta", description: "Health, discovery, and specification endpoints." },
     { name: "cash", description: "Cash request lifecycle: discover providers, lock escrow, poll, release." },
-    { name: "reputation", description: "On-chain reputation lookups." },
+  { name: "reputation", description: "On-chain reputation lookups." },
+    { name: "status", description: "Public transparency: API/chain health and recent activity." },
   ],
   paths: {
     "/health": {
@@ -203,6 +204,66 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/status": {
+      get: {
+        operationId: "getStatus",
+        tags: ["status"],
+        summary: "Public transparency status",
+        description:
+          "Free, public endpoint for a transparency page: API uptime, " +
+          "Soroban RPC/chain health with the latest known ledger, and a " +
+          "sanitized feed of recent trade activity (id, status, and " +
+          "timestamp only — no addresses, amounts, or secrets).",
+        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        responses: {
+          "200": {
+            description: "Combined API/chain health and recent activity.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["api", "chain", "recent_activity"],
+                  properties: {
+                    api: {
+                      type: "object",
+                      required: ["status", "uptime_seconds", "timestamp"],
+                      properties: {
+                        status: { type: "string", const: "ok" },
+                        uptime_seconds: { type: "integer" },
+                        timestamp: { type: "string", format: "date-time" },
+                      },
+                    },
+                    chain: {
+                      type: "object",
+                      required: ["network", "status", "latest_ledger", "oldest_ledger"],
+                      properties: {
+                        network: { type: "string", examples: ["testnet", "public"] },
+                        status: { type: "string", examples: ["healthy", "unreachable"] },
+                        latest_ledger: { type: ["integer", "null"] },
+                        oldest_ledger: { type: ["integer", "null"] },
+                      },
+                    },
+                    recent_activity: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        required: ["id", "status", "createdAt"],
+                        properties: {
+                          id: { type: "string" },
+                          status: { type: "string", enum: ["locked", "expired", "released", "refunded"] },
+                          createdAt: { type: "string", format: "date-time" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
     "/api/v1/cash/agents": {
       get: {
         operationId: "findCashAgents",
@@ -219,11 +280,32 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["agents"],
+                  required: ["agents", "availability"],
                   properties: {
                     agents: {
                       type: "array",
                       items: { $ref: "#/components/schemas/CashAgent" },
+                    },
+                    availability: {
+                      type: "object",
+                      required: ["state"],
+                      description:
+                        "A successful empty discovery is `no_providers_nearby`; transport and validation failures use non-200 responses instead.",
+                      properties: {
+                        state: {
+                          type: "string",
+                          enum: ["available", "no_providers_nearby"],
+                        },
+                        message: { type: "string" },
+                        suggested_action: {
+                          type: "string",
+                          enum: ["check_back_later"],
+                        },
+                        retry_after_seconds: {
+                          type: "integer",
+                          minimum: 1,
+                        },
+                      },
                     },
                   },
                 },
@@ -633,8 +715,14 @@ export const openApiDocument = {
           amountStroops: { type: "string" },
           secretHashHex: { type: "string" },
           qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
-          status: { type: "string", enum: ["locked", "released", "refunded"] },
+          status: { type: "string", enum: ["locked", "expired", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
+          disputedAt: { type: "string", format: "date-time" },
+          disputedBy: { type: "string" },
+          disputeReason: { type: "string" },
+          resolvedAt: { type: "string", format: "date-time" },
+          resolvedBy: { type: "string" },
+          resolution: { type: "string" },
         },
       },
       Reputation: {

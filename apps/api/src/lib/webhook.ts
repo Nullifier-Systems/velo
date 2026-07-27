@@ -6,39 +6,29 @@ function isDiscord(url: string): boolean {
   return /discord\.com|discordapp\.com/i.test(url);
 }
 
-export async function sendRefundAlert(params: {
-  tradeId: string;
-  amountStroops: string;
-  buyer: string;
-  seller: string;
-}): Promise<void> {
-  if (!WEBHOOK_URL) {
-    return;
-  }
+export interface WebhookAlert {
+  title: string;
+  text: string;
+  fields: Record<string, string>;
+}
 
-  const { tradeId, amountStroops, buyer, seller } = params;
-  const amountUsdc = (Number(amountStroops) / 10_000_000).toFixed(2);
+/** Send an operations alert through the existing Slack/Discord webhook. */
+export async function sendWebhookAlert(alert: WebhookAlert): Promise<void> {
+  if (!WEBHOOK_URL) return;
 
-  const blocks = [
-    { type: "header", text: { type: "plain_text", text: "Refund processed" } },
-    { type: "section", fields: [
-      { type: "mrkdwn", text: `*Trade ID*\n\`${tradeId}\`` },
-      { type: "mrkdwn", text: `*Amount*\n${amountUsdc} USDC` },
-    ]},
-    { type: "section", fields: [
-      { type: "mrkdwn", text: `*Buyer*\n\`${buyer}\`` },
-      { type: "mrkdwn", text: `*Seller*\n\`${seller}\`` },
-    ]},
-  ];
-
+  const fields = Object.entries(alert.fields);
   const payload = isDiscord(WEBHOOK_URL)
-    ? { content: `Refund processed — trade \`${tradeId}\`, ${amountUsdc} USDC`, embeds: [{ title: "Refund processed", fields: [
-        { name: "Trade ID", value: `\`${tradeId}\``, inline: true },
-        { name: "Amount", value: `${amountUsdc} USDC`, inline: true },
-        { name: "Buyer", value: `\`${buyer}\``, inline: true },
-        { name: "Seller", value: `\`${seller}\``, inline: true },
-      ]}]}
-    : { text: `Refund processed — trade \`${tradeId}\`, ${amountUsdc} USDC`, blocks };
+    ? {
+        content: alert.text,
+        embeds: [{ title: alert.title, fields: fields.map(([name, value]) => ({ name, value, inline: true })) }],
+      }
+    : {
+        text: alert.text,
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: alert.title } },
+          { type: "section", fields: fields.map(([name, value]) => ({ type: "mrkdwn", text: `*${name}*\n${value}` })) },
+        ],
+      };
 
   try {
     const res = await fetch(WEBHOOK_URL, {
@@ -46,10 +36,28 @@ export async function sendRefundAlert(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      console.error(`webhook returned ${res.status}: ${await res.text()}`);
-    }
+    if (!res.ok) console.error(`webhook returned ${res.status}: ${await res.text()}`);
   } catch (err) {
     console.error("webhook call failed:", err);
   }
+}
+
+export async function sendRefundAlert(params: {
+  tradeId: string;
+  amountStroops: string;
+  buyer: string;
+  seller: string;
+}): Promise<void> {
+  const { tradeId, amountStroops, buyer, seller } = params;
+  const amountUsdc = (Number(amountStroops) / 10_000_000).toFixed(2);
+  await sendWebhookAlert({
+    title: "Refund processed",
+    text: `Refund processed — trade \`${tradeId}\`, ${amountUsdc} USDC`,
+    fields: {
+      "Trade ID": `\`${tradeId}\``,
+      Amount: `${amountUsdc} USDC`,
+      Buyer: `\`${buyer}\``,
+      Seller: `\`${seller}\``,
+    },
+  });
 }

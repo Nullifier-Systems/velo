@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { app } from "./app.js";
 import { server } from "./lib/stellar.js";
 
@@ -56,11 +56,8 @@ describe("requirePayment verification", () => {
     const firstCall = await (app as any).requirePayment(mockReq, mockReply, "1.0");
     expect(firstCall).toBe(true);
 
-    // Second time with same hash should fail immediately
-    const secondCall = await (app as any).requirePayment(mockReq, mockReply, "1.0");
-    expect(secondCall).toBe(false);
-    expect(mockReply.code).toHaveBeenCalledWith(402);
-    expect(mockReply.send).toHaveBeenCalledWith({ error: "Payment already used" });
+    // Second time with same hash should throw ApiError
+    await expect((app as any).requirePayment(mockReq, mockReply, "1.0")).rejects.toThrow("Payment already used");
   });
 
   it("fails if transaction has wrong memo", async () => {
@@ -86,10 +83,7 @@ describe("requirePayment verification", () => {
       ],
     } as any);
 
-    const result = await (app as any).requirePayment(mockReq, mockReply, "1.0");
-    expect(result).toBe(false);
-    expect(mockReply.code).toHaveBeenCalledWith(402);
-    expect(mockReply.send).toHaveBeenCalledWith({ error: "Invalid payment memo" });
+    await expect((app as any).requirePayment(mockReq, mockReply, "1.0")).rejects.toThrow("Invalid payment memo");
   });
 
   it("fails if amount is insufficient", async () => {
@@ -115,10 +109,7 @@ describe("requirePayment verification", () => {
       ],
     } as any);
 
-    const result = await (app as any).requirePayment(mockReq, mockReply, "1.0");
-    expect(result).toBe(false);
-    expect(mockReply.code).toHaveBeenCalledWith(402);
-    expect(mockReply.send).toHaveBeenCalledWith({ error: "Transaction does not contain a valid payment" });
+    await expect((app as any).requirePayment(mockReq, mockReply, "1.0")).rejects.toThrow("Transaction does not contain a valid payment");
   });
 
   it("fails if destination is incorrect", async () => {
@@ -144,9 +135,35 @@ describe("requirePayment verification", () => {
       ],
     } as any);
 
-    const result = await (app as any).requirePayment(mockReq, mockReply, "1.0");
-    expect(result).toBe(false);
-    expect(mockReply.code).toHaveBeenCalledWith(402);
-    expect(mockReply.send).toHaveBeenCalledWith({ error: "Transaction does not contain a valid payment" });
+    await expect((app as any).requirePayment(mockReq, mockReply, "1.0")).rejects.toThrow("Transaction does not contain a valid payment");
+  });
+});
+
+describe("GET /version", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("returns commit and timestamp", async () => {
+    process.env.VERCEL_GIT_COMMIT_SHA = "abcdef123456";
+    process.env.DEPLOY_TIMESTAMP = "2026-01-01T12:00:00Z";
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/version",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      commit: "abcdef123456",
+      timestamp: "2026-01-01T12:00:00Z",
+    });
   });
 });

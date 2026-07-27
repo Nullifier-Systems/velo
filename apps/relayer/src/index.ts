@@ -21,7 +21,7 @@ function main() {
 
   const evm = new EthersEvmHtlcClient(cfg.evmRpcUrl, cfg.evmPrivateKey, cfg.evmHtlcAddress);
 
-  const relayer = new Relayer(watcher, evm);
+  const relayer = new Relayer(watcher, evm, undefined, cfg.relayerId);
   relayer.run();
 
   const shutdown = () => {

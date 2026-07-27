@@ -6,6 +6,8 @@ The contract workspace in this repository currently includes the core escrow imp
 
 The escrow contract implements a simple HTLC-style release flow. It locks stablecoin funds from a buyer and allows them to be transferred to a seller only when the correct secret is revealed.
 
+It also exposes `batch_release()`, which settles many trades' payouts in a single invocation — the on-chain half of opt-in provider payout batching. See [docs/provider-payout-batching.md](provider-payout-batching.md).
+
 ## HTLC Core
 
 The HTLC core crate provides shared types and interfaces used by the escrow contract and future contract components.
