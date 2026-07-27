@@ -253,10 +253,7 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
     try {
       await this.publisher.xAdd(this.streamKey(id), "*", { _init: "1" });
       // Trim the init message immediately
-      await this.publisher.xTrim(this.streamKey(id), "MAXLEN", {
-        count: 0,
-        strategy: "=",
-      });
+      await this.publisher.xTrim(this.streamKey(id), "MAXLEN", 0);
     } catch {
       // Stream may already exist
     }
