@@ -38,6 +38,8 @@ The system is organized around a simple trust model:
 - the API layer exposes the flow to clients and agents,
 - the mobile experience provides a lightweight path for users to complete or claim transactions.
 
+For a detailed step-by-step visual sequence of the end-to-end payment and cash request flow, see the [End-to-End Request Flow Diagram](docs/request-flow.md).
+
 ```mermaid
 flowchart LR
   User[User / Mobile Client] --> Frontend[Mobile Frontend]
@@ -63,6 +65,7 @@ flowchart LR
 - Fastify for service APIs
 - React + Vite for the mobile frontend
 - TurboRepo for workspace orchestration
+- Managed Redis for distributed trade-chat state and Pub/Sub
 - Stellar / Soroban for settlement infrastructure
 
 ## Soroban Smart Contracts
@@ -90,9 +93,28 @@ The API layer provides the integration surface for clients and agents. It expose
 - payment challenge responses,
 - reputation and provider discovery concepts.
 
+### Agent Integration & Worked Examples
+
+Velo is designed for direct consumption by autonomous AI agents, Telegram bots, and automated client applications. Agents interact with the API layer to discover local liquidity providers, lock cash requests in Soroban escrow, and receive a user-facing claim link.
+
+For a complete end-to-end worked example, see [examples/telegram_bot.js](examples/telegram_bot.js). This minimal runnable Telegram bot script demonstrates how an agent can:
+1. Query available cash providers via `GET /api/v1/cash/agents`
+2. Create an escrow cash request via `POST /api/v1/cash/request`
+3. Retrieve and present the resulting `claim_url` to the end user
+
 ## Mobile Application
 
 The mobile experience is intentionally lightweight and QR-centric. It allows a user to claim or complete a payment flow without requiring a full wallet-native experience at the first step.
+
+## Provider Identity Verification
+
+Provider onboarding uses a lightweight manual-review workflow rather than a full KYC service:
+
+1. `POST /api/v1/provider/register` creates the provider with verification status `pending`.
+2. The registration UI immediately uploads one private identity-document image to `POST /api/v1/provider/verification-document`. JPEG, PNG, and WebP files up to 5 MB are accepted and checked against their file signatures.
+3. An operator authenticated with `x-admin-api-key` reviews submissions through `GET /api/v1/admin/providers/verifications`, retrieves a private document through `GET /api/v1/admin/providers/:providerId/verifications/:documentId`, and records a decision with `POST /api/v1/admin/providers/:id/verification` using `{"status":"approved"}` or `{"status":"rejected"}`.
+
+The states are `pending` (awaiting review), `approved` (eligible for public directory and default cash matching), and `rejected` (not eligible; a new document submission returns the provider to `pending`). Verification documents are never returned by public provider APIs. Deployments using PostgreSQL must apply migration `007_add_provider_verification.sql`; operators should restrict database and admin-endpoint access because uploaded identity images are sensitive.
 
 ## Installation
 
@@ -133,12 +155,29 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
+### Distributed WebSocket chat
+
+Trade chat requires a Redis-compatible managed service in deployed environments. Set `REDIS_URL` to its connection URL and set `CHAT_CAPABILITY_SECRET` to at least 32 random characters. Optional settings are `CHAT_CAPABILITY_TTL_SECONDS` (default `3600`) and `CHAT_HEARTBEAT_INTERVAL_MS` (default `30000`). Local development falls back to process-local state when `REDIS_URL` is absent; that fallback is not suitable for multi-instance deployments.
+
+The backend issues a short-lived capability bound to one `{tradeId, participant}` pair through the existing buyer claim and seller dashboard flows. The client presents it during the WebSocket handshake. The server verifies its signature and expiry, loads shared trade membership from Redis, and admits only the recorded buyer or seller. HTTP chat history and encryption-key routes require the same token as a Bearer credential.
+
+Each API instance subscribes to a Redis channel only while it owns connections for that trade. Ciphertext is persisted before publication, so clients reconnect with the last received message ID and replay anything missed. Server heartbeat pings remove dropped connections, while clients reconnect with bounded exponential backoff. Serverless deployments must support WebSocket upgrades and long-lived connections, permit outbound Redis connections, and use the same Redis database and capability secret on every instance.
+
 ## Running Tests
 
 ```bash
+npm run localization:check
 npm run test
 cd contracts && cargo test --workspace
 ```
+
+When adding user-facing text, add matching keys to the English and Spanish
+catalogs under `mobile/frontend/src/i18n/locales/` (or
+`apps/api/src/i18n/locales/` for API messages) and render the text through the
+project's translation helper. `npm run localization:check` mirrors CI and fails
+on unmatched catalog keys or placeholders, unknown translation keys, and newly
+hardcoded frontend text. See [CONTRIBUTING.md](CONTRIBUTING.md#localization) for
+the full contributor workflow.
 
 ## Repository Structure
 
@@ -159,11 +198,13 @@ docs/                contributor and architecture documentation
 
 ## Documentation Links
 
+- [docs/request-flow.md](docs/request-flow.md) (End-to-End Request Flow Diagram)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/smart-contracts.md](docs/smart-contracts.md)
 - [docs/api.md](docs/api.md)
 - [docs/development.md](docs/development.md)
 - [docs/testing.md](docs/testing.md)
+- [examples/telegram_bot.js](examples/telegram_bot.js) (Telegram Bot Agent Worked Example)
 
 ## Security
 

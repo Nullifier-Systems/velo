@@ -1,5 +1,6 @@
 import type { FastifyReply } from "fastify";
 import { z, type ZodTypeAny } from "zod";
+import { ApiError } from "./errors.js";
 
 export function parseBody<T extends ZodTypeAny>(schema: T, body: unknown, reply: FastifyReply) {
   const result = schema.safeParse(body);
@@ -7,6 +8,9 @@ export function parseBody<T extends ZodTypeAny>(schema: T, body: unknown, reply:
   if (!result.success) {
     reply.code(400).send({
       error: "invalid_request",
+      code: "VALIDATION_ERROR",
+      statusCode: 400,
+      retryable: false,
       details: result.error.flatten(),
     });
     return null;

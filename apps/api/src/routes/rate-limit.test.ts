@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { cashRoutes } from "./cash.js";
 import { servicesRoutes } from "./services.js";
 import { reputationRoutes } from "./reputation.js";
+import {
+  clearRateLimitViolations,
+  getRateLimitViolations,
+  recordRateLimitViolation,
+} from "../lib/rate-limit-violations.js";
 
 describe("rate limiting", () => {
   /**
@@ -20,6 +25,13 @@ describe("rate limiting", () => {
       global: true,
       max: globalMax,
       timeWindow: "1 minute",
+      onExceeded: (request: FastifyRequest, identifier: string) => {
+        recordRateLimitViolation({
+          identifier,
+          route: request.routeOptions.url ?? request.url.split("?", 1)[0],
+          method: request.method,
+        });
+      },
     });
 
     // Minimal requirePayment stub so routes don't abort on payment.
@@ -42,6 +54,7 @@ describe("rate limiting", () => {
   // ── Global limit tests (route without per-route config) ───────────
 
   it("enforces the global rate limit on routes without per-route config", async () => {
+    clearRateLimitViolations();
     const app = await buildApp(2);
 
     // Consume the 2 allowed requests
@@ -60,10 +73,22 @@ describe("rate limiting", () => {
     expect(body).toHaveProperty("error", "Too Many Requests");
     expect(body.message).toContain("Rate limit exceeded");
 
+    expect(getRateLimitViolations()).toEqual([
+      expect.objectContaining({
+        identifier: "127.0.0.1",
+        route: "/public",
+        method: "GET",
+        offenseCount: 1,
+        severity: "low",
+        status: "open",
+      }),
+    ]);
+
     await app.close();
   });
 
   it("sets retry-after header when globally rate-limited", async () => {
+    clearRateLimitViolations();
     const app = await buildApp(1);
 
     // Exhaust the limit
@@ -73,6 +98,26 @@ describe("rate limiting", () => {
     expect(res.statusCode).toBe(429);
     expect(res.headers["retry-after"]).toBeDefined();
     expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+
+    await app.close();
+  });
+
+  it("persists repeat 429s and derives severity without changing the response", async () => {
+    clearRateLimitViolations();
+    const app = await buildApp(1);
+
+    await app.inject({ method: "GET", url: "/public" });
+    const blocked = await Promise.all([
+      app.inject({ method: "GET", url: "/public" }),
+      app.inject({ method: "GET", url: "/public" }),
+      app.inject({ method: "GET", url: "/public" }),
+    ]);
+
+    expect(blocked.map(response => response.statusCode)).toEqual([429, 429, 429]);
+    expect(blocked[0].json()).toHaveProperty("statusCode", 429);
+    expect(getRateLimitViolations()).toEqual([
+      expect.objectContaining({ offenseCount: 3, severity: "medium" }),
+    ]);
 
     await app.close();
   });
