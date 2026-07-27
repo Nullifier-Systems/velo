@@ -13,6 +13,12 @@ pub enum TradeStatus {
     Locked,
     Released,
     Refunded,
+    Disputed,
+    /// A disputed trade whose funds were split (or fully allocated) by an
+    /// arbitrator via `resolve_dispute`. Distinct from `Released`/`Refunded`
+    /// so a resolved dispute is never confused with the ordinary HTLC
+    /// release/refund paths.
+    Resolved,
 }
 
 #[derive(Clone)]
