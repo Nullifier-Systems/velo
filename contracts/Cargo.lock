@@ -1428,6 +1428,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-account"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
