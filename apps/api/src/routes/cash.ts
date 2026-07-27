@@ -15,6 +15,7 @@ import {
   NETWORK_PASSPHRASE,
   getLatestLedgerSequence,
 } from "../lib/stellar.js";
+import { CASH_CASH_DEFAULT_TIMEOUT_LEDGERS } from "../lib/timeouts.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
@@ -51,7 +52,6 @@ import { ApiError } from "../lib/errors.js";
 
 const ESCROW_CONTRACT_ID =
   process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
-const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
 
 const cashRequestSchema = z.object({
   seller: z
@@ -413,7 +413,7 @@ export async function cashRoutes(app: FastifyInstance) {
             buyer,
             amountStroops: BigInt(amount_stroops),
             secretHashHex: secret_hash,
-            timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
           });
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
@@ -438,7 +438,7 @@ export async function cashRoutes(app: FastifyInstance) {
           secretHashHex: secret_hash,
           qrPayload,
           status: "locked",
-          timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
+          timeoutLedger: lockedAtLedger + CASH_DEFAULT_TIMEOUT_LEDGERS,
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
@@ -461,7 +461,7 @@ export async function cashRoutes(app: FastifyInstance) {
             buyer,
             amountStroops: BigInt(amount_stroops),
             secretHashHex: secret_hash,
-            timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
             signerPublicKey: buyer,
           });
 
@@ -575,7 +575,7 @@ export async function cashRoutes(app: FastifyInstance) {
           buyer,
           amountStroops: BigInt(amount_stroops),
           secretHashHex: secret_hash,
-          timeoutLedgers: DEFAULT_TIMEOUT_LEDGERS,
+          timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
         });
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
@@ -607,7 +607,7 @@ export async function cashRoutes(app: FastifyInstance) {
         secretHashHex: secret_hash,
         qrPayload,
         status: "locked",
-        timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
+        timeoutLedger: lockedAtLedger + CASH_DEFAULT_TIMEOUT_LEDGERS,
         createdAt: new Date().toISOString(),
         notificationType: notification_type,
         contactInfo: contact_info,
@@ -741,7 +741,7 @@ export async function cashRoutes(app: FastifyInstance) {
       try {
         const result = await submitSignedTransaction(signed_xdr);
         updateStatus(record.id, "locked");
-        record.timeoutLedger = result.ledger + DEFAULT_TIMEOUT_LEDGERS;
+        record.timeoutLedger = result.ledger + CASH_DEFAULT_TIMEOUT_LEDGERS;
 
         const baseUrl =
           process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
