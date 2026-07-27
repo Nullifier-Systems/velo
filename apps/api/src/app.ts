@@ -4,8 +4,8 @@ import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import { randomUUID } from "crypto";
 import "dotenv/config";
-import { resolveLocale, t } from "./lib/i18n.js";
 import { ApiError } from "./lib/errors.js";
+import { resolveLocale, t } from "./lib/i18n.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
@@ -132,6 +132,31 @@ app.register(rateLimit, {
       retryAfterSeconds: Math.ceil(context.ttl / 1000),
     };
   },
+});
+
+app.setErrorHandler((error, request, reply) => {
+  const requestId = request.id as string;
+  if (error instanceof ApiError) {
+    return reply.status(error.statusCode).send(error.toJSON(requestId));
+  }
+  if ("validation" in error && Array.isArray((error as any).validation)) {
+    return reply.status(400).send({
+      error: "Request validation failed",
+      code: "VALIDATION_ERROR",
+      statusCode: 400,
+      retryable: false,
+      detail: (error as any).validation.map((v: any) => v.message).join("; "),
+      requestId,
+    });
+  }
+  request.log.error(error, "Unhandled error");
+  return reply.status(500).send({
+    error: "An unexpected error occurred",
+    code: "INTERNAL_ERROR",
+    statusCode: 500,
+    retryable: false,
+    requestId,
+  });
 });
 
 /**

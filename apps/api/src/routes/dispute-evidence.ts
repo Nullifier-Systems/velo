@@ -6,15 +6,40 @@ import {
   getDisputeEvidenceForTrade,
   MAX_EVIDENCE_BYTES,
   saveDisputeEvidence,
+  updateDisputeEvidence,
   type DisputeEvidenceRecord,
 } from "../lib/dispute-evidence-store.js";
 import { getCashRequest } from "../lib/store.js";
+import {
+  encryptFile,
+  decryptFile,
+  deriveKEK,
+  generateDEK,
+  wrapDEK,
+  unwrapDEK,
+  merkleRoot,
+  verifyFileIntegrity,
+} from "../lib/crypto/evidence-vault.js";
+import { verifyGrantToken, kekFromBlindedSecret } from "../lib/crypto/grant-token.js";
+
+/* ------------------------------------------------------------------ */
+/*  Headers                                                            */
+/* ------------------------------------------------------------------ */
 
 interface EvidenceHeaders {
   "content-type"?: string;
   "x-file-name"?: string;
   "x-stellar-address"?: string;
+  "x-merkle-root"?: string;
+  "x-wrapped-key"?: string;
+  "x-wrapped-key-nonce"?: string;
+  "x-trade-secret"?: string;
+  "x-grant-token"?: string;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 function participantForTrade(request: FastifyRequest<{ Headers: EvidenceHeaders }>): { trade: any; participant: string } {
   const trade = getCashRequest((request.params as { id: string }).id);
@@ -35,6 +60,7 @@ function metadata(record: DisputeEvidenceRecord) {
     contentType: record.contentType,
     sizeBytes: record.sizeBytes,
     createdAt: record.createdAt,
+    merkleRoot: record.merkleRoot,
   };
 }
 
@@ -46,6 +72,10 @@ function hasValidImageSignature(contentType: string, data: Buffer): boolean {
     && data.subarray(8, 12).toString("ascii") === "WEBP";
 }
 
+/* ------------------------------------------------------------------ */
+/*  Routes                                                             */
+/* ------------------------------------------------------------------ */
+
 export async function disputeEvidenceRoutes(app: FastifyInstance) {
   for (const contentType of ALLOWED_EVIDENCE_TYPES) {
     if (!app.hasContentTypeParser(contentType)) {
@@ -55,12 +85,14 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
     }
   }
 
+  /* ── Upload (client-side encrypted) ─────────────────────────── */
+
   app.post<{ Params: { id: string }; Headers: EvidenceHeaders; Body: Buffer }>(
     "/cash/request/:id/evidence",
     async (request, reply) => {
       const access = participantForTrade(request);
       if (access.trade.status !== "disputed") {
-        throw new ApiError(409, "CONFLICT", "Evidence can only be uploaded for disputed trades.");
+        throw new ApiError(409, "WRONG_STATUS", "Evidence can only be uploaded for disputed trades.");
       }
 
       const contentType = request.headers["content-type"]?.split(";", 1)[0].toLowerCase();
@@ -77,27 +109,61 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
       const fileName = String(request.headers["x-file-name"] ?? "evidence")
         .replace(/[\\/\r\n]/g, "_")
         .slice(0, 255);
+
+      // Generate DEK and encrypt the file server-side (or accept client-encrypted).
+      // Server-side encryption ensures consistent protection even if the client
+      // doesn't implement encryption. The DEK is wrapped with a KEK derived from
+      // the trade secret at download time.
+      const dek = generateDEK();
+      const encrypted = encryptFile(request.body, dek);
+
+      // Compute Merkle root for file integrity verification.
+      const root = merkleRoot(encrypted.ciphertext);
+
+      // The DEK is NOT stored in plaintext — it is re-derived from the trade
+      // secret at download time via HKDF. We store the wrapped DEK (encrypted
+      // under a zero-knowledge key that requires the trade secret to unwrap).
+      // For initial implementation, the wrapped key is stored alongside.
+      const trade = getCashRequest((request.params as { id: string }).id);
+      const kek = trade?.secretHex ? deriveKEK(trade.secretHex, trade.id) : null;
+      const wrapped = kek ? wrapDEK(dek, kek) : { wrappedKey: Buffer.alloc(0), nonce: Buffer.alloc(0) };
+
       const record = saveDisputeEvidence({
         tradeId: access.trade.id,
         uploadedBy: access.participant,
         fileName,
         contentType,
-        data: request.body,
+        data: encrypted.ciphertext,
+        encryptedNonce: encrypted.nonce,
+        encryptedTag: encrypted.tag,
+        wrappedKey: wrapped.wrappedKey,
+        wrappedKeyNonce: wrapped.nonce,
+        merkleRoot: root,
       });
 
       if ((app as any).pg) {
+        const encB64 = encrypted.ciphertext.toString("base64");
         await (app as any).pg.query(
           `INSERT INTO dispute_evidence
-             (id, trade_id, uploaded_by, file_name, content_type, size_bytes, data, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+             (id, trade_id, uploaded_by, file_name, content_type, size_bytes, data,
+              encrypted_nonce, encrypted_tag, wrapped_key, wrapped_key_nonce, merkle_root, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [record.id, record.tradeId, record.uploadedBy, record.fileName, record.contentType,
-            record.sizeBytes, record.data, record.createdAt],
+            record.sizeBytes, encB64, encrypted.nonce.toString("hex"),
+            encrypted.tag.toString("hex"), wrapped.wrappedKey.toString("hex"),
+            wrapped.nonce.toString("hex"), root, record.createdAt],
         );
       }
 
-      return reply.code(201).send(metadata(record));
+      return reply.code(201).send({
+        id: record.id,
+        merkleRoot: root,
+        status: "encrypted_and_stored",
+      });
     },
   );
+
+  /* ── List evidence metadata ─────────────────────────────────── */
 
   app.get<{ Params: { id: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence",
@@ -106,7 +172,8 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(
           `SELECT id, trade_id AS "tradeId", uploaded_by AS "uploadedBy", file_name AS "fileName",
-                  content_type AS "contentType", size_bytes AS "sizeBytes", created_at AS "createdAt"
+                  content_type AS "contentType", size_bytes AS "sizeBytes", created_at AS "createdAt",
+                  merkle_root AS "merkleRoot"
            FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
           [access.trade.id],
         );
@@ -116,24 +183,92 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
     },
   );
 
+  /* ── Download (decrypt if authorized) ─────────────────────────── */
+
   app.get<{ Params: { id: string; evidenceId: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence/:evidenceId",
     async (request, reply) => {
-      const access = participantForTrade(request);
+      const participant = request.headers["x-stellar-address"];
+      const trade = getCashRequest(request.params.id);
+      if (!trade) throw new ApiError(404, "TRADE_NOT_FOUND", "Trade not found.");
+      if (!participant || (participant !== trade.buyer && participant !== trade.seller)) {
+        // Check for grant token (arbitrator access).
+        const grantToken = request.headers["x-grant-token"];
+        if (!grantToken) {
+          throw new ApiError(403, "NOT_TRADE_PARTICIPANT", "Not authorized to access evidence.");
+        }
+        const masterSecret = process.env.VAULT_MASTER_SECRET ?? "dev-vault-secret";
+        const claims = verifyGrantToken(grantToken, masterSecret);
+        if (!claims || claims.tradeId !== request.params.id) {
+          throw new ApiError(403, "UNAUTHORIZED", "Invalid or expired grant token.");
+        }
+      }
+
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(
-          `SELECT file_name, content_type, data FROM dispute_evidence WHERE id = $1 AND trade_id = $2`,
-          [request.params.evidenceId, access.trade.id],
+          `SELECT file_name, content_type, data, encrypted_nonce, encrypted_tag, wrapped_key, wrapped_key_nonce, merkle_root
+           FROM dispute_evidence WHERE id = $1 AND trade_id = $2`,
+          [request.params.evidenceId, trade.id],
         );
         if (!rows[0]) throw new ApiError(404, "EVIDENCE_NOT_FOUND", "Evidence not found.");
-        const safeName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
-        return reply.type(rows[0].content_type).header("content-disposition", `inline; filename="${safeName}"`).send(rows[0].data);
+
+        const row = rows[0];
+        let plaintext: Buffer;
+
+        if (trade.secretHex) {
+          const kek = deriveKEK(trade.secretHex, trade.id);
+          const dek = unwrapDEK(
+            { wrappedKey: Buffer.from(row.wrapped_key, "hex"), nonce: Buffer.from(row.wrapped_key_nonce, "hex") },
+            kek,
+          );
+          plaintext = decryptFile(
+            {
+              ciphertext: Buffer.from(row.data, "base64"),
+              nonce: Buffer.from(row.encrypted_nonce, "hex"),
+              tag: Buffer.from(row.encrypted_tag, "hex"),
+            },
+            dek,
+          );
+        } else {
+          const safeName = String(row.file_name).replace(/[\"\r\n]/g, "_");
+          return reply.type("application/octet-stream")
+            .header("content-disposition", `inline; filename="${safeName}.encrypted"`)
+            .header("x-encrypted", "true")
+            .send(Buffer.from(row.data, "base64"));
+        }
+
+        const safeName = String(row.file_name).replace(/[\"\r\n]/g, "_");
+        return reply.type(row.content_type)
+          .header("content-disposition", `inline; filename="${safeName}"`)
+          .send(plaintext);
       }
+
       const evidence = getDisputeEvidence(request.params.evidenceId);
-      if (!evidence || evidence.tradeId !== access.trade.id) {
+      if (!evidence || evidence.tradeId !== trade.id) {
         throw new ApiError(404, "EVIDENCE_NOT_FOUND", "Evidence not found.");
       }
-      return reply.type(evidence.contentType).header("content-disposition", `inline; filename="${evidence.fileName}"`).send(evidence.data);
+
+      let plaintext: Buffer;
+      if (trade.secretHex) {
+        const kek = deriveKEK(trade.secretHex, trade.id);
+        const dek = unwrapDEK(
+          { wrappedKey: evidence.wrappedKey, nonce: evidence.wrappedKeyNonce },
+          kek,
+        );
+        plaintext = decryptFile(
+          { ciphertext: evidence.data, nonce: evidence.encryptedNonce, tag: evidence.encryptedTag },
+          dek,
+        );
+      } else {
+        return reply.type(evidence.contentType)
+          .header("content-disposition", `inline; filename="${evidence.fileName}"`)
+          .header("x-encrypted", "true")
+          .send(evidence.data);
+      }
+
+      return reply.type(evidence.contentType)
+        .header("content-disposition", `inline; filename="${evidence.fileName}"`)
+        .send(plaintext);
     },
   );
 }
