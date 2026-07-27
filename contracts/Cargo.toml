@@ -3,12 +3,15 @@ resolver = "2"
 members = [
     "htlc-core",
     "escrow",
+    "reputation",
     "atomic-swap",
     "zk-credential",
+    "settlement-chain",
+    "soroban-lint",
 ]
 
 [workspace.dependencies]
-soroban-sdk = "21"
+soroban-sdk = "27"
 
 [profile.release]
 opt-level = "z"

@@ -11,13 +11,21 @@ import {
   submitReleaseTx,
   submitRefundTx,
   NETWORK_PASSPHRASE,
+  getLatestLedgerSequence,
 } from "../lib/stellar.js";
+import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
-import { saveCashRequest, getCashRequest, updateStatus, saveProvider, getProviders, countProvidersByNetwork } from "../lib/store.js";
+import { saveCashRequest, getCashRequest, updateStatus, expireCashRequest, saveProvider, getProviders, countProvidersByNetwork, getProviderByAddress, enqueueForBatch } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
+import { toPublicProvider, withinRadius, applyKAnonymity, DEFAULT_PRECISION } from "../utils/privacy.js";
+import { cellFor, haversineKm, GEOHASH_CELL_SIZE_METERS } from "../utils/geohash.js";
+import { t, type Locale } from "../lib/i18n.js";
+import { issueChatCapability } from "../lib/chat-capability.js";
+import { registerTradeForChat } from "../lib/chat-infrastructure.js";
+import { ApiError } from "../lib/errors.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
@@ -45,49 +53,22 @@ interface RegisterProviderBody {
   device_id?: string;
 }
 
-interface BoundingBox {
-  minLat: number;
-  maxLat: number;
-  minLng: number;
-  maxLng: number;
-}
-
-/**
- * Calculates bounding-box coordinates for a given search point and radius.
- * @param lat Target Latitude (degrees)
- * @param lng Target Longitude (degrees)
- * @param radiusInKm Search radius in kilometers (defaults to 5km)
- */
-function getBoundingBox(lat: number, lng: number, radiusInKm: number): BoundingBox {
-  const kmPerDegreeLat = 111;
-  // Account for longitude shrinkage as we move away from the equator
-  const kmPerDegreeLng = 111 * Math.cos(lat * (Math.PI / 180));
-
-  const latDelta = radiusInKm / kmPerDegreeLat;
-  const lngDelta = radiusInKm / kmPerDegreeLng;
+function discoveryAvailability(agentCount: number, locale: Locale) {
+  if (agentCount > 0) {
+    return { state: "available" as const };
+  }
 
   return {
-    minLat: lat - latDelta,
-    maxLat: lat + latDelta,
-    minLng: lng - lngDelta,
-    maxLng: lng + lngDelta,
+    state: "no_providers_nearby" as const,
+    message: t(locale, "discovery.noProvidersNearby"),
+    suggested_action: "check_back_later" as const,
+    retry_after_seconds: 3600,
   };
 }
 
-/**
- * Simple Haversine distance formula to calculate exact path distance
- */
-function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Radius of the earth in km
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// Proximity matching is privacy-preserving: providers are generalized to a
+// geohash cell and never returned with exact coordinates (issue #216). See
+// ../utils/privacy.ts and docs/privacy/proximity-matching.md.
 
 /**
  * GET  /api/v1/cash/agents        — find nearby cash providers ($0.001)
@@ -111,7 +92,7 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
  *                                    if the trade times out or fails (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
-  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string } }>(
+  app.get<{ Querystring: { lat?: string; lng?: string; radius?: string; precision?: string; k?: string } }>(
     "/cash/agents",
     {
       config: {
@@ -122,8 +103,26 @@ export async function cashRoutes(app: FastifyInstance) {
       const paid = await (app as any).requirePayment(req, reply, "0.001");
       if (!paid) return;
 
-      const { lat, lng, radius } = req.query;
-      const providers = getProviders().filter(p => p.status === "available");
+      const { lat, lng, radius, precision, k } = req.query;
+      const providers = getProviders().filter(
+        p => p.status === "available" && p.kycStatus === "approved",
+      );
+      const prec = precision ? parseInt(precision, 10) : DEFAULT_PRECISION;
+      const kAnon = k ? parseInt(k, 10) : 1;
+
+      if (Number.isNaN(prec) || prec < 4 || prec > 8) {
+        throw new ApiError(400, "INVALID_PRECISION", "precision must be an integer between 4 and 8");return;
+      }
+
+      const privacyMeta = {
+        precision: prec,
+        cell_size_m: GEOHASH_CELL_SIZE_METERS[prec],
+        k_anonymity: kAnon,
+        note: t(
+          (req as any).locale ?? "en",
+          "privacy.note"
+        ),
+      };
 
       if (lat && lng) {
         const userLat = parseFloat(lat);
@@ -131,34 +130,53 @@ export async function cashRoutes(app: FastifyInstance) {
         const searchRadiusKm = radius ? parseFloat(radius) : 5.0; // Default to 5km radius if not provided
 
         if (isNaN(userLat) || isNaN(userLng) || isNaN(searchRadiusKm)) {
-          reply.code(400).send({ error: "Invalid numeric coordinates or radius supplied" });
-          return;
+          throw new ApiError(400, "INVALID_COORDINATES", "Invalid numeric coordinates or radius supplied");return;
         }
 
-        // 1. Obtain bounding box
-        const box = getBoundingBox(userLat, userLng, searchRadiusKm);
+        // Filter at cell granularity (never by exact distance), then sort by the
+        // cell-centroid distance computed server-side. Only the coarse public
+        // view (cell + quantized band) is returned.
+        const inRange = withinRadius(providers, { lat: userLat, lng: userLng }, searchRadiusKm, prec);
+        const queryCell = cellFor(userLat, userLng, prec);
+        inRange.sort((a, b) => {
+          const ca = cellFor(a.lat, a.lng, prec);
+          const cb = cellFor(b.lat, b.lng, prec);
+          return (
+            haversineKm(queryCell.lat, queryCell.lon, ca.lat, ca.lon) -
+            haversineKm(queryCell.lat, queryCell.lon, cb.lat, cb.lon)
+          );
+        });
 
-        // 2. High-speed Bounding-box pre-filtering
-        const candidates = providers.filter(p =>
-          p.lat >= box.minLat && p.lat <= box.maxLat &&
-          p.lng >= box.minLng && p.lng <= box.maxLng
+        let agents = inRange.map(p => toPublicProvider(p, { lat: userLat, lng: userLng, precision: prec }, prec));
+        agents = applyKAnonymity(agents, kAnon);
+        const availability = discoveryAvailability(
+          agents.length,
+          (req as any).locale ?? "en",
         );
-
-        // 3. Exact distance calculation on remaining filtered candidates
-        const withDistance = candidates
-          .map(p => ({
-            ...p,
-            distance_km: parseFloat(getDistanceFromLatLonInKm(userLat, userLng, p.lat, p.lng).toFixed(2))
-          }))
-          // Prune out mathematical corner cases falling in the box but outside the circle radius
-          .filter(p => p.distance_km <= searchRadiusKm);
-
-        withDistance.sort((a, b) => a.distance_km - b.distance_km);
-        return { agents: withDistance };
+        if (availability.state === "no_providers_nearby") {
+          req.log.info(
+            {
+              event: "provider_discovery_empty",
+              search_cell: queryCell.hash,
+              radius_km: searchRadiusKm,
+            },
+            "no providers available near requester",
+          );
+        }
+        return { agents, availability, privacy: privacyMeta };
       }
 
-      // Default if no coordinates are provided
-      return { agents: providers };
+      // Default if no coordinates are provided: still coarse, no exact coords.
+      let agents = providers.map(p => toPublicProvider(p, undefined, prec));
+      agents = applyKAnonymity(agents, kAnon);
+      return {
+        agents,
+        availability: discoveryAvailability(
+          agents.length,
+          (req as any).locale ?? "en",
+        ),
+        privacy: privacyMeta,
+      };
     }
   );
 
@@ -169,15 +187,13 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const { name, lat, lng, rate, device_id } = req.body ?? ({} as RegisterProviderBody);
       if (!name || typeof lat !== "number" || typeof lng !== "number") {
-          reply.code(400).send({ error: "name, lat (number), and lng (number) are required" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "name, lat (number), and lng (number) are required");return;
       }
       
       // Network Fingerprinting
       const networkCount = countProvidersByNetwork(req.ip, device_id);
       if (networkCount >= 2) {
-          reply.code(403).send({ error: "Registration limit exceeded for this network or device" });
-          return;
+          throw new ApiError(403, "REGISTRATION_LIMIT_EXCEEDED", "Registration limit exceeded for this network or device");return;
       }
 
       const id = randomHex32();
@@ -235,26 +251,22 @@ export async function cashRoutes(app: FastifyInstance) {
       const { seller, buyer, amount_stroops, secret_hash, mode: rawMode, notification_type, contact_info } = body;
       const mode = rawMode ?? "custodial";
       if (mode !== "custodial" && mode !== "non_custodial") {
-        reply.code(400).send({ error: "mode must be either 'custodial' or 'non_custodial'" });
-        return;
+        throw new ApiError(400, "INVALID_MODE", "mode must be either 'custodial' or 'non_custodial'");return;
       }
 
       if (notification_type && notification_type !== "none") {
         if (!contact_info) {
-          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "contact_info is required when notification_type is specified");return;
         }
         if (notification_type === "email") {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid email address format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_EMAIL", "Invalid email address format for contact_info");return;
           }
         } else if (notification_type === "sms") {
           const phoneRegex = /^\+?[1-9]\d{5,14}$/;
           if (!phoneRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_PHONE", "Invalid phone number format for contact_info");return;
           }
         }
       }
@@ -262,10 +274,12 @@ export async function cashRoutes(app: FastifyInstance) {
       const tradeId = randomHex32();
       const qrPayload = `velo://claim?request_id=${tradeId}&contract=${ESCROW_CONTRACT_ID}`;
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      const locale = (req as any).locale ?? "en";
 
       if (mode === "custodial") {
+        let lockedAtLedger: number;
         try {
-          await lockEscrow({
+          lockedAtLedger = await lockEscrow({
             contractId: ESCROW_CONTRACT_ID,
             tradeId,
             seller,
@@ -276,12 +290,13 @@ export async function cashRoutes(app: FastifyInstance) {
           });
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
-          reply.code(502).send({
-            error: "escrow lock failed",
-            detail: String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-          return;
+          if (err instanceof RpcTimeoutError) {
+            throw new ApiError(504, "RPC_TIMEOUT", "RPC timeout", {
+              extra: { operation: err.operation, elapsed_ms: err.elapsedMs },
+              detail: err.message,
+            });
+          }
+          throw new ApiError(502, "ESCROW_LOCK_FAILED", "Escrow lock failed", { detail: String(err) });
         }
 
         saveCashRequest({
@@ -294,16 +309,19 @@ export async function cashRoutes(app: FastifyInstance) {
           secretHashHex: secret_hash,
           qrPayload,
           status: "locked",
+          timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
         });
+        await registerTradeForChat(getCashRequest(tradeId)!);
 
         reply.code(201).send({
           // The secret is held client-side and is NOT returned by the API
           claim_url: `${baseUrl}/claim/${tradeId}`,
+          chat_token: issueChatCapability(tradeId, buyer),
           qr_payload: qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
+          instructions: t(locale, "instructions.showQR"),
         });
       } else {
         try {
@@ -332,6 +350,7 @@ export async function cashRoutes(app: FastifyInstance) {
             notificationType: notification_type,
             contactInfo: contact_info,
           });
+          await registerTradeForChat(getCashRequest(tradeId)!);
 
           reply.code(201).send({
             request_id: tradeId,
@@ -339,8 +358,9 @@ export async function cashRoutes(app: FastifyInstance) {
             network_passphrase: NETWORK_PASSPHRASE,
             submit_url: `/api/v1/cash/request/${tradeId}/submit`,
             claim_url: `${baseUrl}/claim/${tradeId}`,
+            chat_token: issueChatCapability(tradeId, buyer),
             qr_payload: qrPayload,
-            instructions: "Sign the transaction with your wallet and submit to the provided endpoint.",
+            instructions: t(locale, "instructions.signAndSubmit"),
           });
         } catch (err) {
           req.log.error(err, "buildLockEscrowTransaction failed");
@@ -373,20 +393,17 @@ export async function cashRoutes(app: FastifyInstance) {
 
       if (notification_type && notification_type !== "none") {
         if (!contact_info) {
-          reply.code(400).send({ error: "contact_info is required when notification_type is specified" });
-          return;
+          throw new ApiError(400, "MISSING_FIELD", "contact_info is required when notification_type is specified");return;
         }
         if (notification_type === "email") {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid email address format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_EMAIL", "Invalid email address format for contact_info");return;
           }
         } else if (notification_type === "sms") {
           const phoneRegex = /^\+?[1-9]\d{5,14}$/;
           if (!phoneRegex.test(contact_info)) {
-            reply.code(400).send({ error: "Invalid phone number format for contact_info" });
-            return;
+            throw new ApiError(400, "INVALID_PHONE", "Invalid phone number format for contact_info");return;
           }
         }
       }
@@ -397,9 +414,10 @@ export async function cashRoutes(app: FastifyInstance) {
       // generates a fresh trade ID, so it cannot be paired with a
       // signed XDR built against some other trade ID.
       const tradeId = randomHex32();
+      let lockedAtLedger: number;
 
       try {
-        await lockEscrow({
+        lockedAtLedger = await lockEscrow({
           contractId: ESCROW_CONTRACT_ID,
           tradeId,
           seller,
@@ -410,11 +428,20 @@ export async function cashRoutes(app: FastifyInstance) {
         });
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
-        reply.code(502).send({
-          error: "escrow lock failed",
-          detail: String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-        });
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply.code(502).send({
+            error: "escrow lock failed",
+            detail: String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
         return;
       }
 
@@ -429,16 +456,20 @@ export async function cashRoutes(app: FastifyInstance) {
         secretHashHex: secret_hash,
         qrPayload,
         status: "locked",
+        timeoutLedger: lockedAtLedger + DEFAULT_TIMEOUT_LEDGERS,
         createdAt: new Date().toISOString(),
         notificationType: notification_type,
         contactInfo: contact_info,
       });
+      await registerTradeForChat(getCashRequest(tradeId)!);
 
       const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      const locale = (req as any).locale ?? "en";
       reply.code(201).send({
         claim_url: `${baseUrl}/claim/${tradeId}`,
+        chat_token: issueChatCapability(tradeId, buyer),
         qr_payload: qrPayload,
-        instructions: "Show this QR to the cash provider to receive your cash.",
+        instructions: t(locale, "instructions.showQR"),
       });
     }
   );
@@ -453,11 +484,54 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
+      }
+      try {
+        expireCashRequest(record, await getLatestLedgerSequence());
+      } catch (err) {
+        req.log.warn(err, "could not check cash request expiry");
       }
       const { secretHex: _omit, ...safe } = record;
       return safe;
+    }
+  );
+
+  // Reveal-on-match: exact provider coordinates are released ONLY once buyer and
+  // provider share a confirmed escrow (locked/released/disputed). A requester
+  // with no such match can never obtain precise coordinates from the API — the
+  // discovery endpoints expose only coarse geohash cells (issue #216).
+  app.get<{ Params: { id: string } }>(
+    "/cash/request/:id/provider-location",
+    {
+      config: {
+        rateLimit: { max: 30, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
+      }
+      const matched = record.status === "locked" || record.status === "released" || record.status === "disputed";
+      if (!matched) {
+        reply.code(403).send({
+          error: "location is revealed only after a match is confirmed (escrow locked)",
+          status: record.status,
+        });
+        return;
+      }
+      const provider = getProviderByAddress(record.seller);
+      if (!provider) {
+        throw new ApiError(404, "PROVIDER_NOT_FOUND", "no registered provider for this trade");return;
+      }
+      return {
+        request_id: record.id,
+        provider_id: provider.id,
+        name: provider.name,
+        stellar_address: provider.stellarAddress ?? record.seller,
+        lat: provider.lat,
+        lng: provider.lng,
+      };
     }
   );
 
@@ -471,7 +545,20 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
+      }
+      if (record.status === "locked") {
+        const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+        const locale = (req as any).locale ?? "en";
+        reply.code(200).send({
+          id: record.id,
+          status: "locked",
+          transaction_hash: null,
+          claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
+          qr_payload: record.qrPayload,
+          instructions: t(locale, "instructions.showQR"),
+        });
         return;
       }
       if (record.status !== "pending_signature") {
@@ -481,24 +568,41 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const { signed_xdr } = req.body ?? {};
       if (!signed_xdr) {
-        reply.code(400).send({ error: "signed_xdr is required" });
-        return;
+        throw new ApiError(400, "MISSING_SIGNED_XDR", "signed_xdr is required");return;
       }
 
       try {
         const result = await submitSignedTransaction(signed_xdr);
         updateStatus(record.id, "locked");
+        record.timeoutLedger = result.ledger + DEFAULT_TIMEOUT_LEDGERS;
 
         const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+        const locale = (req as any).locale ?? "en";
         reply.code(200).send({
           id: record.id,
           status: "locked",
           transaction_hash: result.hash,
           claim_url: `${baseUrl}/claim/${record.id}`,
+          chat_token: issueChatCapability(record.id, record.buyer),
           qr_payload: record.qrPayload,
-          instructions: "Show this QR to the cash provider to receive your cash.",
+          instructions: t(locale, "instructions.showQR"),
         });
       } catch (err) {
+        const current = getCashRequest(record.id);
+        if (current && current.status === "locked") {
+          const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+          const locale = (req as any).locale ?? "en";
+          reply.code(200).send({
+            id: record.id,
+            status: "locked",
+            transaction_hash: null,
+            claim_url: `${baseUrl}/claim/${record.id}`,
+            chat_token: issueChatCapability(record.id, record.buyer),
+            qr_payload: record.qrPayload,
+            instructions: t(locale, "instructions.showQR"),
+          });
+          return;
+        }
         req.log.error(err, "submitSignedTransaction failed");
         reply.code(502).send({ error: "transaction submission failed", detail: String(err) });
         return;
@@ -516,8 +620,13 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
+      }
+      if (record.status === "released") {
+        return { id: record.id, status: "released" };
+      }
+      if (record.status === "pending_batch") {
+        return { id: record.id, status: "pending_batch" };
       }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
@@ -540,11 +649,25 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitReleaseTx(signed_xdr);
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "released") {
+            return { id: record.id, status: "released" };
+          }
           req.log.error(err, "submitReleaseTx failed");
           reply.code(502).send({ error: "release submission failed", detail: String(err) });
           return;
         }
       } else if (secret) {
+        // Providers who opted into batched payouts (POST /provider/payout-settings)
+        // don't get an immediate on-chain release() here — the secret is queued
+        // and settled later alongside their other pending trades in one
+        // batch_release() call. See docs/provider-payout-batching.md.
+        const provider = getProviderByAddress(record.seller);
+        if (provider?.payoutMode === "batched") {
+          enqueueForBatch(record.id, secret);
+          return { id: record.id, status: "pending_batch" };
+        }
+
         try {
           await releaseEscrow({
             contractId: record.contractId,
@@ -552,18 +675,30 @@ export async function cashRoutes(app: FastifyInstance) {
             secretHex: secret,
           });
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "released") {
+            return { id: record.id, status: "released" };
+          }
           req.log.error(err, "releaseEscrow failed");
-          reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow release failed", detail: String(err) });
+          }
           return;
         }
       } else {
-        reply.code(400).send({ error: "either secret or signed_xdr is required" });
-        return;
+        throw new ApiError(400, "MISSING_SECRET_OR_XDR", "either secret or signed_xdr is required");return;
       }
 
       updateStatus(record.id, "released");
-      notifyTradeStatus(record.id, "released");
-      await sendNotification(record, "released");
+      await notifyTradeStatus(record.id, "released");
+      await sendNotification(record, "released", (req as any).locale ?? "en");
       return { id: record.id, status: "released" };
     }
   );
@@ -578,10 +713,12 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
       }
-      if (record.status !== "locked") {
+      if (record.status === "refunded") {
+        return { id: record.id, status: "refunded" };
+      }
+      if (record.status !== "locked" && record.status !== "expired") {
         reply.code(409).send({ error: `request is already ${record.status}` });
         return;
       }
@@ -597,6 +734,10 @@ export async function cashRoutes(app: FastifyInstance) {
         try {
           await submitRefundTx(refundBody.signed_xdr);
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "refunded") {
+            return { id: record.id, status: "refunded" };
+          }
           req.log.error(err, "submitRefundTx failed");
           reply.code(502).send({ error: "refund submission failed", detail: String(err) });
           return;
@@ -608,15 +749,28 @@ export async function cashRoutes(app: FastifyInstance) {
             tradeId: record.id,
           });
         } catch (err) {
+          const current = getCashRequest(record.id);
+          if (current && current.status === "refunded") {
+            return { id: record.id, status: "refunded" };
+          }
           req.log.error(err, "refundEscrow failed");
-          reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          if (err instanceof RpcTimeoutError) {
+            reply.code(504).send({
+              error: "rpc_timeout",
+              detail: err.message,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            });
+          } else {
+            reply.code(502).send({ error: "escrow refund failed", detail: String(err) });
+          }
           return;
         }
       }
 
       updateStatus(record.id, "refunded");
-      notifyTradeStatus(record.id, "refunded");
-      await sendNotification(record, "refunded");
+      await notifyTradeStatus(record.id, "refunded");
+      await sendNotification(record, "refunded", (req as any).locale ?? "en");
 
       sendRefundAlert({
         tradeId: record.id,
@@ -639,8 +793,16 @@ export async function cashRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const record = getCashRequest(req.params.id);
       if (!record) {
-        reply.code(404).send({ error: "request not found" });
-        return;
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");return;
+      }
+      if (record.status === "disputed") {
+        return {
+          id: record.id,
+          status: "disputed",
+          disputedAt: record.disputedAt,
+          disputedBy: record.disputedBy,
+          disputeReason: record.disputeReason || "",
+        };
       }
       if (record.status !== "locked") {
         reply.code(409).send({ error: `request is already ${record.status}` });
@@ -660,8 +822,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const { caller, reason } = disputeBody;
 
       if (caller !== record.buyer && caller !== record.seller) {
-        reply.code(403).send({ error: "Only trade participants can dispute a trade" });
-        return;
+        throw new ApiError(403, "NOT_TRADE_PARTICIPANT", "Only trade participants can dispute a trade");return;
       }
 
       try {
@@ -671,6 +832,16 @@ export async function cashRoutes(app: FastifyInstance) {
           caller,
         });
       } catch (err) {
+        const current = getCashRequest(record.id);
+        if (current && current.status === "disputed") {
+          return {
+            id: record.id,
+            status: "disputed",
+            disputedAt: current.disputedAt,
+            disputedBy: current.disputedBy,
+            disputeReason: current.disputeReason || "",
+          };
+        }
         req.log.error(err, "disputeEscrow failed");
         reply.code(502).send({ error: "escrow dispute failed", detail: String(err) });
         return;

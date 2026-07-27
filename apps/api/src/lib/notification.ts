@@ -1,4 +1,5 @@
 import { CashRequestRecord } from "./store.js";
+import { t, type Locale } from "./i18n.js";
 
 export interface SentNotification {
   recipient: string;
@@ -16,7 +17,8 @@ export function clearNotificationQueue() {
 
 export async function sendNotification(
   record: CashRequestRecord,
-  newStatus: "released" | "refunded"
+  newStatus: "released" | "refunded",
+  locale: Locale = "en"
 ): Promise<void> {
   const { notificationType, contactInfo, id, amountStroops } = record;
   if (!notificationType || notificationType === "none" || !contactInfo) {
@@ -29,7 +31,11 @@ export async function sendNotification(
   const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
   const formattedAmount = `${whole}.${frac}`;
 
-  const message = `Velo claim update: Your claim ${id} for ${formattedAmount} XLM/USDC has been ${newStatus}.`;
+  const message = t(locale, "notifications.claimUpdate", {
+    id,
+    amount: formattedAmount,
+    status: newStatus,
+  });
 
   const notification: SentNotification = {
     recipient: contactInfo,
@@ -39,7 +45,7 @@ export async function sendNotification(
   };
 
   if (notificationType === "email") {
-    notification.subject = `Velo Claim Update: ${newStatus.toUpperCase()}`;
+    notification.subject = t(locale, "notifications.emailSubject", { status: newStatus.toUpperCase() });
   }
 
   sentNotificationsQueue.push(notification);

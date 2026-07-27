@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import i18n from "../i18n/index.js";
 
 interface Props {
   children: ReactNode;
@@ -18,7 +19,6 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    // Update state so the next render will show the fallback UI.
     return { hasError: true, error, errorInfo: null };
   }
 
@@ -40,9 +40,9 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="error-boundary-container">
           <div className="error-boundary-card">
             <div className="error-boundary-icon">⚠️</div>
-            <h1 className="error-boundary-title">Something went wrong</h1>
+            <h1 className="error-boundary-title">{i18n.t("errorBoundary.title")}</h1>
             <p className="error-boundary-subtitle">
-              An unexpected error occurred in the application.
+              {i18n.t("errorBoundary.description")}
             </p>
             {this.state.error && (
               <pre className="error-boundary-details">
@@ -53,7 +53,7 @@ export class ErrorBoundary extends Component<Props, State> {
               onClick={this.handleReload}
               className="error-boundary-button"
             >
-              Reload Page
+              {i18n.t("errorBoundary.reload")}
             </button>
           </div>
         </div>

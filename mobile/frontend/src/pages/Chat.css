@@ -55,6 +55,54 @@
   background: rgba(92, 107, 95, 0.08);
 }
 
+.chat-encryption-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line, #c7d0be);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--ink-muted, #5c6b5f);
+}
+
+.chat-encryption-badge {
+  letter-spacing: 0.03em;
+}
+
+.chat-safety-number {
+  letter-spacing: 0.08em;
+  cursor: help;
+}
+
+.chat-key-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  background: rgba(180, 83, 9, 0.1);
+  color: #7a3e0c;
+  font-size: 12px;
+}
+
+.chat-key-warning__ack {
+  padding: 6px 12px;
+  background: #7a3e0c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-bubble__undecryptable {
+  opacity: 0.6;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

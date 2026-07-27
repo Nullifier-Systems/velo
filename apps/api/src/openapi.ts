@@ -250,7 +250,7 @@ export const openApiDocument = {
                         required: ["id", "status", "createdAt"],
                         properties: {
                           id: { type: "string" },
-                          status: { type: "string", enum: ["locked", "released", "refunded"] },
+                          status: { type: "string", enum: ["locked", "expired", "released", "refunded"] },
                           createdAt: { type: "string", format: "date-time" },
                         },
                       },
@@ -280,11 +280,32 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["agents"],
+                  required: ["agents", "availability"],
                   properties: {
                     agents: {
                       type: "array",
                       items: { $ref: "#/components/schemas/CashAgent" },
+                    },
+                    availability: {
+                      type: "object",
+                      required: ["state"],
+                      description:
+                        "A successful empty discovery is `no_providers_nearby`; transport and validation failures use non-200 responses instead.",
+                      properties: {
+                        state: {
+                          type: "string",
+                          enum: ["available", "no_providers_nearby"],
+                        },
+                        message: { type: "string" },
+                        suggested_action: {
+                          type: "string",
+                          enum: ["check_back_later"],
+                        },
+                        retry_after_seconds: {
+                          type: "integer",
+                          minimum: 1,
+                        },
+                      },
                     },
                   },
                 },
@@ -694,7 +715,7 @@ export const openApiDocument = {
           amountStroops: { type: "string" },
           secretHashHex: { type: "string" },
           qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
-          status: { type: "string", enum: ["locked", "released", "refunded", "disputed"] },
+          status: { type: "string", enum: ["locked", "expired", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
           disputedAt: { type: "string", format: "date-time" },
           disputedBy: { type: "string" },

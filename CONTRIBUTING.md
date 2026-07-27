@@ -45,10 +45,32 @@ Prefer small, reviewable commits. Keep contract and application changes clearly 
 ### 4. Run validation
 
 ```bash
+npm run localization:check
 npm run build
 npm run test
 cd contracts && cargo test --workspace
 ```
+
+### Localization
+
+All new text shown to users must use a translation key. For frontend changes, add
+the English text to `mobile/frontend/src/i18n/locales/en.json`, add the Spanish
+translation under the same nested key in `es.json`, and render it with
+`useTranslation()` (or `i18n.t()` outside a React component). API messages use
+the paired catalogs in `apps/api/src/i18n/locales/` and the API `t()` helper.
+
+Run the same deterministic check used by CI before submitting a pull request:
+
+```bash
+npm run localization:check
+```
+
+The check fails when English and Spanish keys or interpolation placeholders do
+not match, when source code references an unknown literal translation key, or
+when new user-facing JSX text and common accessibility/input attributes are
+hardcoded. Existing legacy findings are recorded in
+`scripts/localization-baseline.json`; do not add new entries to bypass
+translation work.
 
 ### 5. Open a pull request
 

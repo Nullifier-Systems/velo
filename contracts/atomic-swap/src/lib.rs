@@ -18,6 +18,9 @@
 //! swap settles the counterpart value on the other chain, not via a fee here.
 #![no_std]
 
+#[cfg(not(target_arch = "wasm32"))]
+extern crate std;
+
 use htlc_core::{Htlc, TradeState, TradeStatus};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
@@ -202,3 +205,6 @@ fn panic_with_error(_env: &Env, err: Error) -> ! {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod property_test;

@@ -1,16 +1,19 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 export default function NotFound() {
+  const { t } = useTranslation();
+
   return (
     <main className="home-container">
       <div className="home-card" style={{ textAlign: "center" }}>
-        <h1 className="home-title">404</h1>
-        <p className="home-subtitle">Page Not Found</p>
+        <h1 className="home-title">{t("notFound.title")}</h1>
+        <p className="home-subtitle">{t("notFound.subtitle")}</p>
         <div className="home-placeholder">
-          <p>The page you are looking for does not exist.</p>
+          <p>{t("notFound.description")}</p>
           <Link to="/" style={{ textDecoration: "none" }}>
             <button className="home-crash-button" style={{ marginTop: "1rem" }}>
-              Go Home
+              {t("notFound.goHome")}
             </button>
           </Link>
         </div>

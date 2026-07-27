@@ -2,7 +2,8 @@ export interface ChatMessage {
   id: string;
   tradeId: string;
   sender: string;
-  text: string;
+  ciphertext: string;
+  nonce: string;
   createdAt: string;
 }
 
@@ -26,3 +27,16 @@ export function saveMessage(msg: Omit<ChatMessage, "id" | "createdAt">): ChatMes
 export function getMessages(tradeId: string): ChatMessage[] {
   return messages.get(tradeId) ?? [];
 }
+
+export function deleteMessagesForTrade(tradeId: string): number {
+  const list = messages.get(tradeId) ?? [];
+  const count = list.length;
+  messages.delete(tradeId);
+  return count;
+}
+
+export function clearChatStore(): void {
+  messages.clear();
+}
+
+

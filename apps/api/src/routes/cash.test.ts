@@ -2,18 +2,24 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
 import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
+import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
 import { sendRefundAlert } from "../lib/webhook.js";
+import { getCashRequest, saveProvider } from "../lib/store.js";
 
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
-  lockEscrow: vi.fn().mockResolvedValue(undefined),
+  lockEscrow: vi.fn().mockResolvedValue(1_000),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
   disputeEscrow: vi.fn().mockResolvedValue(undefined),
-  resolveEscrow: vi.fn().mockResolvedValue(undefined),
+  resolveDisputeEscrow: vi.fn().mockResolvedValue(undefined),
   buildLockEscrowTransaction: vi.fn().mockResolvedValue("dummy_unsigned_xdr"),
-  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
+  submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS", ledger: 1_000 }),
+  submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
+  submitRefundTx: vi.fn().mockResolvedValue({ hash: "dummy_refund_hash" }),
+  getLatestLedgerSequence: vi.fn().mockResolvedValue(1_000),
+  NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
 
@@ -126,6 +132,61 @@ describe("cashRoutes", () => {
     });
     expect(sentNotificationsQueue[0].message).toContain("released");
     expect(sentNotificationsQueue[0].message).toContain("2.5"); // stroops formatted correctly
+  });
+
+  it("queues release for a provider opted into batched payouts instead of calling releaseEscrow", async () => {
+    const seller = "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+    saveProvider({
+      id: "batched-provider-test",
+      stellarAddress: seller,
+      name: "Batched Payout Shop",
+      lat: 0,
+      lng: 0,
+      tier: "Probationary",
+      rate: "1.0",
+      status: "available",
+      kycStatus: "pending",
+      createdAt: new Date().toISOString(),
+      payoutMode: "batched",
+    });
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid-payment-tx" },
+      payload: {
+        seller,
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "d".repeat(64),
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    const releaseRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "e".repeat(64) },
+    });
+
+    expect(releaseRes.statusCode).toBe(200);
+    expect(releaseRes.json()).toMatchObject({ status: "pending_batch" });
+    expect(releaseEscrow).not.toHaveBeenCalled();
+
+    const record = getCashRequest(tradeId);
+    expect(record?.status).toBe("pending_batch");
+    expect(record?.secretHex).toBe("e".repeat(64));
+
+    // Calling release again while queued is idempotent, not an error.
+    const secondRelease = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "e".repeat(64) },
+    });
+    expect(secondRelease.statusCode).toBe(200);
+    expect(secondRelease.json()).toMatchObject({ status: "pending_batch" });
+    expect(releaseEscrow).not.toHaveBeenCalled();
   });
 
   it("creates with sms opt-in and triggers sms notification on refund", async () => {
@@ -275,6 +336,67 @@ describe("cashRoutes", () => {
     expect(getBody).not.toHaveProperty("secretHex");
   });
 
+  it("marks a stale locked request expired on read without refunding it", async () => {
+    const { getLatestLedgerSequence } = await import("../lib/stellar.js");
+    const ledgerMock = vi.mocked(getLatestLedgerSequence);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+      },
+    });
+    const tradeId = createResponse.json().claim_url.split("/").pop();
+
+    ledgerMock.mockResolvedValueOnce(1_100);
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/cash/request/${tradeId}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({
+      status: "expired",
+      timeoutLedger: 1_100,
+    });
+    expect(refundEscrow).not.toHaveBeenCalled();
+  });
+
+  it("allows refund to be invoked independently after expiration", async () => {
+    const { getLatestLedgerSequence } = await import("../lib/stellar.js");
+    const ledgerMock = vi.mocked(getLatestLedgerSequence);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "b".repeat(64),
+      },
+    });
+    const tradeId = createResponse.json().claim_url.split("/").pop();
+
+    ledgerMock.mockResolvedValueOnce(1_100);
+    await app.inject({ method: "GET", url: `/api/v1/cash/request/${tradeId}` });
+
+    const refundResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/refund`,
+    });
+
+    expect(refundResponse.statusCode).toBe(200);
+    expect(refundResponse.json()).toMatchObject({ status: "refunded" });
+    expect(refundEscrow).toHaveBeenCalledTimes(1);
+  });
+
   it("POST /cash/request/:id/dispute transitions status to disputed, and resolving it via admin route works", async () => {
     const app: any = Fastify();
     registerApp(app);
@@ -319,13 +441,359 @@ describe("cashRoutes", () => {
         "x-admin-api-key": "test-api-key",
       },
       payload: {
-        resolve_to_buyer: true,
+        buyer_share_bps: 10_000,
         notes: "Buyer provided proof of no-show",
       },
     });
     expect(resolveResponse.statusCode).toBe(200);
-    expect(resolveResponse.json().new_status).toBe("refunded");
+    expect(resolveResponse.json().new_status).toBe("resolved");
 
     await app.close();
+  });
+
+  describe("idempotency — duplicate Stellar calls return correct state", () => {
+    it("submit: returns locked status when submitSignedTransaction fails but trade is already locked", async () => {
+      const { submitSignedTransaction } = await import("../lib/stellar.js");
+      const mock = vi.mocked(submitSignedTransaction);
+
+      // Create a cash request in pending_signature status
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request/prepare",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "a".repeat(64),
+          mode: "non_custodial",
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const tradeId = createRes.json().request_id;
+
+      // Simulate first request succeeding (updating status to locked)
+      const { updateStatus } = await import("../lib/store.js");
+      updateStatus(tradeId, "locked");
+
+      // Now simulate a second submit request where the Stellar call fails
+      // (because the transaction was already submitted by the first request)
+      mock.mockRejectedValueOnce(new Error("tx already submitted"));
+
+      const submitRes = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/submit`,
+        payload: { signed_xdr: "some_signed_xdr" },
+      });
+
+      expect(submitRes.statusCode).toBe(200);
+      expect(submitRes.json()).toMatchObject({
+        id: tradeId,
+        status: "locked",
+        transaction_hash: null,
+      });
+    });
+
+    it("release: returns released status when releaseEscrow fails but trade is already released", async () => {
+      const { releaseEscrow: releaseMock } = await import("../lib/stellar.js");
+
+      // Create and lock a cash request
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "b".repeat(64),
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const tradeId = createRes.json().claim_url.split("/").pop();
+
+      // Simulate first release succeeding (updating status to released)
+      const { updateStatus } = await import("../lib/store.js");
+      updateStatus(tradeId, "released");
+
+      // Now simulate a second release request where the Stellar call fails
+      // (because the trade was already released by the first request)
+      vi.mocked(releaseMock).mockRejectedValueOnce(new Error("trade not locked"));
+
+      const releaseRes = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/release`,
+        payload: { secret: "c".repeat(64) },
+      });
+
+      expect(releaseRes.statusCode).toBe(200);
+      expect(releaseRes.json()).toMatchObject({
+        id: tradeId,
+        status: "released",
+      });
+    });
+
+    it("refund: returns refunded status when refundEscrow fails but trade is already refunded", async () => {
+      const { refundEscrow: refundMock } = await import("../lib/stellar.js");
+
+      // Create and lock a cash request
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "d".repeat(64),
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const tradeId = createRes.json().claim_url.split("/").pop();
+
+      // Simulate first refund succeeding (updating status to refunded)
+      const { updateStatus } = await import("../lib/store.js");
+      updateStatus(tradeId, "refunded");
+
+      // Now simulate a second refund request where the Stellar call fails
+      vi.mocked(refundMock).mockRejectedValueOnce(new Error("trade not locked"));
+
+      const refundRes = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/refund`,
+      });
+
+      expect(refundRes.statusCode).toBe(200);
+      expect(refundRes.json()).toMatchObject({
+        id: tradeId,
+        status: "refunded",
+      });
+    });
+
+    it("dispute: returns disputed status when disputeEscrow fails but trade is already disputed", async () => {
+      const { disputeEscrow: disputeMock } = await import("../lib/stellar.js");
+
+      // Create and lock a cash request
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "e".repeat(64),
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const tradeId = createRes.json().claim_url.split("/").pop();
+
+      // Simulate first dispute succeeding (updating status to disputed)
+      const { updateStatus } = await import("../lib/store.js");
+      updateStatus(tradeId, "disputed");
+      const record = getCashRequest(tradeId);
+      if (record) {
+        record.disputedAt = new Date().toISOString();
+        record.disputedBy = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        record.disputeReason = "Seller no-show";
+      }
+
+      // Now simulate a second dispute request where the Stellar call fails
+      vi.mocked(disputeMock).mockRejectedValueOnce(new Error("trade not locked"));
+
+      const disputeRes = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/dispute`,
+        payload: {
+          caller: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          reason: "Seller no-show",
+        },
+      });
+
+      expect(disputeRes.statusCode).toBe(200);
+      expect(disputeRes.json()).toMatchObject({
+        id: tradeId,
+        status: "disputed",
+        disputedBy: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      });
+    });
+
+    it("release: still returns 502 when Stellar fails and trade is NOT already released", async () => {
+      const { releaseEscrow: releaseMock } = await import("../lib/stellar.js");
+
+      // Create and lock a cash request
+      const createRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "valid-payment-tx" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "f".repeat(64),
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const tradeId = createRes.json().claim_url.split("/").pop();
+
+      // Stellar call fails and the trade is still locked (not yet released)
+      vi.mocked(releaseMock).mockRejectedValueOnce(new Error("some Stellar error"));
+
+      const releaseRes = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/release`,
+        payload: { secret: "c".repeat(64) },
+      });
+
+      expect(releaseRes.statusCode).toBe(502);
+      expect(releaseRes.json()).toMatchObject({ error: "escrow release failed" });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RPC timeout → 504 response tests
+// ---------------------------------------------------------------------------
+describe("cashRoutes — RPC timeout surfaces as 504", () => {
+  let app: any;
+
+  const registerApp = (a: any) => {
+    a.decorate("requirePayment", async (_req: any, _reply: any) => true);
+    a.register(cashRoutes, { prefix: "/api/v1" });
+  };
+
+  beforeEach(() => {
+    vi.mocked(lockEscrow).mockReset().mockResolvedValue(1_000);
+    vi.mocked(releaseEscrow).mockReset().mockResolvedValue(undefined);
+    vi.mocked(refundEscrow).mockReset().mockResolvedValue(undefined);
+    app = Fastify();
+    registerApp(app);
+  });
+
+  it("POST /cash/request returns 504 with error=rpc_timeout when lockEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("lock/buildSim", 15_003),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "a".repeat(64),
+      },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({
+      error: "rpc_timeout",
+      operation: "lock/buildSim",
+      elapsed_ms: 15_003,
+    });
+  });
+
+  it("POST /cash/request/prepare (custodial) returns 504 when lockEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("lock/poll", 45_001),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request/prepare",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "b".repeat(64),
+        mode: "custodial",
+      },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ code: "RPC_TIMEOUT", statusCode: 504 });
+  });
+
+  it("POST /cash/request/:id/release returns 504 when releaseEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
+
+    // Create a locked trade first
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "c".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(releaseEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("release/poll", 30_002),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "d".repeat(64) },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "release/poll" });
+  });
+
+  it("POST /cash/request/:id/refund returns 504 when refundEscrow times out", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "e".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(refundEscrow).mockRejectedValueOnce(
+      new RpcTimeoutError("refund/buildSim", 10_001),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/refund`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: "rpc_timeout", operation: "refund/buildSim" });
+  });
+
+  it("non-timeout errors still produce 502 for lock", async () => {
+    vi.mocked(lockEscrow).mockRejectedValueOnce(new Error("host function trap"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "f".repeat(64),
+      },
+    });
+
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: "escrow lock failed" });
   });
 });

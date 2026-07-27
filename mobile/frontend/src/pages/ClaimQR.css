@@ -9,6 +9,7 @@
   --stamp-blue: #1b4b8f;
   --stamp-green: #1f6b4a;
   --stamp-red: #8f2a1b;
+  --stamp-amber: #9a5b00;
 }
 
 html.dark {
@@ -20,6 +21,7 @@ html.dark {
   --stamp-blue: #5294e2;
   --stamp-green: #52b788;
   --stamp-red: #e63946;
+  --stamp-amber: #f2b84b;
 }
 
 .claim-page {
@@ -112,6 +114,9 @@ html.dark {
 }
 .claim-ticket__stamp--refunded {
   color: var(--stamp-red);
+}
+.claim-ticket__stamp--expired {
+  color: var(--stamp-amber);
 }
 
 .claim-ticket__qr-window {
@@ -436,4 +441,3 @@ html.dark .claim-ticket__skeleton-value {
     font-size: 12px;
   }
 }
-
