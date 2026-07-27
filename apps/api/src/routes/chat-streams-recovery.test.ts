@@ -65,9 +65,9 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
       expect(missed[0].clock).toBeDefined();
       expect(missed[1].clock).toBeDefined();
       // First message from buyer should have buyer counter incremented
-      expect(missed[0].clock.buyer).toBeGreaterThanOrEqual(1);
+      expect(missed[0].clock[BUYER]).toBeGreaterThanOrEqual(1);
       // Second message from seller should have seller counter incremented
-      expect(missed[1].clock.seller).toBeGreaterThanOrEqual(1);
+      expect(missed[1].clock[SELLER]).toBeGreaterThanOrEqual(1);
     });
   });
 
