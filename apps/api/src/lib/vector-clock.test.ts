@@ -235,7 +235,7 @@ describe("Vector Clock Operations", () => {
       );
       const resorted = parsed.sort(compareClocks);
 
-      // Verify sender sequences are preserved
+      // Verify sender sequences are preserved (non-decreasing)
       const buyerSequence = resorted
         .filter((c) => c.buyer > 0)
         .map((c) => c.buyer);
@@ -243,16 +243,19 @@ describe("Vector Clock Operations", () => {
         .filter((c) => c.seller > 0)
         .map((c) => c.seller);
 
+      // Check that sequences are non-decreasing
       for (let i = 1; i < buyerSequence.length; i++) {
-        expect(buyerSequence[i]).toBe(
-          buyerSequence[i - 1] + 1 || buyerSequence[i - 1],
-        );
+        expect(buyerSequence[i]).toBeGreaterThanOrEqual(buyerSequence[i - 1]);
       }
       for (let i = 1; i < sellerSequence.length; i++) {
-        expect(sellerSequence[i]).toBe(
-          sellerSequence[i - 1] + 1 || sellerSequence[i - 1],
-        );
+        expect(sellerSequence[i]).toBeGreaterThanOrEqual(sellerSequence[i - 1]);
       }
+      
+      // Check that we have the expected number of unique values
+      const uniqueBuyerValues = new Set(buyerSequence);
+      const uniqueSellerValues = new Set(sellerSequence);
+      expect(uniqueBuyerValues.size).toBe(50); // 50 buyer messages
+      expect(uniqueSellerValues.size).toBe(50); // 50 seller messages
     });
   });
 });

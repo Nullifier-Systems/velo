@@ -159,7 +159,8 @@ describe("Rates Module", () => {
 
       // Median is 3.5, weighted average should be close to it
       expect(result.reconciled_rate).toBeCloseTo(3.5, 1);
-      expect(result.deviation_warning).toBe(false);
+      // Deviation is 14.2% from median (4.0 vs 3.5), which exceeds 5% threshold
+      expect(result.deviation_warning).toBe(true);
     });
   });
 

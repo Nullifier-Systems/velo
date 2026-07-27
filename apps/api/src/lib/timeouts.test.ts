@@ -204,14 +204,14 @@ describe("Timeout Policy Invariants", () => {
       // From contracts/escrow/src/lib.rs line 78:
       // const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
       expect(ESCROW_MAX_TIMEOUT_LEDGERS_POLICY).toBe(6 * 60 * 24 * 7);
-      expect(ESCROW_MAX_TIMEOUT_LEDGERS_POLICY).toBe(604_800);
+      expect(ESCROW_MAX_TIMEOUT_LEDGERS_POLICY).toBe(60_480);
     });
 
     it("DISPUTE_RESOLUTION_WINDOW_LEDGERS matches contract", () => {
       // From contracts/escrow/src/lib.rs line 90:
       // const DISPUTE_RESOLUTION_WINDOW_LEDGERS: u32 = 12 * 60 * 24 * 3;
       expect(DISPUTE_RESOLUTION_WINDOW_LEDGERS).toBe(12 * 60 * 24 * 3);
-      expect(DISPUTE_RESOLUTION_WINDOW_LEDGERS).toBe(259_200);
+      expect(DISPUTE_RESOLUTION_WINDOW_LEDGERS).toBe(51_840);
     });
 
     it("CASH_DEFAULT_TIMEOUT_LEDGERS reflects API intent (P2P quick settlement)", () => {
