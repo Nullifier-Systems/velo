@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { ApiError } from "../lib/errors.js";
 import {
   ALLOWED_EVIDENCE_TYPES,
   getDisputeEvidence,
@@ -15,16 +16,12 @@ interface EvidenceHeaders {
   "x-stellar-address"?: string;
 }
 
-function participantForTrade(request: FastifyRequest<{ Headers: EvidenceHeaders }>, reply: FastifyReply) {
+function participantForTrade(request: FastifyRequest<{ Headers: EvidenceHeaders }>): { trade: any; participant: string } {
   const trade = getCashRequest((request.params as { id: string }).id);
-  if (!trade) {
-    reply.code(404).send({ error: "Trade request not found." });
-    return;
-  }
+  if (!trade) throw new ApiError(404, "TRADE_NOT_FOUND", "Trade request not found.");
   const participant = request.headers["x-stellar-address"];
   if (!participant || (participant !== trade.buyer && participant !== trade.seller)) {
-    reply.code(403).send({ error: "Only trade participants can access dispute evidence." });
-    return;
+    throw new ApiError(403, "NOT_TRADE_PARTICIPANT", "Only trade participants can access dispute evidence.");
   }
   return { trade, participant };
 }
@@ -61,21 +58,20 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string }; Headers: EvidenceHeaders; Body: Buffer }>(
     "/cash/request/:id/evidence",
     async (request, reply) => {
-      const access = participantForTrade(request, reply);
-      if (!access) return;
+      const access = participantForTrade(request);
       if (access.trade.status !== "disputed") {
-        return reply.code(409).send({ error: "Evidence can only be uploaded for disputed trades." });
+        throw new ApiError(409, "CONFLICT", "Evidence can only be uploaded for disputed trades.");
       }
 
       const contentType = request.headers["content-type"]?.split(";", 1)[0].toLowerCase();
       if (!contentType || !ALLOWED_EVIDENCE_TYPES.has(contentType)) {
-        return reply.code(415).send({ error: "Evidence must be a JPEG, PNG, or WebP image." });
+        throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Evidence must be a JPEG, PNG, or WebP image.");
       }
       if (!Buffer.isBuffer(request.body) || request.body.byteLength === 0) {
-        return reply.code(400).send({ error: "An image body is required." });
+        throw new ApiError(400, "MISSING_FIELD", "An image body is required.");
       }
       if (!hasValidImageSignature(contentType, request.body)) {
-        return reply.code(415).send({ error: "The file content does not match its declared image type." });
+        throw new ApiError(415, "INVALID_IMAGE_CONTENT", "The file content does not match its declared image type.");
       }
 
       const fileName = String(request.headers["x-file-name"] ?? "evidence")
@@ -105,9 +101,8 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence",
-    async (request, reply) => {
-      const access = participantForTrade(request, reply);
-      if (!access) return;
+    async (request) => {
+      const access = participantForTrade(request);
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(
           `SELECT id, trade_id AS "tradeId", uploaded_by AS "uploadedBy", file_name AS "fileName",
@@ -124,20 +119,19 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string; evidenceId: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence/:evidenceId",
     async (request, reply) => {
-      const access = participantForTrade(request, reply);
-      if (!access) return;
+      const access = participantForTrade(request);
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(
           `SELECT file_name, content_type, data FROM dispute_evidence WHERE id = $1 AND trade_id = $2`,
           [request.params.evidenceId, access.trade.id],
         );
-        if (!rows[0]) return reply.code(404).send({ error: "Evidence not found." });
+        if (!rows[0]) throw new ApiError(404, "EVIDENCE_NOT_FOUND", "Evidence not found.");
         const safeName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
         return reply.type(rows[0].content_type).header("content-disposition", `inline; filename="${safeName}"`).send(rows[0].data);
       }
       const evidence = getDisputeEvidence(request.params.evidenceId);
       if (!evidence || evidence.tradeId !== access.trade.id) {
-        return reply.code(404).send({ error: "Evidence not found." });
+        throw new ApiError(404, "EVIDENCE_NOT_FOUND", "Evidence not found.");
       }
       return reply.type(evidence.contentType).header("content-disposition", `inline; filename="${evidence.fileName}"`).send(evidence.data);
     },
