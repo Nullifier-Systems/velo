@@ -5,6 +5,7 @@ members = [
     "escrow",
     "reputation",
     "atomic-swap",
+    "zk-credential",
     "settlement-chain",
     "soroban-lint",
 ]
