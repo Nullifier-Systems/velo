@@ -67,7 +67,8 @@ export function getOrCreateKeyPair(ownAddress: string): KeyPair {
 
 export function encryptMessage(plaintext: string, peerPublicKey: Uint8Array, ownSecretKey: Uint8Array): EncryptedMessage {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const sealed = nacl.box(textEncoder.encode(plaintext), nonce, peerPublicKey, ownSecretKey);
+  const msg = Uint8Array.from(textEncoder.encode(plaintext));
+  const sealed = nacl.box(msg, nonce, peerPublicKey, ownSecretKey);
   return { ciphertext: toBase64(sealed), nonce: toBase64(nonce) };
 }
 

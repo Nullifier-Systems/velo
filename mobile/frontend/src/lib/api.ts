@@ -1,5 +1,10 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 
+/** Generate a unique idempotency key for offline-safe mutations. */
+function createIdempotencyKey(): string {
+  return `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 export interface CashRequestStatus {
   id: string;
   contractId: string;
@@ -43,12 +48,28 @@ export async function releaseCashRequest(id: string, secret: string): Promise<vo
   try {
     res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-idempotency-key": createIdempotencyKey(),
+      },
       body: JSON.stringify({ secret }),
     });
   } catch (cause) {
+    // Offline: queue the mutation for later sync (#305)
+    try {
+      const { queueMutation } = await import("./sync/queue");
+      await queueMutation({
+        endpoint: `/api/v1/cash/request/${id}/release`,
+        method: "POST",
+        body: { secret },
+        idempotencyKey: createIdempotencyKey(),
+      });
+    } catch {
+      // Silently handle queue failure — will retry on next sync
+    }
+
     throw new ReleaseRequestError(
-      "The connection ended before Velo could confirm the release.",
+      "The connection ended before Velo could confirm the release. It has been queued for sync.",
       "uncertain",
       { cause }
     );
