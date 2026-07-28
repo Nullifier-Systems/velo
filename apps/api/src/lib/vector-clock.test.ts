@@ -7,6 +7,7 @@ import {
   compareClocks,
   canDeliver,
   normalizeClock,
+  type VectorClock,
 } from "./vector-clock.js";
 
 describe("Vector Clock Operations", () => {
@@ -230,7 +231,7 @@ describe("Vector Clock Operations", () => {
 
       // Parse back and verify they can be re-sorted
       const parsed = shuffled.map(
-        ([json]) => JSON.parse(json) as typeof compareClocks,
+        ([json]) => JSON.parse(json) as VectorClock,
       );
       const resorted = parsed.sort(compareClocks);
 
@@ -243,14 +244,16 @@ describe("Vector Clock Operations", () => {
         .map((c) => c.seller);
 
       for (let i = 1; i < buyerSequence.length; i++) {
-        expect(buyerSequence[i]).toBe(
-          buyerSequence[i - 1] + 1 || buyerSequence[i - 1],
-        );
+        expect(
+          buyerSequence[i] === buyerSequence[i - 1] + 1 ||
+          buyerSequence[i] === buyerSequence[i - 1]
+        ).toBe(true);
       }
       for (let i = 1; i < sellerSequence.length; i++) {
-        expect(sellerSequence[i]).toBe(
-          sellerSequence[i - 1] + 1 || sellerSequence[i - 1],
-        );
+        expect(
+          sellerSequence[i] === sellerSequence[i - 1] + 1 ||
+          sellerSequence[i] === sellerSequence[i - 1]
+        ).toBe(true);
       }
     });
   });
