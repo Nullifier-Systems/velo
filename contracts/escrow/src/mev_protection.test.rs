@@ -30,6 +30,16 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     let contract_id = env.register_contract(None, EscrowContract);
     let client = EscrowContractClient::new(&env, &contract_id);
 
+    let keys: Vec<BytesN<32>> = Vec::new(&env);
+    let arb_set = ArbitratorSet {
+        keys,
+        threshold_epoch1: 1,
+        threshold_epoch2: 1,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    };
+
+
     // Initialize escrow
     client.initialize(&admin, &token_addr, &100); // 1% fee
 
