@@ -49,18 +49,18 @@ fn setup_env() -> (Env, Address, Address) {
     (env, admin, escrow)
 }
 
-fn setup_contract<'a>(env: &'a Env, admin: &'a Address, escrow: &'a Address) -> ReputationContractClient<'a> {
+fn setup_contract<'a>(
+    env: &'a Env,
+    admin: &'a Address,
+    escrow: &'a Address,
+) -> ReputationContractClient<'a> {
     let contract_id = env.register_contract(None, ReputationContract);
     let client = ReputationContractClient::new(env, &contract_id);
     client.initialize(admin, escrow);
     client
 }
 
-fn setup_escrow_trades(
-    env: &Env,
-    escrow: &Address,
-    trades: &[(Address, Address, TradeStatus)],
-) {
+fn setup_escrow_trades(env: &Env, escrow: &Address, trades: &[(Address, Address, TradeStatus)]) {
     for (i, (seller, buyer, status)) in trades.iter().enumerate() {
         let idx = i as u32 + 1;
         let id_bytes = (idx as u128).to_le_bytes();
@@ -114,7 +114,10 @@ fn test_score_happy_path() {
 
     let client = setup_contract(&env, &_admin, &escrow);
     let score = client.compute_score(&seller);
-    assert!(score > 0, "score should be > 0 for a seller with completed trades");
+    assert!(
+        score > 0,
+        "score should be > 0 for a seller with completed trades"
+    );
     assert!(score <= 1000, "score should be <= 1000");
 }
 
@@ -141,7 +144,10 @@ fn test_self_trades_excluded() {
 
     let client = setup_contract(&env, &_admin, &escrow);
     let score = client.compute_score(&seller);
-    assert_eq!(score, 0, "self-trades should be excluded, score should be 0");
+    assert_eq!(
+        score, 0,
+        "self-trades should be excluded, score should be 0"
+    );
 }
 
 #[test]
@@ -161,8 +167,14 @@ fn test_sybil_self_trading() {
 
     let client = setup_contract(&env, &_admin, &escrow);
     let score = client.compute_score(&addr);
-    assert!(score > 0, "should have non-zero score from the 1 real trade");
-    assert!(score <= 1000, "self-trades should not inflate the score unreasonably");
+    assert!(
+        score > 0,
+        "should have non-zero score from the 1 real trade"
+    );
+    assert!(
+        score <= 1000,
+        "self-trades should not inflate the score unreasonably"
+    );
 }
 
 #[test]
@@ -180,7 +192,10 @@ fn test_dispute_penalty() {
 
     let client = setup_contract(&env, &_admin, &escrow);
     let score = client.compute_score(&seller);
-    assert!(score < 1000, "dispute penalty should reduce score below max 1000");
+    assert!(
+        score < 1000,
+        "dispute penalty should reduce score below max 1000"
+    );
 }
 
 #[test]
@@ -212,9 +227,7 @@ fn test_score_breakdown() {
     let seller = Address::generate(&env);
     let buyer = Address::generate(&env);
 
-    let trades = [
-        (seller.clone(), buyer.clone(), TradeStatus::Released),
-    ];
+    let trades = [(seller.clone(), buyer.clone(), TradeStatus::Released)];
     setup_escrow_trades(&env, &escrow, &trades);
 
     let client = setup_contract(&env, &_admin, &escrow);
@@ -228,9 +241,7 @@ fn test_cached_score() {
     let seller = Address::generate(&env);
     let buyer = Address::generate(&env);
 
-    let trades = [
-        (seller.clone(), buyer.clone(), TradeStatus::Released),
-    ];
+    let trades = [(seller.clone(), buyer.clone(), TradeStatus::Released)];
     setup_escrow_trades(&env, &escrow, &trades);
 
     let client = setup_contract(&env, &_admin, &escrow);

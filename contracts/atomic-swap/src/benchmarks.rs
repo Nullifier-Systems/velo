@@ -1,13 +1,12 @@
 #![cfg(test)]
 
 /// Resource benchmarking module for cross-chain reorg protection.
-/// 
+///
 /// Soroban CPU/Memory instruction limits per contract invocation:
 /// - CPU: ~16 million instructions per transaction
 /// - Memory: ~256 MB
 ///
 /// This module validates that cryptographic operations fit within these limits.
-
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -15,7 +14,7 @@ use soroban_sdk::{
 };
 
 /// Benchmark: SHA256 hash computation (used for proof verification)
-/// 
+///
 /// SHA256 is a fast operation even in Soroban:
 /// - Input size: 32 bytes (typical EVM log data)
 /// - Estimated CPU cost: ~5,000-10,000 instructions
@@ -38,7 +37,7 @@ fn bench_sha256_hash_computation() {
 }
 
 /// Benchmark: Multiple proof verifications in sequence
-/// 
+///
 /// Simulates batch verification of multiple Merkle proofs:
 /// - 10 proofs verification loop
 /// - Cache hits after first verification
@@ -79,7 +78,7 @@ fn bench_batch_proof_verification() {
 }
 
 /// Benchmark: Cross-chain finality tracking with multiple chain updates
-/// 
+///
 /// Simulates recording EVM reveals from multiple chains:
 /// - 5 different EVM chains (Ethereum, Arbitrum, Polygon, Optimism, Base)
 /// - Different block heights and confirmation counts
@@ -98,11 +97,11 @@ fn bench_multi_chain_finality_tracking() {
     let secret = BytesN::from_array(&env, &[7u8; 32]);
 
     let chains = vec![
-        (1u32, "Ethereum", 64u32, 1000u32, 1100u32),       // 100 confirmations >= 64
-        (42161u32, "Arbitrum", 100u32, 2000u32, 2050u32),  // 50 confirmations < 100
-        (137u32, "Polygon", 256u32, 3000u32, 3200u32),     // 200 confirmations < 256
-        (10u32, "Optimism", 1u32, 4000u32, 4001u32),       // 1 confirmation >= 1
-        (8453u32, "Base", 1u32, 5000u32, 5001u32),         // 1 confirmation >= 1
+        (1u32, "Ethereum", 64u32, 1000u32, 1100u32), // 100 confirmations >= 64
+        (42161u32, "Arbitrum", 100u32, 2000u32, 2050u32), // 50 confirmations < 100
+        (137u32, "Polygon", 256u32, 3000u32, 3200u32), // 200 confirmations < 256
+        (10u32, "Optimism", 1u32, 4000u32, 4001u32), // 1 confirmation >= 1
+        (8453u32, "Base", 1u32, 5000u32, 5001u32),   // 1 confirmation >= 1
     ];
 
     let start = env.ledger().sequence();
@@ -126,7 +125,7 @@ fn bench_multi_chain_finality_tracking() {
 }
 
 /// Benchmark: Timelock extension operations
-/// 
+///
 /// Simulates extending timelock for multiple trades:
 /// - Lock 10 trades
 /// - Extend timelock for each one
@@ -181,14 +180,14 @@ fn bench_timelock_extension_batch() {
 }
 
 /// Benchmark: Worst-case scenario — all operations combined
-/// 
+///
 /// Simulates a real-world scenario:
 /// - 3 trades locked
 /// - Each experiences EVM reveal with reorg risk
 /// - Proof verification for each
 /// - Timelock extension for each
 /// - Total simulated CPU load
-/// 
+///
 /// Expected result: Should fit well within 16M instruction limit
 #[test]
 fn bench_worst_case_reorg_scenario() {
@@ -231,7 +230,13 @@ fn bench_worst_case_reorg_scenario() {
         let evm_current_block = evm_block_reveal + 10; // Only 10 confirmations < 64
 
         let _extension = client
-            .record_evm_reveal(&tx_hash, &secret, &evm_block_reveal, &1u32, &evm_current_block)
+            .record_evm_reveal(
+                &tx_hash,
+                &secret,
+                &evm_block_reveal,
+                &1u32,
+                &evm_current_block,
+            )
             .unwrap();
 
         // Verify proof

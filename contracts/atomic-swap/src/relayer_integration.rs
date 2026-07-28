@@ -7,7 +7,6 @@
 /// 2. Calls record_evm_reveal() if preimage is revealed
 /// 3. System may request timelock extension based on finality
 /// 4. Relayer monitors Soroban for release() event to complete EVM side
-
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -221,7 +220,7 @@ fn relayer_arbitrum_l2_swap_finality_tracking() {
             &evm_tx_hash,
             &s.secret,
             &arb_reveal_block,
-            &42161u32, // Arbitrum
+            &42161u32,  // Arbitrum
             &50_030u32, // 30 blocks (< 100 required)
         )
         .unwrap();
@@ -237,7 +236,7 @@ fn relayer_arbitrum_l2_swap_finality_tracking() {
             &evm_tx_hash,
             &s.secret,
             &arb_reveal_block,
-            &42161u32, // Arbitrum
+            &42161u32,  // Arbitrum
             &50_120u32, // 120 blocks (> 100 required)
         )
         .unwrap();
@@ -278,7 +277,7 @@ fn relayer_polygon_swap_deep_finality_requirement() {
             &evm_tx_hash,
             &s.secret,
             &polygon_reveal_block,
-            &137u32, // Polygon
+            &137u32,     // Polygon
             &100_100u32, // 100 blocks (< 256 required)
         )
         .unwrap();
@@ -369,13 +368,7 @@ fn relayer_error_wrong_secret_release_fails() {
     // Relayer records correct EVM reveal
     let evm_tx_hash = BytesN::from_array(&s.env, &[16u8; 32]);
     s.client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &1000u32,
-            &1u32,
-            &1100u32,
-        )
+        .record_evm_reveal(&evm_tx_hash, &s.secret, &1000u32, &1u32, &1100u32)
         .unwrap();
 
     // But relayer submits wrong secret to Soroban (failure case)
