@@ -59,7 +59,9 @@
     "releasing": "Liberando...",
     "confirmHandoff": "Confirmar entrega (liberar fondos)",
     "releaseFailed": "error al liberar",
-    "somethingWentWrong": "algo salió mal"
+    "somethingWentWrong": "algo salió mal",
+    "pausedTitle": "Nuevos intercambios en pausa",
+    "pausedBody": "Velo ha detenido temporalmente las nuevas solicitudes de efectivo. Este reclamo existente aún puede liberarse o reembolsarse — tus fondos bloqueados no quedan atrapados."
   },
   "chat": {
     "noTradeId": "No se especificó un ID de comercio.",

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
 import {
   fetchCashRequest,
   releaseCashRequest,
+  fetchEscrowPauseState,
   formatStroops,
   shortAddress,
   type CashRequestStatus,
@@ -31,6 +32,7 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [escrowPaused, setEscrowPaused] = useState(false);
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("velo-theme");
@@ -72,16 +74,28 @@ export default function ClaimQR() {
     }
   }, [id, t]);
 
+  const loadPauseState = useCallback(async () => {
+    try {
+      const pause = await fetchEscrowPauseState();
+      setEscrowPaused(pause.paused);
+    } catch {
+      // Best-effort: claim flow for existing trades must keep working.
+      setEscrowPaused(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadPauseState();
     const interval = setInterval(() => {
       setStatus((current) => {
         if (current?.status === 'locked') load();
         return current;
       });
+      loadPauseState();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadPauseState]);
 
   const statusLabel = (s: CashRequestStatus["status"]): string => {
     if (s === "locked") return t("claim.statusReady");
@@ -204,6 +218,13 @@ export default function ClaimQR() {
             {statusLabel(status.status)}
           </span>
         </div>
+
+        {escrowPaused && (
+          <div className="claim-ticket__pause-banner" role="status" aria-live="polite">
+            <strong>{t("claim.pausedTitle")}</strong>
+            <p>{t("claim.pausedBody")}</p>
+          </div>
+        )}
 
         <div className="claim-ticket__qr-window">
           {status.status === 'locked' && qrPayload ? (

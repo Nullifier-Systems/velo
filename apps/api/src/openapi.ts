@@ -296,6 +296,39 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/cash/pause": {
+      get: {
+        operationId: "getEscrowPause",
+        tags: ["cash"],
+        summary: "Escrow emergency pause / circuit breaker state",
+        description:
+          "Reads whether the escrow contract is currently rejecting new locks. " +
+          "When paused is true, POST /cash/request and /cash/request/prepare return 503. " +
+          "Existing locked trades can still be released or refunded.",
+        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        responses: {
+          "200": {
+            description: "Current on-chain pause state.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["paused", "pause_effective_ledger", "pause_delay_ledgers"],
+                  properties: {
+                    paused: { type: "boolean" },
+                    pause_effective_ledger: { type: ["integer", "null"] },
+                    pause_delay_ledgers: { type: "integer" },
+                    message: { type: ["string", "null"] },
+                  },
+                },
+              },
+            },
+          },
+          "502": { description: "Failed to read pause state from chain." },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
     "/api/v1/cash/request/prepare": {
       post: {
         operationId: "prepareCashRequest",

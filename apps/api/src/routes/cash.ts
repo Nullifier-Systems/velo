@@ -10,6 +10,7 @@ import {
   submitSignedTransaction,
   submitReleaseTx,
   submitRefundTx,
+  getEscrowPauseState,
   NETWORK_PASSPHRASE,
 } from "../lib/stellar.js";
 import { sendRefundAlert } from "../lib/webhook.js";
@@ -24,6 +25,32 @@ import { t } from "../lib/i18n.js";
 
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 const DEFAULT_TIMEOUT_LEDGERS = 100; // ~15-20 min at Stellar's ~5-6s ledger close time
+
+const PAUSED_NEW_TRADE_MESSAGE =
+  "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
+
+/** Reject new locks when the on-chain circuit breaker is effective (issue #266). */
+async function rejectIfEscrowPaused(
+  req: { log: { warn: (err: unknown, msg: string) => void } },
+  reply: { code: (n: number) => { send: (body: unknown) => void } },
+): Promise<boolean> {
+  try {
+    const state = await getEscrowPauseState(ESCROW_CONTRACT_ID);
+    if (state.paused) {
+      reply.code(503).send({
+        error: "escrow_paused",
+        message: PAUSED_NEW_TRADE_MESSAGE,
+        pause_effective_ledger: state.pause_effective_ledger,
+      });
+      return true;
+    }
+  } catch (err) {
+    // If the pause read fails, allow the lock attempt — the contract itself
+    // still enforces pause; this is a UX pre-check only.
+    req.log.warn(err, "getEscrowPauseState failed; continuing without pause pre-check");
+  }
+  return false;
+}
 
 const cashRequestSchema = z.object({
   seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
@@ -72,8 +99,33 @@ interface RegisterProviderBody {
  *                                    embedded in the scanned QR (free)
  * POST /api/v1/cash/request/:id/refund  — refund escrow back to the buyer
  *                                    if the trade times out or fails (free)
+ * GET  /api/v1/cash/pause         — on-chain circuit breaker state (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
+  app.get(
+    "/cash/pause",
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const state = await getEscrowPauseState(ESCROW_CONTRACT_ID);
+        return {
+          ...state,
+          message: state.paused ? PAUSED_NEW_TRADE_MESSAGE : null,
+        };
+      } catch (err) {
+        req.log.error(err, "getEscrowPauseState failed");
+        reply.code(502).send({
+          error: "failed to read escrow pause state",
+          detail: String(err),
+        });
+      }
+    }
+  );
+
   app.get<{ Querystring: { lat?: string; lng?: string; radius?: string; precision?: string; k?: string } }>(
     "/cash/agents",
     {
@@ -210,6 +262,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const body = parseBody(prepareLockSchema, req.body, reply);
       if (!body) return;
+
+      if (await rejectIfEscrowPaused(req, reply)) return;
 
       const { seller, buyer, amount_stroops, secret_hash, mode: rawMode, notification_type, contact_info } = body;
       const mode = rawMode ?? "custodial";
@@ -348,6 +402,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const body = parseBody(cashRequestSchema, req.body, reply);
       if (!body) return;
+
+      if (await rejectIfEscrowPaused(req, reply)) return;
 
       const { seller, buyer, amount_stroops, secret_hash, notification_type, contact_info } = body;
 

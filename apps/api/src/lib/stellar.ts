@@ -1,4 +1,5 @@
 import {
+    Account,
     BASE_FEE,
     Keypair,
     Networks,
@@ -494,4 +495,87 @@ export async function submitSignedTransaction(signedXdr: string): Promise<{ hash
     }
 
     return { hash: sendResult.hash, status: getResult.status };
+}
+
+// ---------------------------------------------------------------------------
+// Read helpers — pause / circuit breaker (issue #266)
+// ---------------------------------------------------------------------------
+
+export interface EscrowPauseState {
+    /** True only when a pause is armed AND the delay has elapsed. */
+    paused: boolean;
+    /** Ledger when an armed pause becomes effective; null if not armed. */
+    pause_effective_ledger: number | null;
+    /** Fixed delay (ledgers) between pause() and effective lock blocking. */
+    pause_delay_ledgers: number;
+}
+
+/** Source account for read-only simulations (does not need to sign). */
+async function simulationAccount(): Promise<Account> {
+    const configured =
+        process.env.SOROBAN_SIMULATION_SOURCE ||
+        process.env.BUYER_PUBLIC_KEY ||
+        (process.env.BUYER_SECRET_KEY
+            ? Keypair.fromSecret(process.env.BUYER_SECRET_KEY).publicKey()
+            : null);
+
+    if (configured) {
+        try {
+            return await server.getAccount(configured);
+        } catch {
+            // Fall through to ephemeral account if the key is not funded on this network.
+        }
+    }
+
+    return new Account(Keypair.random().publicKey(), "0");
+}
+
+async function simulateContractRead<T>(
+    contractId: string,
+    functionName: string,
+    args: xdr.ScVal[] = [],
+): Promise<T> {
+    const account = await simulationAccount();
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+        .addOperation(
+            Operation.invokeContractFunction({
+                contract: contractId,
+                function: functionName,
+                args,
+            })
+        )
+        .setTimeout(30)
+        .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed (${functionName}): ${sim.error}`);
+    }
+    if (!Api.isSimulationSuccess(sim) || sim.result === undefined) {
+        throw new Error(`simulation returned no result for ${functionName}`);
+    }
+
+    return scValToNative(sim.result.retval) as T;
+}
+
+/**
+ * Read the escrow circuit-breaker state from chain (issue #266).
+ * Used by the API to refuse new locks and by the frontend to show a clear message.
+ */
+export async function getEscrowPauseState(contractId: string): Promise<EscrowPauseState> {
+    const [paused, effective, delay] = await Promise.all([
+        simulateContractRead<boolean>(contractId, "is_paused"),
+        simulateContractRead<number | null | undefined>(contractId, "pause_effective_ledger"),
+        simulateContractRead<number>(contractId, "pause_delay_ledgers"),
+    ]);
+
+    return {
+        paused: Boolean(paused),
+        pause_effective_ledger:
+            effective === null || effective === undefined ? null : Number(effective),
+        pause_delay_ledgers: Number(delay),
+    };
 }

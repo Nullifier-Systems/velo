@@ -127,15 +127,31 @@ fn get_trade_returns_none_for_unknown_id() {
 }
 
 // ---------------------------------------------------------------------------
-// Pause / unpause
+// Pause / unpause (issue #266 — time-locked circuit breaker)
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "11")]
-fn pause_blocks_lock() {
+fn pause_does_not_block_lock_before_delay_elapses() {
     let f = setup();
     f.client.pause(&f.no_sigs);
 
+    // Immediately after pause(), the delay has not elapsed — lock must still succeed.
+    assert!(!f.client.is_paused());
+    lock_trade(&f);
+    assert_eq!(f.token.balance(&f.contract_id), 500);
+}
+
+#[test]
+#[should_panic(expected = "15")]
+fn pause_blocks_lock_after_delay() {
+    let f = setup();
+    f.client.pause(&f.no_sigs);
+
+    f.env
+        .ledger()
+        .with_mut(|li| li.sequence_number += PAUSE_DELAY_LEDGERS);
+
+    assert!(f.client.is_paused());
     let new_id = BytesN::from_array(&f.env, &[2u8; 32]);
     f.client
         .lock(&new_id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
@@ -145,7 +161,13 @@ fn pause_blocks_lock() {
 fn unpause_restores_lock() {
     let f = setup();
     f.client.pause(&f.no_sigs);
+    f.env
+        .ledger()
+        .with_mut(|li| li.sequence_number += PAUSE_DELAY_LEDGERS);
+    assert!(f.client.is_paused());
+
     f.client.unpause(&f.no_sigs);
+    assert!(!f.client.is_paused());
     lock_trade(&f);
 
     assert_eq!(f.token.balance(&f.contract_id), 500);
@@ -157,10 +179,82 @@ fn pause_does_not_affect_release_of_already_locked_trade() {
     lock_trade(&f);
 
     f.client.pause(&f.no_sigs);
+    f.env
+        .ledger()
+        .with_mut(|li| li.sequence_number += PAUSE_DELAY_LEDGERS);
+    assert!(f.client.is_paused());
+
     f.client.release(&f.id, &f.secret);
 
     let fee = (500 * 50) / 10_000;
     assert_eq!(f.token.balance(&f.seller), 500 - fee);
+}
+
+#[test]
+fn pause_does_not_affect_refund_of_already_locked_trade() {
+    let f = setup();
+    lock_trade(&f);
+
+    f.client.pause(&f.no_sigs);
+    // Advance past both the pause delay and the trade timeout.
+    f.env.ledger().with_mut(|li| {
+        li.sequence_number += PAUSE_DELAY_LEDGERS.max(101);
+    });
+    assert!(f.client.is_paused());
+
+    f.client.refund(&f.id);
+
+    assert_eq!(f.token.balance(&f.buyer), 1_000);
+    assert_eq!(
+        f.client.get_trade(&f.id).unwrap().status,
+        htlc_core::TradeStatus::Refunded
+    );
+}
+
+#[test]
+fn pause_schedules_effective_ledger_with_delay() {
+    let f = setup();
+    let before = f.env.ledger().sequence();
+    f.client.pause(&f.no_sigs);
+
+    assert_eq!(f.client.pause_delay_ledgers(), PAUSE_DELAY_LEDGERS);
+    assert_eq!(
+        f.client.pause_effective_ledger(),
+        Some(before + PAUSE_DELAY_LEDGERS)
+    );
+    assert!(!f.client.is_paused());
+}
+
+#[test]
+fn pause_rejects_insufficient_multisig() {
+    let f = setup();
+    let s1 = Address::generate(&f.env);
+    let s2 = Address::generate(&f.env);
+    let s3 = Address::generate(&f.env);
+    let ms = Vec::from_array(&f.env, [s1.clone(), s2.clone(), s3]);
+    f.client.migrate_to_multisig(&ms, &2);
+
+    // Only one authorized signer — below the 2-of-3 threshold.
+    let too_few = Vec::from_array(&f.env, [s1]);
+    let result = f.client.try_pause(&too_few);
+    assert_eq!(result, Err(Ok(Error::NotAuthorized)));
+}
+
+#[test]
+fn unpause_rejects_unauthorized_signer() {
+    let f = setup();
+    let s1 = Address::generate(&f.env);
+    let s2 = Address::generate(&f.env);
+    let ms = Vec::from_array(&f.env, [s1.clone(), s2.clone()]);
+    f.client.migrate_to_multisig(&ms, &2);
+
+    let ok = Vec::from_array(&f.env, [s1.clone(), s2]);
+    f.client.pause(&ok);
+
+    let intruder = Address::generate(&f.env);
+    let bad = Vec::from_array(&f.env, [s1, intruder]);
+    let result = f.client.try_unpause(&bad);
+    assert_eq!(result, Err(Ok(Error::NotAuthorized)));
 }
 
 // ---------------------------------------------------------------------------

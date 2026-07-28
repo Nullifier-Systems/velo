@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
-import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
+import { lockEscrow, releaseEscrow, refundEscrow, getEscrowPauseState } from "../lib/stellar.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { getCashRequest } from "../lib/store.js";
@@ -17,6 +17,11 @@ vi.mock("../lib/stellar.js", () => ({
   submitSignedTransaction: vi.fn().mockResolvedValue({ hash: "dummy_hash", status: "SUCCESS" }),
   submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
   submitRefundTx: vi.fn().mockResolvedValue({ hash: "dummy_refund_hash" }),
+  getEscrowPauseState: vi.fn().mockResolvedValue({
+    paused: false,
+    pause_effective_ledger: null,
+    pause_delay_ledgers: 10,
+  }),
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
@@ -529,6 +534,48 @@ describe("cashRoutes", () => {
 
       expect(releaseRes.statusCode).toBe(502);
       expect(releaseRes.json()).toMatchObject({ error: "escrow release failed" });
+    });
+  });
+
+  describe("circuit breaker pause (issue #266)", () => {
+    it("GET /cash/pause returns pause state", async () => {
+      await app.ready();
+      const res = await app.inject({ method: "GET", url: "/api/v1/cash/pause" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        paused: false,
+        pause_effective_ledger: null,
+        pause_delay_ledgers: 10,
+        message: null,
+      });
+    });
+
+    it("POST /cash/request returns 503 when escrow is paused", async () => {
+      vi.mocked(getEscrowPauseState).mockResolvedValueOnce({
+        paused: true,
+        pause_effective_ledger: 12345,
+        pause_delay_ledgers: 10,
+      });
+
+      await app.ready();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request",
+        headers: { "x-payment": "test" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "a".repeat(64),
+        },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({
+        error: "escrow_paused",
+        pause_effective_ledger: 12345,
+      });
+      expect(lockEscrow).not.toHaveBeenCalled();
     });
   });
 });
