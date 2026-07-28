@@ -249,8 +249,8 @@ pub struct EscrowContract;
 
 /// Window constraints for commit-reveal protocol (MEV protection).
 /// Reveal must open after Nmin blocks and close before Nmax blocks.
-const COMMIT_REVEAL_WINDOW_MIN_LEDGERS: u32 = 2;      // ~10 seconds (2 ledgers)
-const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100;    // ~15 minutes (same as lock timeout for P2P)
+const COMMIT_REVEAL_WINDOW_MIN_LEDGERS: u32 = 2; // ~10 seconds (2 ledgers)
+const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100; // ~15 minutes (same as lock timeout for P2P)
 
 /// Collateral multiplier: bond required to make commit is % of trade amount.
 /// Stored as fixed-point (10000 = 100%, 500 = 5%).
@@ -258,9 +258,9 @@ const COMMIT_COLLATERAL_RATE_FP: u32 = 500; // 5% collateral requirement
 
 /// Default dynamic fee configuration.
 /// Prevents transaction spam when pending escrow volume is high.
-const DEFAULT_DYNAMIC_FEE_BASE_BPS: u32 = 100;      // 1% base fee
-const DEFAULT_DYNAMIC_FEE_GAMMA_FP: u32 = 2000;     // γ = 0.2 (fixed-point)
-const DEFAULT_DYNAMIC_FEE_ALPHA: u32 = 2;           // α = 2 (quadratic)
+const DEFAULT_DYNAMIC_FEE_BASE_BPS: u32 = 100; // 1% base fee
+const DEFAULT_DYNAMIC_FEE_GAMMA_FP: u32 = 2000; // γ = 0.2 (fixed-point)
+const DEFAULT_DYNAMIC_FEE_ALPHA: u32 = 2; // α = 2 (quadratic)
 const DEFAULT_DYNAMIC_FEE_TARGET_LIQUIDITY: i128 = 1_000_000_000_000; // 10M USDC target
 
 #[contractimpl]
@@ -319,10 +319,12 @@ impl EscrowContract {
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&arbitrator, &env.current_contract_address(), &amount);
-        
+
         let key = DataKey::ArbitratorStake(arbitrator.clone());
         let current_stake: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-        env.storage().persistent().set(&key, &(current_stake + amount));
+        env.storage()
+            .persistent()
+            .set(&key, &(current_stake + amount));
     }
 
     /// Read-only accessor for a trade's current state. Returns `None` if the id
@@ -413,7 +415,9 @@ impl EscrowContract {
         state.status = TradeStatus::Disputed;
         env.storage().persistent().set(&key, &state);
 
-        let info = DisputeInfo { start_ledger: env.ledger().sequence() };
+        let info = DisputeInfo {
+            start_ledger: env.ledger().sequence(),
+        };
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(id.clone()), &info);
@@ -438,7 +442,7 @@ impl EscrowContract {
         env: Env,
         id: BytesN<32>,
         buyer_share_bps: u32,
-        signatures: Vec<(u32, BytesN<64>)>
+        signatures: Vec<(u32, BytesN<64>)>,
     ) -> Result<(), Error> {
         if buyer_share_bps > 10_000 {
             return Err(Error::InvalidSplit);
@@ -467,7 +471,10 @@ impl EscrowContract {
             .get(&DataKey::Dispute(id.clone()))
             .ok_or(Error::TradeNotDisputed)?;
 
-        let elapsed = env.ledger().sequence().saturating_sub(dispute_info.start_ledger);
+        let elapsed = env
+            .ledger()
+            .sequence()
+            .saturating_sub(dispute_info.start_ledger);
 
         if elapsed > arb_set.t2_ledgers {
             return Err(Error::TimeoutReached); // Should use fallback
@@ -489,11 +496,14 @@ impl EscrowContract {
 
         for sig in signatures.iter() {
             let (idx, signature) = sig;
-            if seen_indices.contains(idx) { continue; }
+            if seen_indices.contains(idx) {
+                continue;
+            }
             seen_indices.push_back(idx);
 
             if let Some(pub_key) = arb_set.keys.get(idx) {
-                env.crypto().ed25519_verify(&pub_key, &msg_buf.clone().into(), &signature);
+                env.crypto()
+                    .ed25519_verify(&pub_key, &msg_buf.clone().into(), &signature);
                 verified_count += 1;
             }
         }
@@ -574,14 +584,19 @@ impl EscrowContract {
             .get(&DataKey::ArbitratorSet)
             .ok_or(Error::NotInitialized)?;
 
-        let elapsed = env.ledger().sequence().saturating_sub(dispute_info.start_ledger);
+        let elapsed = env
+            .ledger()
+            .sequence()
+            .saturating_sub(dispute_info.start_ledger);
         if elapsed <= arb_set.t2_ledgers {
             return Err(Error::DisputeTimeoutNotReached);
         }
 
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
-        env.storage().persistent().remove(&DataKey::Dispute(id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Dispute(id.clone()));
 
         // Slashing: Admin seizes all stakes from arbitrators since they failed to resolve.
         // For simplicity, we zero out all stakes in `arb_set.keys` and send to admin.
@@ -887,9 +902,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&commitment_key, &commitment_state);
-        env.storage()
-            .persistent()
-            .extend_ttl(&commitment_key, COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100, COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100);
+        env.storage().persistent().extend_ttl(
+            &commitment_key,
+            COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100,
+            COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100,
+        );
 
         // Update accumulated locked liquidity for dynamic fee calculation
         let current_liquidity: i128 = env
@@ -913,11 +930,11 @@ impl EscrowContract {
     pub fn reveal_escrow(
         env: Env,
         buyer: Address,
-        id: BytesN<32>,                // Trade ID for the final escrow
+        id: BytesN<32>, // Trade ID for the final escrow
         seller: Address,
         amount: i128,
         secret_hash: BytesN<32>,
-        salt: BytesN<32>,              // Commitment salt (reveals hash = SHA256(buyer || seller || ...))
+        salt: BytesN<32>, // Commitment salt (reveals hash = SHA256(buyer || seller || ...))
         timeout_ledgers: u32,
     ) -> Result<(), Error> {
         check_not_paused(&env);
@@ -927,7 +944,13 @@ impl EscrowContract {
         buyer.require_auth();
 
         // Recompute commitment hash from parameters
-        let commitment_input = (buyer.clone(), seller.clone(), amount, secret_hash.clone(), salt);
+        let commitment_input = (
+            buyer.clone(),
+            seller.clone(),
+            amount,
+            secret_hash.clone(),
+            salt,
+        );
         let serialized = env.crypto().sha256(&commitment_input.to_xdr(&env));
         let commitment_hash = serialized.clone();
 
@@ -954,9 +977,10 @@ impl EscrowContract {
                 .instance()
                 .get(&DataKey::LockedLiquidity)
                 .unwrap_or(0);
-            env.storage()
-                .instance()
-                .set(&DataKey::LockedLiquidity, &(current_liquidity - commitment_state.amount));
+            env.storage().instance().set(
+                &DataKey::LockedLiquidity,
+                &(current_liquidity - commitment_state.amount),
+            );
 
             return Err(Error::RevealWindowClosed);
         }
@@ -970,8 +994,7 @@ impl EscrowContract {
         // Verify revealed parameters match commitment
         if commitment_state.amount != amount
             || commitment_state.buyer != buyer
-            || commitment_state.collateral
-                != (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000
+            || commitment_state.collateral != (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000
         {
             return Err(Error::CommitmentMismatch);
         }
@@ -998,7 +1021,11 @@ impl EscrowContract {
         client.transfer(&buyer, &env.current_contract_address(), &amount);
 
         // Refund collateral to buyer (reveal succeeded)
-        client.transfer(&env.current_contract_address(), &buyer, &commitment_state.collateral);
+        client.transfer(
+            &env.current_contract_address(),
+            &buyer,
+            &commitment_state.collateral,
+        );
 
         let timeout_ledger = current_ledger + timeout_ledgers;
         let state = TradeState {
@@ -1066,7 +1093,8 @@ impl EscrowContract {
         };
 
         // Fee = base_fee × (1 + γ × power_term / 10000)
-        let multiplier_fp = 10_000 + ((fee_config.gamma_fp as u128 * power_term as u128) / 10_000) as u32;
+        let multiplier_fp =
+            10_000 + ((fee_config.gamma_fp as u128 * power_term as u128) / 10_000) as u32;
         ((fee_config.base_fee_bps as u128 * multiplier_fp as u128) / 10_000) as u32
     }
 }
@@ -2131,430 +2159,445 @@ mod test {
         let f = setup(2_000, 0);
 
         let secret2 = BytesN::from_array(&f.env, &[42u8; 32]);
-    // Front-running / griefing resistance for release() (issue #272).
-    //
-    // These tests formally verify that the contract's logic is immune to
-    // front-running and griefing attacks when the secret is revealed in
-    // the mempool. The threat model: an attacker observes a pending
-    // release(id, secret) transaction and attempts to front-run it.
-    //
-    // The contract is safe because:
-    //   1. Payout destination (seller) is immutable — fixed at lock().
-    //   2. CEI pattern: state updated to Released BEFORE external calls.
-    //   3. Secret verification happens BEFORE state change.
-    //   4. Any second attempt (front-run or retry) fails fast at the
-    //      status check with TradeNotLocked — cheap revert, no side effects.
-    // ------------------------------------------------------------------
+        // Front-running / griefing resistance for release() (issue #272).
+        //
+        // These tests formally verify that the contract's logic is immune to
+        // front-running and griefing attacks when the secret is revealed in
+        // the mempool. The threat model: an attacker observes a pending
+        // release(id, secret) transaction and attempts to front-run it.
+        //
+        // The contract is safe because:
+        //   1. Payout destination (seller) is immutable — fixed at lock().
+        //   2. CEI pattern: state updated to Released BEFORE external calls.
+        //   3. Secret verification happens BEFORE state change.
+        //   4. Any second attempt (front-run or retry) fails fast at the
+        //      status check with TradeNotLocked — cheap revert, no side effects.
+        // ------------------------------------------------------------------
 
-    /// Front-runner submits the SAME valid secret for the same trade.
-    /// Attacker's tx confirms first, pays out to the legitimate seller.
-    /// Legitimate tx then fails fast with TradeNotLocked (cheap revert).
-    /// Attacker gains nothing, spends gas to do seller's work.
-    #[test]
-    fn release_front_run_same_valid_secret_attacker_pays_seller_legit_fails_fast() {
-        let f = setup(1_000, 100);
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        /// Front-runner submits the SAME valid secret for the same trade.
+        /// Attacker's tx confirms first, pays out to the legitimate seller.
+        /// Legitimate tx then fails fast with TradeNotLocked (cheap revert).
+        /// Attacker gains nothing, spends gas to do seller's work.
+        #[test]
+        fn release_front_run_same_valid_secret_attacker_pays_seller_legit_fails_fast() {
+            let f = setup(1_000, 100);
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
-        // Attacker front-runs with the same valid secret
-        f.client.release(&f.id, &f.secret);
+            // Attacker front-runs with the same valid secret
+            f.client.release(&f.id, &f.secret);
 
-        // Seller gets paid (attacker's tx executed the payout)
-        assert_eq!(f.token.balance(&f.seller), 495); // 500 - 1% fee
-        assert_eq!(f.token.balance(&f.admin), 5);
-        assert_eq!(f.token.balance(&f.contract_id), 0);
+            // Seller gets paid (attacker's tx executed the payout)
+            assert_eq!(f.token.balance(&f.seller), 495); // 500 - 1% fee
+            assert_eq!(f.token.balance(&f.admin), 5);
+            assert_eq!(f.token.balance(&f.contract_id), 0);
 
-        // Trade state is Released
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Released
-        );
+            // Trade state is Released
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Released
+            );
 
-        // Legitimate caller's subsequent attempt fails fast with TradeNotLocked
-        // (simulated by calling release again — in reality this would be a
-        // separate transaction that reverts at the status check)
-        let result = f.client.try_release(&f.id, &f.secret);
-        assert!(result.is_err(), "second release must fail");
-        // The error is TradeNotLocked (10) — status check fails before any
-        // crypto or token operations, so revert is cheap.
+            // Legitimate caller's subsequent attempt fails fast with TradeNotLocked
+            // (simulated by calling release again — in reality this would be a
+            // separate transaction that reverts at the status check)
+            let result = f.client.try_release(&f.id, &f.secret);
+            assert!(result.is_err(), "second release must fail");
+            // The error is TradeNotLocked (10) — status check fails before any
+            // crypto or token operations, so revert is cheap.
+        }
+
+        /// Griefing attempt: front-runner submits an INVALID secret for the
+        /// same trade. Attacker's tx fails at secret verification (InvalidSecret)
+        /// BEFORE any state change. Legitimate tx then succeeds normally.
+        /// Attacker wastes gas; legitimate party unaffected.
+        #[test]
+        fn release_front_run_invalid_secret_griefing_fails_fast_legit_succeeds() {
+            let f = setup(1_000, 100);
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+            let invalid_secret = BytesN::from_array(&f.env, &[99u8; 32]);
+
+            // Attacker's griefing attempt fails at secret verification
+            let grief_result = f.client.try_release(&f.id, &invalid_secret);
+            assert!(grief_result.is_err(), "invalid secret must fail");
+
+            // Trade state UNCHANGED — still Locked, funds still escrowed
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Locked
+            );
+            assert_eq!(f.token.balance(&f.contract_id), 500);
+            assert_eq!(f.token.balance(&f.seller), 0);
+
+            // Legitimate release now succeeds normally
+            f.client.release(&f.id, &f.secret);
+
+            assert_eq!(f.token.balance(&f.seller), 495);
+            assert_eq!(f.token.balance(&f.admin), 5);
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Released
+            );
+        }
+
+        /// Batch release front-running resistance: attacker includes a valid
+        /// secret for a target trade in a batch, hoping to front-run the
+        /// legitimate single release. The batch item succeeds, pays the
+        /// legitimate seller. Legitimate single release then fails fast.
+        /// No value extraction possible.
+        #[test]
+        fn batch_release_front_run_valid_secret_pays_seller_legit_fails_fast() {
+            let f = setup(2_000, 100);
+            let seller2 = Address::generate(&f.env);
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+            // Attacker front-runs by including target trade in a batch
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+            ];
+            let released = f.client.batch_release(&releases);
+
+            assert_eq!(released.len(), 1);
+            assert_eq!(released.get(0).unwrap(), f.id.clone());
+
+            // Seller paid by attacker's batch tx
+            assert_eq!(f.token.balance(&f.seller), 495);
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Released
+            );
+
+            // Legitimate single release fails fast
+            let result = f.client.try_release(&f.id, &f.secret);
+            assert!(result.is_err());
+        }
+
+        /// Distinct IDs never interfere: two trades with different IDs can
+        /// co-exist, be released independently, and neither affects the other.
+        #[test]
+        fn distinct_trade_ids_never_collide() {
+            let f = setup(2_000, 0);
+
+            let secret2 = BytesN::from_array(&f.env, &[42u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &f.seller, &f.buyer, &700, &secret_hash2, &100);
+
+            assert_eq!(f.token.balance(&f.contract_id), 1_200);
+
+            // Release the first — second must stay Locked.
+            f.client.release(&f.id, &f.secret);
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Released
+            );
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Locked
+            );
+        }
+
+        /// Secret revelation in mempool does not compromise other trades.
+        /// Each trade has independent secret_hash; knowing one secret gives
+        /// zero advantage for any other trade.
+        #[test]
+        fn release_secret_revelation_does_not_compromise_other_trades() {
+            let f = setup(2_000, 100);
+            let seller2 = Address::generate(&f.env);
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+            // Attacker learns secret for trade 1 (from mempool observation)
+            // but cannot use it for trade 2
+            let bad_attempt = f.client.try_release(&id2, &f.secret); // wrong secret for id2
+            assert!(bad_attempt.is_err());
+
+            // Trade 2 still locked, funds safe
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Locked
+            );
+            assert_eq!(f.token.balance(&seller2), 0);
+            assert_eq!(f.token.balance(&f.contract_id), 700);
+
+            // Legitimate release of trade 2 still works with its own secret
+            f.client.release(&id2, &secret2);
+            assert_eq!(f.token.balance(&seller2), 297); // 300 - 1%
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Released
+            );
+            assert_eq!(f.token.balance(&f.contract_id), 0);
+        }
+
+        // ------------------------------------------------------------------
+        // Atomic release_batch() — all succeed or all fail.
+        // ------------------------------------------------------------------
+
+        #[test]
+        fn release_batch_atomically_releases_3_valid_trades() {
+            let f = setup(2_000, 100); // 1% fee
+            let seller2 = Address::generate(&f.env);
+            let seller3 = Address::generate(&f.env);
+
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            let secret3 = BytesN::from_array(&f.env, &[9u8; 32]);
+            let secret_hash3 = f.env.crypto().sha256(&secret3.clone().into()).to_bytes();
+            let id3 = BytesN::from_array(&f.env, &[3u8; 32]);
+
+            // Lock 3 trades with different amounts.
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+            f.client
+                .lock(&id3, &seller3, &f.buyer, &200, &secret_hash3, &100);
+
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+                BatchReleaseItem {
+                    id: id2.clone(),
+                    secret: secret2.clone(),
+                },
+                BatchReleaseItem {
+                    id: id3.clone(),
+                    secret: secret3.clone(),
+                },
+            ];
+
+            // Call atomic release_batch — must succeed.
+            f.client.release_batch(&releases).unwrap();
+
+            // All 3 trades are Released.
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Released
+            );
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Released
+            );
+            assert_eq!(
+                f.client.get_trade(&id3).unwrap().status,
+                TradeStatus::Released
+            );
+
+            // Verify exact payouts: 1% fee deducted from each seller.
+            assert_eq!(f.token.balance(&f.seller), 495); // 500 - 5
+            assert_eq!(f.token.balance(&seller2), 297); // 300 - 3
+            assert_eq!(f.token.balance(&seller3), 198); // 200 - 2
+
+            // Admin collected exact fees: 5 + 3 + 2 = 10.
+            assert_eq!(f.token.balance(&f.admin), 10);
+        }
+
+        #[test]
+        fn release_batch_reverts_entire_batch_on_invalid_secret() {
+            let f = setup(2_000, 100);
+            let seller2 = Address::generate(&f.env);
+
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            let wrong_secret = BytesN::from_array(&f.env, &[99u8; 32]);
+
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+                BatchReleaseItem {
+                    id: id2.clone(),
+                    secret: wrong_secret, // Invalid secret for id2
+                },
+            ];
+
+            // Atomic release_batch must fail and revert.
+            assert!(f.client.try_release_batch(&releases).is_err());
+
+            // Both trades remain Locked, untouched.
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Locked
+            );
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Locked
+            );
+
+            // No funds transferred.
+            assert_eq!(f.token.balance(&f.seller), 0);
+            assert_eq!(f.token.balance(&seller2), 0);
+            assert_eq!(f.token.balance(&f.admin), 0);
+        }
+
+        #[test]
+        fn release_batch_reverts_entire_batch_on_nonexistent_trade() {
+            let f = setup(2_000, 100);
+            let seller2 = Address::generate(&f.env);
+
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            let nonexistent_id = BytesN::from_array(&f.env, &[99u8; 32]);
+
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+                BatchReleaseItem {
+                    id: nonexistent_id,
+                    secret: f.secret.clone(),
+                },
+            ];
+
+            // Atomic release_batch must fail (trade doesn't exist).
+            assert!(f.client.try_release_batch(&releases).is_err());
+
+            // Both existing trades remain Locked.
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Locked
+            );
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Locked
+            );
+
+            // No funds transferred.
+            assert_eq!(f.token.balance(&f.seller), 0);
+            assert_eq!(f.token.balance(&seller2), 0);
+        }
+
+        #[test]
+        fn release_batch_reverts_on_trade_not_in_locked_state() {
+            let f = setup(2_000, 100);
+            let seller2 = Address::generate(&f.env);
+
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+            // Release id2 first, moving it to Released state.
+            f.client.release(&id2, &secret2);
+
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+                BatchReleaseItem {
+                    id: id2.clone(),
+                    secret: secret2.clone(),
+                },
+            ];
+
+            // Atomic release_batch must fail (id2 is Released, not Locked).
+            assert!(f.client.try_release_batch(&releases).is_err());
+
+            // id1 must remain Locked (the batch reverted before releasing it).
+            assert_eq!(
+                f.client.get_trade(&f.id).unwrap().status,
+                TradeStatus::Locked
+            );
+            assert_eq!(
+                f.client.get_trade(&id2).unwrap().status,
+                TradeStatus::Released
+            );
+
+            // Seller1 got no payout (batch failed).
+            assert_eq!(f.token.balance(&f.seller), 0);
+            // Seller2 was already released.
+            assert_eq!(f.token.balance(&seller2), 297);
+        }
+
+        #[test]
+        fn release_batch_matches_fee_accounting_to_individual_releases() {
+            let f = setup(1_000, 250); // 2.5% fee
+            let seller2 = Address::generate(&f.env);
+
+            let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+            let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+            let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+            // Set up two trades with different amounts.
+            f.client
+                .lock(&f.id, &f.seller, &f.buyer, &1000, &f.secret_hash, &100);
+            f.client
+                .lock(&id2, &seller2, &f.buyer, &400, &secret_hash2, &100);
+
+            // Release them atomically.
+            let releases = vec![
+                &f.env,
+                BatchReleaseItem {
+                    id: f.id.clone(),
+                    secret: f.secret.clone(),
+                },
+                BatchReleaseItem {
+                    id: id2.clone(),
+                    secret: secret2.clone(),
+                },
+            ];
+            f.client.release_batch(&releases).unwrap();
+
+            // Verify fees are calculated exactly as individual releases would:
+            // Trade 1: 1000 * 250 / 10_000 = 25 fee, payout 975
+            // Trade 2: 400 * 250 / 10_000 = 10 fee, payout 390
+            // Total fee: 35
+            assert_eq!(f.token.balance(&f.seller), 975);
+            assert_eq!(f.token.balance(&seller2), 390);
+            assert_eq!(f.token.balance(&f.admin), 35);
+        }
     }
-
-    /// Griefing attempt: front-runner submits an INVALID secret for the
-    /// same trade. Attacker's tx fails at secret verification (InvalidSecret)
-    /// BEFORE any state change. Legitimate tx then succeeds normally.
-    /// Attacker wastes gas; legitimate party unaffected.
-    #[test]
-    fn release_front_run_invalid_secret_griefing_fails_fast_legit_succeeds() {
-        let f = setup(1_000, 100);
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-
-        let invalid_secret = BytesN::from_array(&f.env, &[99u8; 32]);
-
-        // Attacker's griefing attempt fails at secret verification
-        let grief_result = f.client.try_release(&f.id, &invalid_secret);
-        assert!(grief_result.is_err(), "invalid secret must fail");
-
-        // Trade state UNCHANGED — still Locked, funds still escrowed
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Locked
-        );
-        assert_eq!(f.token.balance(&f.contract_id), 500);
-        assert_eq!(f.token.balance(&f.seller), 0);
-
-        // Legitimate release now succeeds normally
-        f.client.release(&f.id, &f.secret);
-
-        assert_eq!(f.token.balance(&f.seller), 495);
-        assert_eq!(f.token.balance(&f.admin), 5);
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Released
-        );
-    }
-
-    /// Batch release front-running resistance: attacker includes a valid
-    /// secret for a target trade in a batch, hoping to front-run the
-    /// legitimate single release. The batch item succeeds, pays the
-    /// legitimate seller. Legitimate single release then fails fast.
-    /// No value extraction possible.
-    #[test]
-    fn batch_release_front_run_valid_secret_pays_seller_legit_fails_fast() {
-        let f = setup(2_000, 100);
-        let seller2 = Address::generate(&f.env);
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-
-        // Attacker front-runs by including target trade in a batch
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-        ];
-        let released = f.client.batch_release(&releases);
-
-        assert_eq!(released.len(), 1);
-        assert_eq!(released.get(0).unwrap(), f.id.clone());
-
-        // Seller paid by attacker's batch tx
-        assert_eq!(f.token.balance(&f.seller), 495);
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Released
-        );
-
-        // Legitimate single release fails fast
-        let result = f.client.try_release(&f.id, &f.secret);
-        assert!(result.is_err());
-    }
-
-    /// Distinct IDs never interfere: two trades with different IDs can
-    /// co-exist, be released independently, and neither affects the other.
-    #[test]
-    fn distinct_trade_ids_never_collide() {
-        let f = setup(2_000, 0);
-
-        let secret2 = BytesN::from_array(&f.env, &[42u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &f.seller, &f.buyer, &700, &secret_hash2, &100);
-
-        assert_eq!(f.token.balance(&f.contract_id), 1_200);
-
-        // Release the first — second must stay Locked.
-        f.client.release(&f.id, &f.secret);
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Released
-        );
-        assert_eq!(
-            f.client.get_trade(&id2).unwrap().status,
-            TradeStatus::Locked
-        );
-    }
-
-    /// Secret revelation in mempool does not compromise other trades.
-    /// Each trade has independent secret_hash; knowing one secret gives
-    /// zero advantage for any other trade.
-    #[test]
-    fn release_secret_revelation_does_not_compromise_other_trades() {
-        let f = setup(2_000, 100);
-        let seller2 = Address::generate(&f.env);
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-
-        // Attacker learns secret for trade 1 (from mempool observation)
-        // but cannot use it for trade 2
-        let bad_attempt = f.client.try_release(&id2, &f.secret); // wrong secret for id2
-        assert!(bad_attempt.is_err());
-
-        // Trade 2 still locked, funds safe
-        assert_eq!(
-            f.client.get_trade(&id2).unwrap().status,
-            TradeStatus::Locked
-        );
-        assert_eq!(f.token.balance(&seller2), 0);
-        assert_eq!(f.token.balance(&f.contract_id), 700);
-
-        // Legitimate release of trade 2 still works with its own secret
-        f.client.release(&id2, &secret2);
-        assert_eq!(f.token.balance(&seller2), 297); // 300 - 1%
-        assert_eq!(
-            f.client.get_trade(&id2).unwrap().status,
-            TradeStatus::Released
-        );
-        assert_eq!(f.token.balance(&f.contract_id), 0);
-    }
-
-    // ------------------------------------------------------------------
-    // Atomic release_batch() — all succeed or all fail.
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn release_batch_atomically_releases_3_valid_trades() {
-        let f = setup(2_000, 100); // 1% fee
-        let seller2 = Address::generate(&f.env);
-        let seller3 = Address::generate(&f.env);
-
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        let secret3 = BytesN::from_array(&f.env, &[9u8; 32]);
-        let secret_hash3 = f.env.crypto().sha256(&secret3.clone().into()).to_bytes();
-        let id3 = BytesN::from_array(&f.env, &[3u8; 32]);
-
-        // Lock 3 trades with different amounts.
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-        f.client
-            .lock(&id3, &seller3, &f.buyer, &200, &secret_hash3, &100);
-
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-            BatchReleaseItem {
-                id: id2.clone(),
-                secret: secret2.clone(),
-            },
-            BatchReleaseItem {
-                id: id3.clone(),
-                secret: secret3.clone(),
-            },
-        ];
-
-        // Call atomic release_batch — must succeed.
-        f.client.release_batch(&releases).unwrap();
-
-        // All 3 trades are Released.
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Released
-        );
-        assert_eq!(f.client.get_trade(&id2).unwrap().status, TradeStatus::Released);
-        assert_eq!(f.client.get_trade(&id3).unwrap().status, TradeStatus::Released);
-
-        // Verify exact payouts: 1% fee deducted from each seller.
-        assert_eq!(f.token.balance(&f.seller), 495); // 500 - 5
-        assert_eq!(f.token.balance(&seller2), 297); // 300 - 3
-        assert_eq!(f.token.balance(&seller3), 198); // 200 - 2
-
-        // Admin collected exact fees: 5 + 3 + 2 = 10.
-        assert_eq!(f.token.balance(&f.admin), 10);
-    }
-
-    #[test]
-    fn release_batch_reverts_entire_batch_on_invalid_secret() {
-        let f = setup(2_000, 100);
-        let seller2 = Address::generate(&f.env);
-
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        let wrong_secret = BytesN::from_array(&f.env, &[99u8; 32]);
-
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-            BatchReleaseItem {
-                id: id2.clone(),
-                secret: wrong_secret, // Invalid secret for id2
-            },
-        ];
-
-        // Atomic release_batch must fail and revert.
-        assert!(f.client.try_release_batch(&releases).is_err());
-
-        // Both trades remain Locked, untouched.
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Locked
-        );
-        assert_eq!(f.client.get_trade(&id2).unwrap().status, TradeStatus::Locked);
-
-        // No funds transferred.
-        assert_eq!(f.token.balance(&f.seller), 0);
-        assert_eq!(f.token.balance(&seller2), 0);
-        assert_eq!(f.token.balance(&f.admin), 0);
-    }
-
-    #[test]
-    fn release_batch_reverts_entire_batch_on_nonexistent_trade() {
-        let f = setup(2_000, 100);
-        let seller2 = Address::generate(&f.env);
-
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        let nonexistent_id = BytesN::from_array(&f.env, &[99u8; 32]);
-
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-            BatchReleaseItem {
-                id: nonexistent_id,
-                secret: f.secret.clone(),
-            },
-        ];
-
-        // Atomic release_batch must fail (trade doesn't exist).
-        assert!(f.client.try_release_batch(&releases).is_err());
-
-        // Both existing trades remain Locked.
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Locked
-        );
-        assert_eq!(f.client.get_trade(&id2).unwrap().status, TradeStatus::Locked);
-
-        // No funds transferred.
-        assert_eq!(f.token.balance(&f.seller), 0);
-        assert_eq!(f.token.balance(&seller2), 0);
-    }
-
-    #[test]
-    fn release_batch_reverts_on_trade_not_in_locked_state() {
-        let f = setup(2_000, 100);
-        let seller2 = Address::generate(&f.env);
-
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
-
-        // Release id2 first, moving it to Released state.
-        f.client.release(&id2, &secret2);
-
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-            BatchReleaseItem {
-                id: id2.clone(),
-                secret: secret2.clone(),
-            },
-        ];
-
-        // Atomic release_batch must fail (id2 is Released, not Locked).
-        assert!(f.client.try_release_batch(&releases).is_err());
-
-        // id1 must remain Locked (the batch reverted before releasing it).
-        assert_eq!(
-            f.client.get_trade(&f.id).unwrap().status,
-            TradeStatus::Locked
-        );
-        assert_eq!(f.client.get_trade(&id2).unwrap().status, TradeStatus::Released);
-
-        // Seller1 got no payout (batch failed).
-        assert_eq!(f.token.balance(&f.seller), 0);
-        // Seller2 was already released.
-        assert_eq!(f.token.balance(&seller2), 297);
-    }
-
-    #[test]
-    fn release_batch_matches_fee_accounting_to_individual_releases() {
-        let f = setup(1_000, 250); // 2.5% fee
-        let seller2 = Address::generate(&f.env);
-
-        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
-        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
-        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
-
-        // Set up two trades with different amounts.
-        f.client
-            .lock(&f.id, &f.seller, &f.buyer, &1000, &f.secret_hash, &100);
-        f.client
-            .lock(&id2, &seller2, &f.buyer, &400, &secret_hash2, &100);
-
-        // Release them atomically.
-        let releases = vec![
-            &f.env,
-            BatchReleaseItem {
-                id: f.id.clone(),
-                secret: f.secret.clone(),
-            },
-            BatchReleaseItem {
-                id: id2.clone(),
-                secret: secret2.clone(),
-            },
-        ];
-        f.client.release_batch(&releases).unwrap();
-
-        // Verify fees are calculated exactly as individual releases would:
-        // Trade 1: 1000 * 250 / 10_000 = 25 fee, payout 975
-        // Trade 2: 400 * 250 / 10_000 = 10 fee, payout 390
-        // Total fee: 35
-        assert_eq!(f.token.balance(&f.seller), 975);
-        assert_eq!(f.token.balance(&seller2), 390);
-        assert_eq!(f.token.balance(&f.admin), 35);
-    }
-}
 }
 
 #[cfg(test)]
@@ -2730,5 +2773,4 @@ mod issue280_bonding {
 mod property_test;
 
 #[cfg(test)]
-mod mev_protection;
-
+mod mev_protection_test;

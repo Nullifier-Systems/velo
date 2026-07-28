@@ -1,10 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    testutils::Address as _,
-    token, Address, Bytes, BytesN, Env,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, Bytes, BytesN, Env};
 
 struct Fixture {
     env: Env,
@@ -47,12 +44,12 @@ fn generate_proof(env: &Env, root: &BytesN<32>, nullifier_hash: &BytesN<32>) -> 
     let mut input = Bytes::new(env);
     input.append(&root.clone().into());
     input.append(&nullifier_hash.clone().into());
-    
+
     let tag = Bytes::from_slice(env, b"noir_zk_proof_v1");
     input.append(&tag);
-    
+
     let expected_hash = env.crypto().sha256(&input);
-    
+
     let mut proof = Bytes::new(env);
     proof.append(&expected_hash.into());
     proof.append(&Bytes::from_slice(env, &[0x42u8; 64]));
@@ -90,7 +87,9 @@ fn test_end_to_end_credential_buy_and_spend() {
     assert!(!f.client.is_nullifier_spent(&nullifier_hash));
 
     // 3. Spend Credential via ZK proof
-    let spend_res = f.client.spend_credential(&f.spender, &new_root, &nullifier_hash, &proof);
+    let spend_res = f
+        .client
+        .spend_credential(&f.spender, &new_root, &nullifier_hash, &proof);
     assert_eq!(spend_res, true);
 
     // 4. Confirm nullifier marked as spent
@@ -114,11 +113,15 @@ fn test_second_spend_attempt_rejected_via_nullifier() {
     let proof = generate_proof(&f.env, &root, &nullifier_hash);
 
     // First spend succeeds
-    let spend1 = f.client.spend_credential(&f.spender, &root, &nullifier_hash, &proof);
+    let spend1 = f
+        .client
+        .spend_credential(&f.spender, &root, &nullifier_hash, &proof);
     assert_eq!(spend1, true);
 
     // Second spend with the exact same nullifier fails
-    let spend2 = f.client.try_spend_credential(&f.spender, &root, &nullifier_hash, &proof);
+    let spend2 = f
+        .client
+        .try_spend_credential(&f.spender, &root, &nullifier_hash, &proof);
     assert_eq!(spend2, Err(Ok(Error::NullifierAlreadySpent)));
 }
 
@@ -130,7 +133,9 @@ fn test_unknown_merkle_root_rejected() {
     let nullifier_hash = BytesN::from_array(&f.env, &[0x11u8; 32]);
     let proof = generate_proof(&f.env, &fake_root, &nullifier_hash);
 
-    let res = f.client.try_spend_credential(&f.spender, &fake_root, &nullifier_hash, &proof);
+    let res = f
+        .client
+        .try_spend_credential(&f.spender, &fake_root, &nullifier_hash, &proof);
     assert_eq!(res, Err(Ok(Error::RootNotFound)));
 }
 
@@ -146,6 +151,8 @@ fn test_invalid_proof_rejected() {
     let nullifier_hash = BytesN::from_array(&f.env, &[0x22u8; 32]);
     let invalid_proof = Bytes::from_slice(&f.env, &[0x00u8; 64]);
 
-    let res = f.client.try_spend_credential(&f.spender, &root, &nullifier_hash, &invalid_proof);
+    let res = f
+        .client
+        .try_spend_credential(&f.spender, &root, &nullifier_hash, &invalid_proof);
     assert_eq!(res, Err(Ok(Error::InvalidProof)));
 }

@@ -39,7 +39,6 @@ fn setup_commit_reveal() -> CommitRevealFixture {
         t2_ledgers: 200,
     };
 
-
     // Initialize escrow
     client.initialize(&admin, &token_addr, &100); // 1% fee
 
@@ -64,8 +63,18 @@ fn commit_reveal_happy_path() {
     let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
 
     // Phase 1: Commit
-    let commitment_input = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt.clone());
-    let commitment_hash = f.env.crypto().sha256(&(commitment_input,).into()).to_bytes();
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input,).into())
+        .to_bytes();
 
     let result = f.client.try_commit_escrow(&commitment_hash, &amount);
     assert!(result.is_ok());
@@ -77,14 +86,9 @@ fn commit_reveal_happy_path() {
     // Phase 2: Reveal within window
     f.env.ledger().with_mut(|li| li.sequence_number += 10); // Advance 10 ledgers (within window)
 
-    let result = f.client.try_reveal_escrow(
-        &trade_id,
-        &f.seller,
-        &amount,
-        &secret_hash,
-        &salt,
-        &100,
-    );
+    let result =
+        f.client
+            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
     assert!(result.is_ok());
 
     // Verify collateral was refunded, amount moved to escrow
@@ -104,8 +108,18 @@ fn commit_prevents_replay_attacks() {
     let secret_hash = BytesN::from_array(&f.env, &[8u8; 32]);
     let salt = BytesN::from_array(&f.env, &[99u8; 32]);
 
-    let commitment_input = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt.clone());
-    let commitment_hash = f.env.crypto().sha256(&(commitment_input,).into()).to_bytes();
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input,).into())
+        .to_bytes();
 
     // First commit succeeds
     let result = f.client.try_commit_escrow(&commitment_hash, &amount);
@@ -125,8 +139,18 @@ fn reveal_window_closed_forfeits_collateral() {
     let salt = BytesN::from_array(&f.env, &[99u8; 32]);
     let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
 
-    let commitment_input = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt.clone());
-    let commitment_hash = f.env.crypto().sha256(&(commitment_input,).into()).to_bytes();
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input,).into())
+        .to_bytes();
 
     // Commit
     f.client.commit_escrow(&commitment_hash, &amount);
@@ -139,14 +163,9 @@ fn reveal_window_closed_forfeits_collateral() {
     f.env.ledger().with_mut(|li| li.sequence_number += 105);
 
     // Attempt reveal — should fail with RevealWindowClosed
-    let result = f.client.try_reveal_escrow(
-        &trade_id,
-        &f.seller,
-        &amount,
-        &secret_hash,
-        &salt,
-        &100,
-    );
+    let result =
+        f.client
+            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
     assert!(result.is_err());
 
     // Collateral is NOT refunded (forfeited to protocol)
@@ -164,22 +183,27 @@ fn reveal_window_not_open_prevents_early_reveal() {
     let salt = BytesN::from_array(&f.env, &[99u8; 32]);
     let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
 
-    let commitment_input = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt.clone());
-    let commitment_hash = f.env.crypto().sha256(&(commitment_input,).into()).to_bytes();
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input,).into())
+        .to_bytes();
 
     // Commit at ledger 1000
     f.client.commit_escrow(&commitment_hash, &amount);
 
     // Try to reveal immediately (before Nmin=2 ledgers)
     // Window opens at ledger 1002, so ledger 1000 or 1001 should fail
-    let result = f.client.try_reveal_escrow(
-        &trade_id,
-        &f.seller,
-        &amount,
-        &secret_hash,
-        &salt,
-        &100,
-    );
+    let result =
+        f.client
+            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
     assert!(result.is_err()); // RevealWindowNotOpen
 }
 
@@ -192,8 +216,18 @@ fn reveal_with_mismatched_parameters_fails() {
     let salt = BytesN::from_array(&f.env, &[99u8; 32]);
     let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
 
-    let commitment_input = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt.clone());
-    let commitment_hash = f.env.crypto().sha256(&(commitment_input,).into()).to_bytes();
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input,).into())
+        .to_bytes();
 
     f.client.commit_escrow(&commitment_hash, &amount);
 
@@ -233,10 +267,7 @@ fn collateral_amount_scales_with_trade_amount() {
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &f.contract_id,
             fn_name: &soroban_sdk::Symbol::new(&f.env, "commit_escrow"),
-            args: &(
-                BytesN::from_array(&f.env, &[2u8; 32]),
-                10_000_000i128,
-            ).into_val(&f.env),
+            args: &(BytesN::from_array(&f.env, &[2u8; 32]), 10_000_000i128).into_val(&f.env),
             sub_invokes: &vec![&f.env],
         },
     }]);
@@ -256,11 +287,31 @@ fn salt_collision_produces_different_commitment_hashes() {
     let salt1 = BytesN::from_array(&f.env, &[99u8; 32]);
     let salt2 = BytesN::from_array(&f.env, &[100u8; 32]);
 
-    let commitment_input1 = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt1.clone());
-    let commitment_hash1 = f.env.crypto().sha256(&(commitment_input1,).into()).to_bytes();
+    let commitment_input1 = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt1.clone(),
+    );
+    let commitment_hash1 = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input1,).into())
+        .to_bytes();
 
-    let commitment_input2 = (f.buyer.clone(), f.seller.clone(), amount, secret_hash.clone(), salt2.clone());
-    let commitment_hash2 = f.env.crypto().sha256(&(commitment_input2,).into()).to_bytes();
+    let commitment_input2 = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt2.clone(),
+    );
+    let commitment_hash2 = f
+        .env
+        .crypto()
+        .sha256(&(commitment_input2,).into())
+        .to_bytes();
 
     // Both commits should succeed (different salts → different hashes)
     let result1 = f.client.try_commit_escrow(&commitment_hash1, &amount);

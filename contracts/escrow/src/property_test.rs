@@ -26,7 +26,7 @@ fn setup(initial_balance: i128, fee_bps: u32) -> Fixture {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-    
+
     let keys: Vec<BytesN<32>> = Vec::new(&m.f.env);
     let arb_set = ArbitratorSet {
         keys,
@@ -187,7 +187,7 @@ proptest! {
         prop_assert!(fee >= 0);
         prop_assert!(payout >= 0);
         prop_assert_eq!(payout + fee, amount);
-        
+
         // Exact rounding check (truncation/dust favors the seller, i.e., actual fee <= ideal fee)
         prop_assert!(fee * 10_000 <= amount * fee_bps as i128);
         prop_assert!(amount * fee_bps as i128 - fee * 10_000 < 10_000);

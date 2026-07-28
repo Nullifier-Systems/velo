@@ -256,7 +256,13 @@ fn record_evm_reveal_sufficient_finality_no_extension() {
     let chain_id = 1u32; // Ethereum
 
     let extension = client
-        .record_evm_reveal(&evm_tx_hash, &secret, &evm_block_height, &chain_id, &evm_current_block)
+        .record_evm_reveal(
+            &evm_tx_hash,
+            &secret,
+            &evm_block_height,
+            &chain_id,
+            &evm_current_block,
+        )
         .unwrap();
 
     // Sufficient finality: no extension needed
@@ -275,7 +281,13 @@ fn record_evm_reveal_insufficient_finality_extends_timelock() {
     let chain_id = 1u32; // Ethereum
 
     let extension = client
-        .record_evm_reveal(&evm_tx_hash, &secret, &evm_block_height, &chain_id, &evm_current_block)
+        .record_evm_reveal(
+            &evm_tx_hash,
+            &secret,
+            &evm_block_height,
+            &chain_id,
+            &evm_current_block,
+        )
         .unwrap();
 
     // Insufficient finality: extend by MAX_REORG_WINDOW_LEDGERS (50)
@@ -289,7 +301,14 @@ fn extend_timelock_for_reorg_updates_timeout() {
 
     // Lock a trade
     let timeout_ledgers = 100u32;
-    client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &timeout_ledgers);
+    client.lock(
+        &f.id,
+        &f.seller,
+        &f.buyer,
+        &500,
+        &f.secret_hash,
+        &timeout_ledgers,
+    );
 
     let trade_before = client.get_trade(&f.id).unwrap();
     let original_timeout = trade_before.timeout_ledger;
@@ -359,7 +378,14 @@ fn simulate_10_block_evm_reorg_prevents_double_claim() {
 
     // Step 1: Lock trade on Soroban
     let timeout_ledgers = 200u32;
-    client.lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &timeout_ledgers);
+    client.lock(
+        &f.id,
+        &f.seller,
+        &f.buyer,
+        &5_000,
+        &f.secret_hash,
+        &timeout_ledgers,
+    );
     let trade_at_lock = client.get_trade(&f.id).unwrap();
     let original_timeout = trade_at_lock.timeout_ledger;
 
@@ -439,9 +465,9 @@ fn multiple_trades_selective_reorg_extension() {
         .record_evm_reveal(
             &evm_tx_hash2,
             &f.secret,
-            &900u32,    // Block 900
-            &1u32,      // Ethereum
-            &910u32,    // Only 10 blocks later (insufficient)
+            &900u32, // Block 900
+            &1u32,   // Ethereum
+            &910u32, // Only 10 blocks later (insufficient)
         )
         .unwrap();
     assert_eq!(extension2, 50);
@@ -470,7 +496,7 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
         .record_evm_reveal(
             &BytesN::from_array(&f.env, &[1u8; 32]),
             &BytesN::from_array(&f.env, &[7u8; 32]),
-            &1000u32, // Block 1000
+            &1000u32,  // Block 1000
             &42161u32, // Arbitrum
             &1050u32,  // Only 50 blocks (~2.5 min)
         )
