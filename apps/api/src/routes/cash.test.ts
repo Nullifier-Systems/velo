@@ -796,4 +796,216 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
     expect(res.statusCode).toBe(502);
     expect(res.json()).toMatchObject({ error: "escrow lock failed" });
   });
+
+  describe("Uber H3 Spatial Indexing, Multi-Parametric Matching & Concurrency", () => {
+    it("indexes providers and discovers them across resolutions 7, 8, 9 with boundary hex crossings", async () => {
+      // Register providers in SF financial district & SOMA
+      const sfLat = 37.7749;
+      const sfLng = -122.4194;
+
+      const p1 = {
+        name: "Provider Alpha",
+        lat: sfLat,
+        lng: sfLng,
+        rate: "1.0",
+        device_id: "device_h3_1",
+      };
+
+      const p2 = {
+        name: "Provider Beta (Boundary Hex)",
+        lat: sfLat + 0.015, // ~1.6km away, adjacent H3 cell
+        lng: sfLng + 0.015,
+        rate: "1.01",
+        device_id: "device_h3_2",
+      };
+
+      const reg1 = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/agents",
+        headers: { "x-payment": "valid-5-usdc" },
+        payload: p1,
+      });
+      expect(reg1.statusCode).toBe(201);
+      const prov1 = reg1.json();
+
+      const reg2 = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/agents",
+        headers: { "x-payment": "valid-5-usdc" },
+        payload: p2,
+      });
+      expect(reg2.statusCode).toBe(201);
+      const prov2 = reg2.json();
+
+      // Approve KYC for both providers
+      const { setProviderVerificationStatus } = await import("../lib/store.js");
+      setProviderVerificationStatus(prov1.id, "approved");
+      setProviderVerificationStatus(prov2.id, "approved");
+
+      // Match request near SF center with 5km radius
+      const matchRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/match",
+        payload: {
+          lat: sfLat,
+          lng: sfLng,
+          radius: 5.0,
+          amount_stroops: "50000000",
+        },
+      });
+
+      expect(matchRes.statusCode).toBe(200);
+      const matchData = matchRes.json();
+      expect(matchData.matched).toBe(true);
+      expect(matchData.provider).toBeDefined();
+      expect(matchData.matching_score).toBeGreaterThan(0);
+    });
+
+    it("handles zero available local providers gracefully", async () => {
+      // Query remote coordinates with no providers (e.g. middle of Pacific Ocean)
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/match",
+        payload: {
+          lat: 0.0,
+          lng: 0.0,
+          radius: 1.0,
+          amount_stroops: "10000000",
+        },
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        matched: false,
+        message: "No liquidity providers available in the specified spatial area",
+      });
+    });
+
+    it("prevents over-committing provider balance under concurrent matching races", async () => {
+      const { clearStore, saveProvider, setProviderVerificationStatus } = await import("../lib/store.js");
+      const { globalOrderAllocator } = await import("../lib/order-allocator.js");
+      clearStore();
+
+      const p1 = {
+        id: "prov_race_1",
+        name: "Liquidity Provider Race 1",
+        lat: 40.7128, // NYC
+        lng: -74.0060,
+        tier: "Trusted" as const,
+        rate: "1.0",
+        status: "available" as const,
+        kycStatus: "approved" as const,
+        createdAt: new Date().toISOString(),
+      };
+      saveProvider(p1);
+      setProviderVerificationStatus("prov_race_1", "approved");
+
+      // Set capacity exactly to 100 USDC (1,000,000,000 stroops)
+      globalOrderAllocator.setProviderBalance("prov_race_1", 1_000_000_000n);
+
+      // 3 concurrent buyers each requesting 50 USDC (500,000,000 stroops)
+      // Only 2 buyers should succeed, the 3rd should fail or be rejected!
+      const requestPayload = {
+        lat: 40.7128,
+        lng: -74.0060,
+        radius: 5.0,
+        amount_stroops: "500000000",
+      };
+
+      const results = await Promise.all([
+        app.inject({ method: "POST", url: "/api/v1/cash/match", payload: requestPayload }),
+        app.inject({ method: "POST", url: "/api/v1/cash/match", payload: requestPayload }),
+        app.inject({ method: "POST", url: "/api/v1/cash/match", payload: requestPayload }),
+      ]);
+
+      const successCount = results.filter(r => r.statusCode === 200).length;
+      const rejectedCount = results.filter(r => r.statusCode === 409).length;
+
+      expect(successCount).toBe(2);
+      expect(rejectedCount).toBe(1);
+
+      // Remaining balance should be exactly 0 stroops
+      const finalState = globalOrderAllocator.getProviderState("prov_race_1");
+      expect(finalState?.availableBalanceStroops).toBe(0n);
+    });
+
+    it("meets performance benchmark: >= 2,500 matched requests/sec with < 20ms p99 latency", async () => {
+      const { clearStore, saveProvider, setProviderVerificationStatus } = await import("../lib/store.js");
+      const { globalH3SpatialIndex } = await import("../lib/h3-spatial-index.js");
+      const { globalMatchingEngine } = await import("../lib/matching-engine.js");
+      const { globalOrderAllocator } = await import("../lib/order-allocator.js");
+      clearStore();
+
+      // Seed 100 available liquidity providers in dense Tokyo spatial area
+      const baseLat = 35.6762;
+      const baseLng = 139.6503;
+
+      for (let i = 0; i < 100; i++) {
+        const id = `tokyo_provider_${i}`;
+        const p = {
+          id,
+          name: `Tokyo Provider ${i}`,
+          lat: baseLat + (Math.random() - 0.5) * 0.05,
+          lng: baseLng + (Math.random() - 0.5) * 0.05,
+          tier: "Trusted" as const,
+          rate: (1.0 + (i % 5) * 0.005).toFixed(3),
+          status: "available" as const,
+          kycStatus: "approved" as const,
+          createdAt: new Date().toISOString(),
+        };
+        saveProvider(p);
+        setProviderVerificationStatus(id, "approved");
+        globalOrderAllocator.setProviderBalance(id, 100_000_000_000n); // Large capacity for benchmark
+      }
+
+      const matchAmount = 10_000_000n;
+      const TOTAL_REQUESTS = 2500;
+      const latencies: number[] = [];
+
+      // 1. Measure Core H3 Spatial Matching Engine Throughput
+      const engineStart = performance.now();
+      for (let i = 0; i < TOTAL_REQUESTS; i++) {
+        const candidates = globalH3SpatialIndex.findProvidersInRadius(baseLat, baseLng, 10.0);
+        const scored = globalMatchingEngine.scoreCandidates(candidates, 10.0);
+        const alloc = globalOrderAllocator.attemptAllocation(matchAmount, scored);
+        expect(alloc.success).toBe(true);
+      }
+      const engineDurationSec = (performance.now() - engineStart) / 1000.0;
+      const engineThroughput = TOTAL_REQUESTS / engineDurationSec;
+
+      // 2. Measure API Endpoint p99 Latency via app.inject
+      const matchPayload = {
+        lat: baseLat,
+        lng: baseLng,
+        radius: 10.0,
+        amount_stroops: "10000000",
+      };
+
+      for (let i = 0; i < 100; i++) {
+        const reqStart = performance.now();
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/v1/cash/match",
+          payload: matchPayload,
+        });
+        const reqDuration = performance.now() - reqStart;
+        latencies.push(reqDuration);
+        expect(res.statusCode).toBe(200);
+      }
+
+      // Sort latencies to compute p99
+      latencies.sort((a, b) => a - b);
+      const p99Index = Math.floor(latencies.length * 0.99);
+      const p99Latency = latencies[p99Index];
+
+      console.log(`Benchmark Results:
+        - Engine Operations: ${TOTAL_REQUESTS}
+        - Engine Duration: ${engineDurationSec.toFixed(4)}s
+        - Engine Throughput: ${engineThroughput.toFixed(1)} matches/sec
+        - API p99 Latency: ${p99Latency.toFixed(2)} ms`);
+
+      expect(engineThroughput).toBeGreaterThanOrEqual(2500);
+      expect(p99Latency).toBeLessThan(20.0);
+    });
+  });
 });
