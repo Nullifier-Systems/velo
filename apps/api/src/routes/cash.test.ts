@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { cashRoutes } from "./cash.js";
-import { lockEscrow, releaseEscrow, refundEscrow } from "../lib/stellar.js";
+import { lockEscrow, releaseEscrow, refundEscrow, getTradeOnChain } from "../lib/stellar.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { clearNotificationQueue, sentNotificationsQueue } from "../lib/notification.js";
 import { sendRefundAlert } from "../lib/webhook.js";
@@ -19,6 +19,7 @@ vi.mock("../lib/stellar.js", () => ({
   submitReleaseTx: vi.fn().mockResolvedValue({ hash: "dummy_release_hash" }),
   submitRefundTx: vi.fn().mockResolvedValue({ hash: "dummy_refund_hash" }),
   getLatestLedgerSequence: vi.fn().mockResolvedValue(1_000),
+  getTradeOnChain: vi.fn().mockResolvedValue(null),
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   CONTRACTS: { testnet: { escrow: "dummy_contract" } },
 }));
@@ -1007,5 +1008,68 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
       expect(engineThroughput).toBeGreaterThanOrEqual(2500);
       expect(p99Latency).toBeLessThan(20.0);
     });
+  it("POST /cash/request/:id/release recovers from transaction failure if on-chain status is released", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "e".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(releaseEscrow).mockRejectedValueOnce(new Error("Transaction rejected: ErrorCode 5"));
+    vi.mocked(getTradeOnChain).mockResolvedValueOnce({ status: "released" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/release`,
+      payload: { secret: "s".repeat(64) },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: tradeId, status: "released" });
+
+    const record = getCashRequest(tradeId);
+    expect(record?.status).toBe("released");
+  });
+
+  it("POST /cash/request/:id/refund recovers from transaction failure if on-chain status is refunded", async () => {
+    vi.mocked(lockEscrow).mockResolvedValue(1_000);
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "valid" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer:  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "e".repeat(64),
+      },
+    });
+    const tradeId = createRes.json().claim_url.split("/").pop();
+
+    vi.mocked(refundEscrow).mockRejectedValueOnce(new Error("Transaction rejected: ErrorCode 5"));
+    vi.mocked(getTradeOnChain).mockResolvedValueOnce({ status: "refunded" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/cash/request/${tradeId}/refund`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: tradeId, status: "refunded" });
+
+    const record = getCashRequest(tradeId);
+    expect(record?.status).toBe("refunded");
   });
 });
+

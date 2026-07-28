@@ -134,40 +134,28 @@ app.register(rateLimit, {
   },
 });
 
-app.setErrorHandler((error, request, reply) => {
-  const requestId = request.id as string;
-  if (error instanceof ApiError) {
-    return reply.status(error.statusCode).send(error.toJSON(requestId));
-  }
-  if ("validation" in error && Array.isArray((error as any).validation)) {
-    return reply.status(400).send({
-      error: "Request validation failed",
-      code: "VALIDATION_ERROR",
-      statusCode: 400,
-      retryable: false,
-      detail: (error as any).validation.map((v: any) => v.message).join("; "),
-      requestId,
-    });
-  }
-  request.log.error(error, "Unhandled error");
-  return reply.status(500).send({
-    error: "An unexpected error occurred",
-    code: "INTERNAL_ERROR",
-    statusCode: 500,
-    retryable: false,
-    requestId,
-  });
-});
-
 /**
  * Centralized error handler (#242).
  * Every ApiError thrown in a route handler is caught here and serialized
  * to the standard { error, code, statusCode, retryable, requestId } shape.
  */
-app.setErrorHandler((error, request, reply) => {
+app.setErrorHandler((error: any, request, reply) => {
   const requestId = request.id as string;
   if (error instanceof ApiError) {
     return reply.status(error.statusCode).send(error.toJSON(requestId));
+  }
+  // Rate limiting errors (429) from @fastify/rate-limit
+  if (error.statusCode === 429) {
+    return reply.status(429).send({
+      error: error.error || "Too Many Requests",
+      code: "RATE_LIMITED",
+      statusCode: 429,
+      retryable: true,
+      message: error.message,
+      retryAfter: error.retryAfter,
+      retryAfterSeconds: error.retryAfterSeconds,
+      requestId,
+    });
   }
   // Fastify validation errors (schema-driven)
   if ("validation" in error && Array.isArray((error as any).validation)) {
