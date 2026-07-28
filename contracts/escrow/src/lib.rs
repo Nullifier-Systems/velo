@@ -239,21 +239,19 @@ fn bond_params(env: &Env) -> BondParams {
 }
 
 // Invariant: funds can only ever leave this contract's balance through
-// exactly four paths, each gated by its own independent check on `status`:
-//   - release()                    requires status == Locked
-//   - refund()                     requires status == Locked
-//   - resolve_dispute()            requires status == Disputed
-//   - refund_after_dispute_timeout() requires status == Disputed
-// Every one of these paths flips `status` away from its required starting
-// value *before* any token transfer (CEI pattern), and every mutating path
-// re-reads `status` from persistent storage inside the same invocation, so
-// there is no way to race two paths against the same trade: whichever runs
-// first moves `status` out of the state the other requires, and Soroban
-// invocations are atomic, so a mid-call failure can never leave `status`
-// updated without the matching transfer(s) having gone through (or vice
-// versa). `raise_dispute()` only moves Locked -> Disputed and never touches
-// tokens, so it cannot open a fifth path. No other function in this
-// contract calls `token::Client::transfer`.
+// the gated exit paths below, each checked against `status`:
+//   - release() / batch_release() / release_batch()  require status == Locked
+//   - refund()                                       requires status == Locked
+//   - resolve_dispute()                              requires status == Disputed
+//   - fallback_after_timeout()                       requires status == Disputed
+// Every exit path flips `status` away from its required starting value
+// *before* any token transfer (CEI). Inflows (`lock`, `commit_escrow`,
+// `reveal_escrow`, `stake_arbitrator`) likewise write bookkeeping before
+// calling `transfer`, so a hypothetical reentrant token callback would
+// already observe the updated state. Soroban currently rejects contract
+// re-entry at the host ("Contract re-entry is not allowed"); combined with
+// invocation atomicity, a trapping transfer rolls back any status flip in
+// the same call. See docs/escrow-sep41-reentrancy-audit.md (issue #273).
 #[contract]
 pub struct EscrowContract;
 
@@ -328,15 +326,19 @@ impl EscrowContract {
     /// This bond is slashed if the arbitrator fails to act during their assigned epoch.
     pub fn stake_arbitrator(env: Env, arbitrator: Address, amount: i128) {
         arbitrator.require_auth();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&arbitrator, &env.current_contract_address(), &amount);
-
+        if amount <= 0 {
+            panic_with_error(&env, Error::InvalidAmount);
+        }
+        // CEI (issue #273): credit stake bookkeeping before the external pull.
         let key = DataKey::ArbitratorStake(arbitrator.clone());
         let current_stake: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         env.storage()
             .persistent()
             .set(&key, &(current_stake + amount));
+
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&arbitrator, &env.current_contract_address(), &amount);
     }
 
     /// Read-only accessor for a trade's current state. Returns `None` if the id
@@ -365,10 +367,11 @@ impl EscrowContract {
             .get::<DataKey, i128>(&DataKey::Bond(id.clone()))
         {
             if bond > 0 {
+                // CEI (issue #273): clear bond bookkeeping before the refund transfer.
+                env.storage().instance().remove(&DataKey::Bond(id.clone()));
                 let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
                 let client = token::Client::new(env, &token_addr);
                 client.transfer(&env.current_contract_address(), buyer, &bond);
-                env.storage().instance().remove(&DataKey::Bond(id.clone()));
             }
         }
         let params = bond_params(env);
@@ -926,21 +929,12 @@ impl EscrowContract {
             return Err(Error::CommitmentAlreadyExists);
         }
 
-        // Calculate and collect collateral bond (5% of amount)
+        // Calculate collateral bond (5% of amount)
         let collateral = (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000;
 
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(Error::NotInitialized)?;
-
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&buyer, &env.current_contract_address(), &collateral);
-
-        // Store commitment state
+        // CEI (issue #273): record commitment + liquidity bookkeeping before pull.
         let commitment_state = CommitmentState {
-            buyer,
+            buyer: buyer.clone(),
             collateral,
             amount,
             committed_at_ledger: env.ledger().sequence(),
@@ -957,7 +951,6 @@ impl EscrowContract {
             COMMIT_REVEAL_WINDOW_MAX_LEDGERS + 100,
         );
 
-        // Update accumulated locked liquidity for dynamic fee calculation
         let current_liquidity: i128 = env
             .storage()
             .instance()
@@ -966,6 +959,15 @@ impl EscrowContract {
         env.storage()
             .instance()
             .set(&DataKey::LockedLiquidity, &(current_liquidity + amount));
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&buyer, &env.current_contract_address(), &collateral);
 
         env.events()
             .publish((symbol_short(&env, "commit"), commitment_hash), amount);
@@ -1058,11 +1060,28 @@ impl EscrowContract {
             return Err(Error::TradeAlreadyExists);
         }
 
+        let timeout_ledger = current_ledger + timeout_ledgers;
+        let state = TradeState {
+            seller,
+            buyer: buyer.clone(),
+            amount,
+            secret_hash,
+            timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+
+        // CEI (issue #273): lock trade + clear commitment before token movements.
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+        env.storage().persistent().remove(&commitment_key);
+
         let token_addr: Address = env
             .storage()
             .instance()
             .get(&DataKey::Token)
-            .unwrap_or_else(|| Err(Error::NotInitialized))?;
+            .ok_or(Error::NotInitialized)?;
 
         let client = token::Client::new(&env, &token_addr);
 
@@ -1075,24 +1094,6 @@ impl EscrowContract {
             &buyer,
             &commitment_state.collateral,
         );
-
-        let timeout_ledger = current_ledger + timeout_ledgers;
-        let state = TradeState {
-            seller,
-            buyer,
-            amount,
-            secret_hash,
-            timeout_ledger,
-            status: TradeStatus::Locked,
-        };
-
-        env.storage().persistent().set(&key, &state);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, 100_000, 100_000);
-
-        // Remove commitment from storage
-        env.storage().persistent().remove(&commitment_key);
 
         // Note: LockedLiquidity already incremented during commit; stays until release/refund
         // (This will be decremented separately in release/refund logic if implemented)
@@ -1218,32 +1219,31 @@ impl Htlc for EscrowContract {
             .get(&DataKey::Token)
             .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized));
 
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&buyer, &env.current_contract_address(), &amount);
-
-        // Issue #280: an "unestablished" buyer posts a refundable bond.
-        let params = bond_params(&env);
-        if params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold {
-            client.transfer(&buyer, &env.current_contract_address(), &params.bond_amount);
-            env.storage()
-                .instance()
-                .set(&DataKey::Bond(id.clone()), &params.bond_amount);
-        }
-
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
         let state = TradeState {
             seller,
-            buyer,
+            buyer: buyer.clone(),
             amount,
             secret_hash,
             timeout_ledger,
             status: TradeStatus::Locked,
         };
+
+        // CEI (issue #273): write trade (+ optional bond) bookkeeping before pulls.
         env.storage().persistent().set(&key, &state);
         env.storage()
             .persistent()
             .extend_ttl(&key, 100_000, 100_000);
+
+        let params = bond_params(&env);
+        let need_bond =
+            params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold;
+        if need_bond {
+            env.storage()
+                .instance()
+                .set(&DataKey::Bond(id.clone()), &params.bond_amount);
+        }
 
         // Issue #283: Record trade in sequential index for reputation scanning.
         let counter: u32 = env
@@ -1258,6 +1258,18 @@ impl Htlc for EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::TradeId(next_idx), &id);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&buyer, &env.current_contract_address(), &amount);
+
+        // Issue #280: an "unestablished" buyer posts a refundable bond.
+        if need_bond {
+            client.transfer(
+                &buyer,
+                &env.current_contract_address(),
+                &params.bond_amount,
+            );
+        }
 
         env.events()
             .publish((symbol_short(&env, "locked"), id), amount);
@@ -2842,3 +2854,9 @@ mod property_test;
 
 #[cfg(test)]
 mod mev_protection_test;
+
+#[cfg(test)]
+mod malicious_token;
+
+#[cfg(test)]
+mod reentrancy_test;

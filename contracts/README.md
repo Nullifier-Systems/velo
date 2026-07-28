@@ -43,6 +43,14 @@ cd contracts
 cargo test -p escrow -- --ignored
 ```
 
+SEP-41 reentrancy / composability adversarial tests (issue #273) live in
+`escrow/src/reentrancy_test.rs` with analysis in
+[`docs/escrow-sep41-reentrancy-audit.md`](../docs/escrow-sep41-reentrancy-audit.md):
+
+```bash
+cargo test -p escrow --lib reentrancy_test
+```
+
 This runs:
 - **`randomized_actions_preserve_accounting_and_transition_graph`** — random lock/release/refund/dispute sequences
 - **`refunds_before_timeout_never_succeed`** — timelock enforcement
