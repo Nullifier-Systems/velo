@@ -60,10 +60,10 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
 
       const missed = await infra.getMissedMessages(TRADE_ID, {}, BUYER);
       expect(missed.length).toBe(2);
-      expect(missed[0].clock.buyer).toBe(1);
-      expect(missed[0].clock.seller).toBeUndefined(); // Not set yet
-      expect(missed[1].clock.buyer).toBe(1);
-      expect(missed[1].clock.seller).toBe(1);
+      expect(missed[0].clock[BUYER]).toBe(1);
+      expect(missed[0].clock[SELLER]).toBeUndefined(); // Not set yet
+      expect(missed[1].clock[BUYER]).toBe(1);
+      expect(missed[1].clock[SELLER]).toBe(1);
     });
   });
 
@@ -160,14 +160,14 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
 
       // Verify causal order: buyer-1 < seller-1 < buyer-2
       expect(recovered.length).toBe(3);
-      expect(recovered[0].clock.buyer).toBe(1);
-      expect(recovered[0].clock.seller).toBeUndefined();
+      expect(recovered[0].clock[BUYER]).toBe(1);
+      expect(recovered[0].clock[SELLER]).toBeUndefined();
 
-      expect(recovered[1].clock.buyer).toBe(1);
-      expect(recovered[1].clock.seller).toBe(1);
+      expect(recovered[1].clock[BUYER]).toBe(1);
+      expect(recovered[1].clock[SELLER]).toBe(1);
 
-      expect(recovered[2].clock.buyer).toBe(2);
-      expect(recovered[2].clock.seller).toBe(1);
+      expect(recovered[2].clock[BUYER]).toBe(2);
+      expect(recovered[2].clock[SELLER]).toBe(1);
     });
 
     it("prevents out-of-order delivery", async () => {
@@ -181,8 +181,8 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
 
       // If client has msg1Clock, msg3Clock is not ready to deliver yet
       // (client hasn't processed msg2)
-      const canDeliverMsg3 = msg3Clock.buyer === (msg1Clock.buyer ?? 0) + 2;
-      expect(canDeliverMsg3).toBe(true); // Skipped msg2
+      const canDeliverMsg3 = msg3Clock[BUYER] === (msg1Clock[BUYER] ?? 0) + 1;
+      expect(canDeliverMsg3).toBe(false); // Skipped msg2
     });
   });
 
