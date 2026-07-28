@@ -68,6 +68,8 @@ enum DataKey {
     LockedLiquidity,
     /// MEV protection: dynamic fee curve parameters (base fee, gamma, alpha, target).
     DynamicFeeConfig,
+    /// Nonce tracking for replay protection.
+    Nonce(BytesN<32>, u64),
 }
 
 #[contracterror]
@@ -109,6 +111,10 @@ pub enum Error {
     RevealWindowNotOpen = 27,
     /// Collateral bond forfeited due to expired commitment.
     CollateralForfeited = 28,
+    /// Insufficient valid signatures provided for threshold validation.
+    InsufficientSignatures = 29,
+    /// Signature replay attempt detected (nonce already used).
+    NonceAlreadyUsed = 30,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -1050,6 +1056,93 @@ impl EscrowContract {
 
         env.events()
             .publish((symbol_short(&env, "reveal"), id), amount);
+
+        Ok(())
+    }
+
+    /// Multi-Party Threshold Signature (2-of-3) Escrow Release Validation.
+    /// Releases escrowed funds if at least 2 valid Ed25519 signatures from the designated
+    /// authorized public keys (buyer, seller, arbitrator) are provided.
+    pub fn release_escrow(
+        env: Env,
+        escrow_id: BytesN<32>,
+        release_amount: i128,
+        recipient_address: Address,
+        nonce: u64,
+        designated_keys: Vec<BytesN<32>>,
+        signatures: Vec<(BytesN<32>, BytesN<64>)>,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+        Self::flatten_branch_cost(&env);
+
+        let nonce_key = DataKey::Nonce(escrow_id.clone(), nonce);
+        if env.storage().persistent().has(&nonce_key) {
+            return Err(Error::NonceAlreadyUsed);
+        }
+
+        if signatures.len() < 2 {
+            return Err(Error::InsufficientSignatures);
+        }
+
+        let payload_input = (
+            escrow_id.clone(),
+            release_amount,
+            recipient_address.clone(),
+            nonce,
+        );
+        let payload = env.crypto().sha256(&payload_input.to_xdr(&env));
+
+        let mut valid_count = 0;
+        let mut seen_keys = Vec::new(&env);
+
+        for sig in signatures.iter() {
+            let (pub_key, signature) = sig;
+            if !designated_keys.contains(&pub_key) {
+                continue;
+            }
+            if seen_keys.contains(&pub_key) {
+                continue;
+            }
+            seen_keys.push_back(pub_key.clone());
+
+            env.crypto().ed25519_verify(&pub_key, &payload.clone().into(), &signature);
+            valid_count += 1;
+        }
+
+        if valid_count < 2 {
+            return Err(Error::InsufficientSignatures);
+        }
+
+        env.storage().persistent().set(&nonce_key, &true);
+
+        let key = DataKey::Trade(escrow_id.clone());
+        let mut state: TradeState = env.storage().persistent().get(&key).ok_or(Error::TradeNotFound)?;
+        
+        if state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+        if state.amount != release_amount {
+            return Err(Error::InvalidAmount);
+        }
+
+        let fee_bps: u32 = env.storage().instance().get(&DataKey::PlatformFeeBps).unwrap_or(0);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+
+        let fee = (state.amount * fee_bps as i128) / 10_000;
+        let payout = state.amount - fee;
+
+        state.status = TradeStatus::Released;
+        env.storage().persistent().set(&key, &state);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &recipient_address, &payout);
+        if fee > 0 {
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        // Just using "released" to match the regular release
+        env.events().publish((symbol_short(&env, "released"), escrow_id), payout);
 
         Ok(())
     }

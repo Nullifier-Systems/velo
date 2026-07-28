@@ -311,3 +311,172 @@ fn insufficient_signers_rejected() {
     let too_few = Vec::from_array(&f.env, [s1, s2]);
     f.client.set_platform_fee(&400, &too_few);
 }
+
+// ---------------------------------------------------------------------------
+// Threshold Release Escrow tests
+// ---------------------------------------------------------------------------
+
+use ed25519_dalek::{Signer, SigningKey};
+use rand::rngs::OsRng;
+use soroban_sdk::xdr::ToXdr;
+
+fn generate_keypair(env: &Env) -> (SigningKey, BytesN<32>) {
+    let mut csprng = OsRng;
+    let signing_key = SigningKey::generate(&mut csprng);
+    let pub_key_bytes = signing_key.verifying_key().to_bytes();
+    (signing_key, BytesN::from_array(env, &pub_key_bytes))
+}
+
+fn sign_payload(env: &Env, signing_key: &SigningKey, payload: &BytesN<32>) -> BytesN<64> {
+    let signature = signing_key.sign(&payload.to_array());
+    BytesN::from_array(env, &signature.to_bytes())
+}
+
+#[test]
+fn test_release_escrow_threshold_success() {
+    let f = setup();
+    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
+    let (seller_sk, seller_pk) = generate_keypair(&f.env);
+    let (arb_sk, arb_pk) = generate_keypair(&f.env);
+
+    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    
+    let nonce = 1u64;
+    let payload_input = (
+        f.id.clone(),
+        500i128,
+        f.seller.clone(),
+        nonce,
+    );
+    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+
+    let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
+    let sig2 = sign_payload(&f.env, &arb_sk, &payload);
+
+    let signatures = vec![&f.env, (buyer_pk, sig1), (arb_pk, sig2)];
+
+    f.client.release_escrow(
+        &f.id,
+        &500,
+        &f.seller,
+        &nonce,
+        &designated_keys,
+        &signatures,
+    );
+
+    let fee = (500 * 50) / 10_000;
+    let payout = 500 - fee;
+    assert_eq!(f.token.balance(&f.seller), payout);
+    assert_eq!(f.token.balance(&f.admin), fee);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    
+    let trade = f.client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, TradeStatus::Released);
+}
+
+#[test]
+#[should_panic]
+fn test_release_escrow_invalid_signature_rejection() {
+    let f = setup();
+    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
+    let (_, seller_pk) = generate_keypair(&f.env);
+    let (_, arb_pk) = generate_keypair(&f.env);
+
+    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    
+    let nonce = 1u64;
+    let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
+    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+
+    let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
+    
+    // create an invalid signature
+    let invalid_sig = BytesN::from_array(&f.env, &[0u8; 64]);
+
+    let signatures = vec![&f.env, (buyer_pk, sig1), (seller_pk, invalid_sig)];
+
+    f.client.release_escrow(
+        &f.id,
+        &500,
+        &f.seller,
+        &nonce,
+        &designated_keys,
+        &signatures,
+    );
+}
+
+#[test]
+#[should_panic(expected = "30")]
+fn test_release_escrow_replay_rejection() {
+    let f = setup();
+    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
+    let (seller_sk, seller_pk) = generate_keypair(&f.env);
+    let (_, arb_pk) = generate_keypair(&f.env);
+
+    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    
+    let nonce = 1u64;
+    let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
+    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+
+    let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
+    let sig2 = sign_payload(&f.env, &seller_sk, &payload);
+
+    let signatures = vec![&f.env, (buyer_pk.clone(), sig1.clone()), (seller_pk.clone(), sig2.clone())];
+
+    f.client.release_escrow(
+        &f.id,
+        &500,
+        &f.seller,
+        &nonce,
+        &designated_keys,
+        &signatures,
+    );
+
+    // Attempt replay
+    f.client.release_escrow(
+        &f.id,
+        &500,
+        &f.seller,
+        &nonce,
+        &designated_keys,
+        &signatures,
+    );
+}
+
+#[test]
+#[should_panic(expected = "29")]
+fn test_release_escrow_insufficient_signatures() {
+    let f = setup();
+    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
+    let (_, seller_pk) = generate_keypair(&f.env);
+    let (_, arb_pk) = generate_keypair(&f.env);
+
+    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    
+    let nonce = 1u64;
+    let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
+    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+
+    let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
+    
+    // Provide only 1 valid signature
+    let signatures = vec![&f.env, (buyer_pk, sig1)];
+
+    f.client.release_escrow(
+        &f.id,
+        &500,
+        &f.seller,
+        &nonce,
+        &designated_keys,
+        &signatures,
+    );
+}
