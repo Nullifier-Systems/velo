@@ -1070,6 +1070,7 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
 
     const record = getCashRequest(tradeId);
     expect(record?.status).toBe("refunded");
-  });
+});
+});
 });
 

@@ -7,6 +7,7 @@ import {
   compareClocks,
   canDeliver,
   normalizeClock,
+  type VectorClock,
 } from "./vector-clock.js";
 
 describe("Vector Clock Operations", () => {
@@ -230,7 +231,7 @@ describe("Vector Clock Operations", () => {
 
       // Parse back and verify they can be re-sorted
       const parsed = shuffled.map(
-        ([json]) => JSON.parse(json) as typeof compareClocks,
+        ([json]) => JSON.parse(json) as VectorClock,
       );
       const resorted = parsed.sort(compareClocks);
 
