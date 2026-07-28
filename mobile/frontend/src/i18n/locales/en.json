@@ -69,6 +69,8 @@
     "confirmHandoff": "Confirm hand-off (release funds)",
     "releaseFailed": "release failed",
     "somethingWentWrong": "something went wrong",
+    "pausedTitle": "New trades are paused",
+    "pausedBody": "Velo has temporarily stopped new cash requests. This existing claim can still be released or refunded — your locked funds are not trapped.",
     "waitNormal": "Locking escrow on Stellar…",
     "waitLonger": "Taking a bit longer than usual — the RPC node may be busy. Your funds are safe.",
     "waitStill": "Still working. The transaction has been submitted; we're waiting for on-chain confirmation.",

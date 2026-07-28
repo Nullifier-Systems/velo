@@ -7,6 +7,7 @@ import {
   fetchCashRequest,
   releaseCashRequest,
   refundCashRequest,
+  fetchEscrowPauseState,
   formatStroops,
   formatRefundCountdown,
   shortAddress,
@@ -80,6 +81,7 @@ export default function ClaimQR() {
   const [releasing, setReleasing] = useState(false);
   const [refunding, setRefunding] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+  const [escrowPaused, setEscrowPaused] = useState(false);
   const [releaseElapsed, setReleaseElapsed] = useState(0);
   const releaseStartRef = useRef<number | null>(null);
   const releaseTickRef  = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -132,16 +134,28 @@ export default function ClaimQR() {
     }
   }, [id, t]);
 
+  const loadPauseState = useCallback(async () => {
+    try {
+      const pause = await fetchEscrowPauseState();
+      setEscrowPaused(pause.paused);
+    } catch {
+      // Best-effort: claim flow for existing trades must keep working.
+      setEscrowPaused(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadPauseState();
     const interval = setInterval(() => {
       setStatus((current) => {
         if (current?.status === "locked" || current?.status === "expired") load();
         return current;
       });
+      loadPauseState();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadPauseState]);
 
   // Tick the wall-clock estimate between API polls so the countdown feels live.
   useEffect(() => {
@@ -277,6 +291,13 @@ export default function ClaimQR() {
             {statusLabel(status.status)}
           </span>
         </div>
+
+        {escrowPaused && (
+          <div className="claim-ticket__pause-banner" role="status" aria-live="polite">
+            <strong>{t("claim.pausedTitle")}</strong>
+            <p>{t("claim.pausedBody")}</p>
+          </div>
+        )}
 
         <div className="claim-ticket__qr-window">
           {status.status === 'locked' && qrPayload ? (

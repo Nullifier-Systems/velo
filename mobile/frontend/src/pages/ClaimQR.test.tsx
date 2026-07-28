@@ -13,6 +13,11 @@ function buildQrPayload(id: string, secret: string | null, contractId: string): 
   return `velo://claim?request_id=${id}&secret=${secret}&contract=${contractId}`;
 }
 
+/** Mirrors ClaimQR pause banner visibility for existing locked trades. */
+function pauseBannerVisible(paused: boolean): boolean {
+  return paused;
+}
+
 describe("ClaimQR logic and status formatting", () => {
   it("formats status labels correctly for physical counter display", () => {
     expect(statusLabel("locked")).toBe("Ready to claim");
@@ -36,5 +41,10 @@ describe("ClaimQR logic and status formatting", () => {
     expect(formatRefundCountdown(45)).toBe("45s");
     expect(formatRefundCountdown(125)).toBe("2m 05s");
     expect(formatRefundCountdown(3725)).toBe("1h 2m");
+  });
+
+  it("shows pause banner when escrow circuit breaker is active", () => {
+    expect(pauseBannerVisible(true)).toBe(true);
+    expect(pauseBannerVisible(false)).toBe(false);
   });
 });

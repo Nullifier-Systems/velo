@@ -206,6 +206,20 @@ export function formatRefundCountdown(totalSeconds: number): string {
   return `${secs}s`;
 }
 
+export interface EscrowPauseState {
+  paused: boolean;
+  pause_effective_ledger: number | null;
+  pause_delay_ledgers: number;
+  message: string | null;
+}
+
+/** Reads the on-chain emergency pause / circuit breaker state (issue #266). */
+export async function fetchEscrowPauseState(): Promise<EscrowPauseState> {
+  const res = await fetch(`${API_BASE}/api/v1/cash/pause`);
+  if (!res.ok) throw new Error(`pause status failed (${res.status})`);
+  return res.json();
+}
+
 /** Truncates a long address/ID to its first and last 5 characters. */
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
