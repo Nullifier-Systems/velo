@@ -674,6 +674,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "escrow-fuzz"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand 0.8.7",
+ "sha2",
+]
+
+[[package]]
 name = "ethnum"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
