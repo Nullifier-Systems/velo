@@ -176,7 +176,7 @@ impl AtomicSwapContract {
         let confirmations = evm_current_block.saturating_sub(evm_block_height);
 
         // Get required finality for this chain
-        let required_finality = Self::get_chain_finality(&env, chain_id)?;
+        let required_finality = Self::get_chain_finality(env.clone(), chain_id)?;
 
         // If confirmations below threshold, signal reorg risk and extend timelock
         let timelock_extension = if confirmations < required_finality {
@@ -226,7 +226,7 @@ impl AtomicSwapContract {
             return Err(Error::TradeNotFound);
         }
 
-        let current_ledger = env.ledger().sequence();
+        let _current_ledger = env.ledger().sequence();
         let old_timeout = state.timeout_ledger;
 
         // Extend by MAX_REORG_WINDOW, but prevent extending past a reasonable maximum
