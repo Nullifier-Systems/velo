@@ -364,8 +364,47 @@ describe("cashRoutes", () => {
     expect(getResponse.json()).toMatchObject({
       status: "expired",
       timeoutLedger: 1_100,
+      latestLedger: 1_100,
+      ledgersUntilRefund: 0,
+      refundAvailable: true,
+      estimatedSecondsUntilRefund: 0,
     });
     expect(refundEscrow).not.toHaveBeenCalled();
+  });
+
+  it("returns refund countdown while a locked request is still before timeout", async () => {
+    const { getLatestLedgerSequence } = await import("../lib/stellar.js");
+    const ledgerMock = vi.mocked(getLatestLedgerSequence);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/cash/request",
+      headers: { "x-payment": "test" },
+      payload: {
+        seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        amount_stroops: "10000000",
+        secret_hash: "c".repeat(64),
+      },
+    });
+    const tradeId = createResponse.json().claim_url.split("/").pop();
+
+    // lockEscrow mock returns ledger 1000 → timeoutLedger 1100
+    ledgerMock.mockResolvedValueOnce(1_050);
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/cash/request/${tradeId}`,
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({
+      status: "locked",
+      timeoutLedger: 1_100,
+      latestLedger: 1_050,
+      ledgersUntilRefund: 50,
+      refundAvailable: false,
+      estimatedSecondsUntilRefund: 300,
+    });
   });
 
   it("allows refund to be invoked independently after expiration", async () => {

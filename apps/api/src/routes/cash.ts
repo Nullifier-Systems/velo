@@ -16,7 +16,10 @@ import {
   getLatestLedgerSequence,
   getTradeOnChain,
 } from "../lib/stellar.js";
-import { CASH_DEFAULT_TIMEOUT_LEDGERS } from "../lib/timeouts.js";
+import {
+  CASH_DEFAULT_TIMEOUT_LEDGERS,
+  buildRefundCountdown,
+} from "../lib/timeouts.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
 import { sendRefundAlert } from "../lib/webhook.js";
 import { notifyTradeStatus } from "./chat.js";
@@ -706,13 +709,32 @@ export async function cashRoutes(app: FastifyInstance) {
         throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");
         return;
       }
+      let latestLedger: number | null = null;
       try {
-        expireCashRequest(record, await getLatestLedgerSequence());
+        latestLedger = await getLatestLedgerSequence();
+        expireCashRequest(record, latestLedger);
       } catch (err) {
         req.log.warn(err, "could not check cash request expiry");
       }
       const { secretHex: _omit, ...safe } = record;
-      return safe;
+      const showCountdown =
+        latestLedger !== null &&
+        record.timeoutLedger !== undefined &&
+        (record.status === "locked" || record.status === "expired");
+      if (!showCountdown) {
+        return safe;
+      }
+      const countdown = buildRefundCountdown(
+        record.timeoutLedger!,
+        latestLedger!,
+      );
+      return {
+        ...safe,
+        latestLedger: countdown.latestLedger,
+        ledgersUntilRefund: countdown.ledgersUntilRefund,
+        refundAvailable: countdown.refundAvailable,
+        estimatedSecondsUntilRefund: countdown.estimatedSecondsUntilRefund,
+      };
     },
   );
 

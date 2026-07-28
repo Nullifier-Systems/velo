@@ -237,7 +237,9 @@ html.dark {
 .claim-ticket__actions {
   padding: 0 24px 16px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .claim-ticket__chat-link {
@@ -260,6 +262,42 @@ html.dark {
 
 .claim-ticket__chat-link:hover {
   opacity: 0.85;
+}
+
+.claim-ticket__refund-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 24px;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--stamp-amber);
+  background: transparent;
+  border: 1px solid var(--stamp-amber);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.claim-ticket__refund-button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.claim-ticket__refund-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.claim-ticket__countdown {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  text-align: right;
+  color: var(--stamp-amber);
 }
 
 .claim-ticket__debug {
