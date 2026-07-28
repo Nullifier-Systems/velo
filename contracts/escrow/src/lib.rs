@@ -44,7 +44,10 @@ enum DataKey {
     Trade(BytesN<32>),
     Signers,
     Threshold,
+    /// Whether an admin has armed a pause (may still be in the delay window).
     Paused,
+    /// Ledger sequence at which an armed pause becomes effective.
+    PauseEffectiveLedger,
     ArbitratorSet,
     ArbitratorStake(Address),
     /// Dispute state information tracking when the dispute started.
@@ -69,6 +72,13 @@ enum DataKey {
     /// MEV protection: dynamic fee curve parameters (base fee, gamma, alpha, target).
     DynamicFeeConfig,
 }
+
+/// Ledgers that must elapse after `pause()` before `lock()` is rejected.
+///
+/// Long enough that a pause cannot front-run one specific pending lock in the
+/// mempool; short enough to still act as a real emergency circuit breaker
+/// (~50s at Stellar's ~5s ledger close time).
+pub const PAUSE_DELAY_LEDGERS: u32 = 10;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -291,6 +301,8 @@ impl EscrowContract {
         env.storage()
             .instance()
             .set(&DataKey::PlatformFeeBps, &platform_fee_bps);
+        // Circuit breaker defaults off — new locks are allowed until admin arms a pause.
+        env.storage().instance().set(&DataKey::Paused, &false);
         env.storage()
             .instance()
             .set(&DataKey::ArbitratorSet, &arbitrator_set);
@@ -370,6 +382,32 @@ impl EscrowContract {
 
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
         env.storage().persistent().get(&DataKey::Trade(id))
+    }
+
+    /// Whether `lock()` is currently rejected (pause armed and delay elapsed).
+    pub fn is_paused(env: Env) -> bool {
+        is_effectively_paused(&env)
+    }
+
+    /// Ledger at which a scheduled pause becomes effective, or `None` if no
+    /// pause is armed.
+    pub fn pause_effective_ledger(env: Env) -> Option<u32> {
+        let armed: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if !armed {
+            return None;
+        }
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseEffectiveLedger)
+    }
+
+    /// Fixed delay (in ledgers) between `pause()` and effective lock blocking.
+    pub fn pause_delay_ledgers(_env: Env) -> u32 {
+        PAUSE_DELAY_LEDGERS
     }
 
     /// Issue #283: Get the total number of trades recorded.
@@ -693,18 +731,29 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Pause the contract — `lock`, `release` and `refund` will be
-    /// rejected while paused.
+    /// Arm the emergency pause circuit breaker (admin / multisig only).
+    ///
+    /// The pause does **not** take effect immediately: `lock()` keeps working
+    /// until `PAUSE_DELAY_LEDGERS` have elapsed, so pause cannot be used to
+    /// front-run and block a specific pending transaction. Once effective,
+    /// only new locks are rejected — see the comment on `release`/`refund`.
     pub fn pause(env: Env, signers: Vec<Address>) -> Result<(), Error> {
         require_multisig(&env, &signers)?;
+        let effective = env.ledger().sequence().saturating_add(PAUSE_DELAY_LEDGERS);
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseEffectiveLedger, &effective);
         Ok(())
     }
 
-    /// Unpause the contract, restoring normal operation.
+    /// Cancel a pending or active pause, restoring normal `lock()` operation.
     pub fn unpause(env: Env, signers: Vec<Address>) -> Result<(), Error> {
         require_multisig(&env, &signers)?;
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PauseEffectiveLedger);
         Ok(())
     }
 
@@ -1215,6 +1264,11 @@ impl Htlc for EscrowContract {
     }
 
     fn release(env: Env, id: BytesN<32>, secret: BytesN<32>) {
+        // Issue #266: intentionally does NOT call check_not_paused.
+        // Pause only closes the front door (new `lock`s). `release` and
+        // `refund` are the back door for already-locked funds — blocking them
+        // while paused would trap user money in the contract, which is worse
+        // than having no pause mechanism at all.
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = match env.storage().persistent().get(&key) {
             Some(s) => s,
@@ -1256,6 +1310,9 @@ impl Htlc for EscrowContract {
     }
 
     fn refund(env: Env, id: BytesN<32>) {
+        // Issue #266: intentionally does NOT call check_not_paused — same
+        // reasoning as `release`: already-locked funds must never be trapped
+        // by the circuit breaker.
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = env
             .storage()
@@ -1283,15 +1340,26 @@ impl Htlc for EscrowContract {
     }
 }
 
-fn check_not_paused(env: &Env) {
-    if let Some(paused) = env
+fn is_effectively_paused(env: &Env) -> bool {
+    let armed: bool = env
         .storage()
         .instance()
-        .get::<DataKey, bool>(&DataKey::Paused)
-    {
-        if paused {
-            panic_with_error(env, Error::ContractPaused);
-        }
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if !armed {
+        return false;
+    }
+    let effective: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::PauseEffectiveLedger)
+        .unwrap_or(0);
+    env.ledger().sequence() >= effective
+}
+
+fn check_not_paused(env: &Env) {
+    if is_effectively_paused(env) {
+        panic_with_error(env, Error::ContractPaused);
     }
 }
 

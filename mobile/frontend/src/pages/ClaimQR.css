@@ -119,6 +119,30 @@ html.dark {
   color: var(--stamp-amber);
 }
 
+.claim-ticket__pause-banner {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--stamp-red);
+  background: color-mix(in srgb, var(--stamp-red) 8%, var(--card));
+  color: var(--ink);
+}
+
+.claim-ticket__pause-banner strong {
+  display: block;
+  font-family: "IBM Plex Serif", serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.claim-ticket__pause-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
 .claim-ticket__qr-window {
   display: flex;
   flex-direction: column;
