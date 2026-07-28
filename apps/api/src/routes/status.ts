@@ -45,7 +45,7 @@ export async function statusRoutes(app: FastifyInstance) {
           server.getLatestLedger(),
         ]);
         chain = {
-          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "public" : "testnet",
+          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "PUBLIC" : "TESTNET",
           status: health.status,
           latest_ledger: latest.sequence,
           oldest_ledger: "oldestLedger" in health ? (health as any).oldestLedger : null,
@@ -53,7 +53,7 @@ export async function statusRoutes(app: FastifyInstance) {
       } catch (err) {
         app.log.warn(err, "status: soroban RPC unreachable");
         chain = {
-          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "public" : "testnet",
+          network: NETWORK_PASSPHRASE === Networks.PUBLIC ? "PUBLIC" : "TESTNET",
           status: "unreachable",
           latest_ledger: null,
           oldest_ledger: null,

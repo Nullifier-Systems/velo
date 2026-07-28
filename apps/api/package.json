@@ -20,6 +20,8 @@
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",
+    "h3-js": "^4.5.0",
+    "redis": "^5.12.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {

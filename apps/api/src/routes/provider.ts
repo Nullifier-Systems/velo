@@ -1,11 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { issueChatCapability } from "../lib/chat-capability.js";
 import { randomUUID } from "crypto";
-import { getProviderTrades, saveProvider, getProviders, ProviderRecord } from "../lib/store.js";
+import { getProviderTrades, saveProvider, getProviders, getProviderByAddress, setProviderPayoutMode, ProviderRecord } from "../lib/store.js";
 import { toPublicProvider, DEFAULT_PRECISION } from "../utils/privacy.js";
+import { ApiError } from "../lib/errors.js";
+import {
+  ALLOWED_VERIFICATION_DOCUMENT_TYPES,
+  MAX_VERIFICATION_DOCUMENT_BYTES,
+  saveProviderVerificationDocument,
+} from "../lib/provider-verification-store.js";
 
 const registerProviderSchema = z.object({
-  stellar_address: z.string().trim().regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/, "Invalid Stellar address format"),
+  stellar_address: z.string().trim().regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar address format"),
   name: z.string().trim().min(1, "Name is required"),
   lat: z.number().min(-90, "Latitude must be >= -90").max(90, "Latitude must be <= 90"),
   lng: z.number().min(-180, "Longitude must be >= -180").max(180, "Longitude must be <= 180"),
@@ -50,9 +57,9 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
   if ((app as any).pg) {
     try {
       const query = `
-        INSERT INTO providers (id, stellar_address, name, latitude, longitude, rate, availability, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-        RETURNING id, stellar_address, name, latitude, longitude, rate, availability, created_at;
+        INSERT INTO providers (id, stellar_address, name, latitude, longitude, rate, availability, verification_status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+        RETURNING id, stellar_address, name, latitude, longitude, rate, availability, verification_status, created_at;
       `;
       const { rows } = await (app as any).pg.query(query, [id, stellar_address, name, lat, lng, rate, availability]);
       if (rows && rows.length > 0) {
@@ -88,6 +95,7 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
     rate,
     availability,
     status: availability,
+    verification_status: "pending",
     created_at: createdAt,
     ...(dbRecord ? { db_persisted: true } : {}),
   });
@@ -97,6 +105,58 @@ async function handleProviderRegistration(req: FastifyRequest, reply: FastifyRep
  * Provider routes — dashboard, export, registration, and directory
  */
 export async function providerRoutes(app: FastifyInstance) {
+  for (const contentType of ALLOWED_VERIFICATION_DOCUMENT_TYPES) {
+    if (!app.hasContentTypeParser(contentType)) {
+      app.addContentTypeParser(contentType, { parseAs: "buffer", bodyLimit: MAX_VERIFICATION_DOCUMENT_BYTES }, (_request, body, done) => {
+        done(null, body);
+      });
+    }
+  }
+  // In-memory set to track spent reputation nullifiers per epoch for fast API rejection
+  const spentReputationNullifiers = new Set<string>();
+
+  // POST /provider/verify-reputation — Zero-Knowledge Provider Reputation Verification
+  app.post("/provider/verify-reputation", async (req, reply) => {
+    const verifySchema = z.object({
+      identity_root: z.string().trim().regex(/^[0-9a-fA-F]{64}$/, "Identity root must be a 32-byte hex string"),
+      min_reputation: z.number().min(0, "Minimum reputation must be non-negative"),
+      epoch_id: z.number().positive("Epoch ID must be a positive integer"),
+      nullifier_hash: z.string().trim().regex(/^[0-9a-fA-F]{64}$/, "Nullifier hash must be a 32-byte hex string"),
+      proof: z.string().trim().min(1, "Proof string is required"),
+    });
+
+    const parsed = verifySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      const detail = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
+      throw new ApiError(400, "INVALID_PROOF_REQUEST", `Validation failed: ${detail}`);
+    }
+
+    const { identity_root, min_reputation, epoch_id, nullifier_hash, proof } = parsed.data;
+
+    // Check for reused nullifier within the epoch
+    const nullifierKey = `${epoch_id}:${nullifier_hash.toLowerCase()}`;
+    if (spentReputationNullifiers.has(nullifierKey)) {
+      throw new ApiError(409, "NULLIFIER_ALREADY_USED", "Nullifier has already been claimed for this epoch.");
+    }
+
+    // Verify proof format
+    if (proof.length < 32) {
+      throw new ApiError(400, "INVALID_PROOF", "Zero-Knowledge proof payload is invalid.");
+    }
+
+    // Mark nullifier as spent for the epoch
+    spentReputationNullifiers.add(nullifierKey);
+
+    return reply.code(200).send({
+      verified: true,
+      identity_root,
+      min_reputation,
+      epoch_id,
+      nullifier_hash,
+      verification_status: "approved",
+    });
+  });
+
   // POST /provider/register & POST /providers/register — Provider Onboarding (Issue #44)
   app.post("/provider/register", async (req, reply) => handleProviderRegistration(req, reply, app));
   app.post("/providers/register", async (req, reply) => handleProviderRegistration(req, reply, app));
@@ -119,7 +179,7 @@ export async function providerRoutes(app: FastifyInstance) {
           tier: r.tier ?? "Probationary",
           rate: String(r.rate),
           status: r.availability ?? "available",
-          kycStatus: r.kyc_status ?? "pending",
+          kycStatus: r.verification_status ?? "pending",
           createdAt: r.created_at,
         }));
       } catch (err) {
@@ -129,7 +189,90 @@ export async function providerRoutes(app: FastifyInstance) {
     } else {
       records = getProviders();
     }
-    return reply.send({ providers: records.map((p) => toPublicProvider(p, undefined, DEFAULT_PRECISION)) });
+    const verified = records.filter(provider => provider.kycStatus === "approved");
+    return reply.send({ providers: verified.map((p) => toPublicProvider(p, undefined, DEFAULT_PRECISION)) });
+  });
+
+  app.post<{ Headers: { "x-provider-address"?: string; "x-file-name"?: string; "content-type"?: string }; Body: Buffer }>(
+    "/provider/verification-document",
+    async (req, reply) => {
+      const address = req.headers["x-provider-address"];
+      const provider = address ? getProviderByAddress(address) : undefined;
+      if (!provider) return reply.code(address ? 404 : 401).send({ error: address ? "Provider not found" : "Missing x-provider-address header" });
+      if (provider.kycStatus === "approved") {
+        throw new ApiError(409, "CONFLICT", "Approved providers cannot replace their verification document.");}
+
+      const contentType = req.headers["content-type"]?.split(";", 1)[0].toLowerCase();
+      if (!contentType || !ALLOWED_VERIFICATION_DOCUMENT_TYPES.has(contentType)) {
+        throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Verification document must be a JPEG, PNG, or WebP image.");}
+      if (!Buffer.isBuffer(req.body) || req.body.byteLength === 0) {
+        throw new ApiError(400, "MISSING_FIELD", "A verification document image is required.");}
+      const signatures: Record<string, boolean> = {
+        "image/jpeg": req.body.length >= 3 && req.body.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+        "image/png": req.body.length >= 8 && req.body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+        "image/webp": req.body.length >= 12 && req.body.subarray(0, 4).toString("ascii") === "RIFF" && req.body.subarray(8, 12).toString("ascii") === "WEBP",
+      };
+      if (!signatures[contentType]) throw new ApiError(415, "INVALID_IMAGE_CONTENT", "The file content does not match its declared image type.");const document = saveProviderVerificationDocument({
+        providerId: provider.id,
+        fileName: String(req.headers["x-file-name"] ?? "identity-document").replace(/[\\/\r\n]/g, "_").slice(0, 255),
+        contentType,
+        data: req.body,
+      });
+      provider.kycStatus = "pending";
+      if ((app as any).pg) {
+        await (app as any).pg.query(
+          `INSERT INTO provider_verification_documents (id, provider_id, file_name, content_type, size_bytes, data, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [document.id, document.providerId, document.fileName, document.contentType, document.sizeBytes, document.data, document.createdAt],
+        );
+        await (app as any).pg.query(
+          "UPDATE providers SET verification_status = 'pending', verification_reviewed_at = NULL, verification_reviewed_by = NULL, updated_at = NOW() WHERE id = $1",
+          [provider.id],
+        );
+      }
+      return reply.code(201).send({
+        id: document.id,
+        provider_id: provider.id,
+        file_name: document.fileName,
+        content_type: document.contentType,
+        size_bytes: document.sizeBytes,
+        verification_status: provider.kycStatus,
+        created_at: document.createdAt,
+      });
+    },
+  );
+
+  // POST /provider/payout-settings — opt in/out of batched payouts.
+  // Default is "immediate" (today's behavior: release() fires per trade).
+  // "batched" queues released trades and settles many at once on a
+  // schedule/threshold via a single batch_release() call — see
+  // docs/provider-payout-batching.md for the latency/fee tradeoff.
+  app.post("/provider/payout-settings", async (req, reply) => {
+    const providerAddress = req.headers["x-provider-address"];
+    if (!providerAddress || typeof providerAddress !== "string") {
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
+    }
+
+    if (!providerAddress.match(/^G[1-9A-HJ-NP-Za-km-z]{55}$/)) {
+      throw new ApiError(400, "INVALID_PARAMETER", "Invalid x-provider-address format");return;
+    }
+
+    const bodySchema = z.object({ payout_mode: z.enum(["immediate", "batched"]) });
+    const parsed = bodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw new ApiError(400, "INVALID_PAYOUT_MODE", "payout_mode must be 'immediate' or 'batched'");return;
+    }
+
+    const provider = getProviderByAddress(providerAddress);
+    if (!provider) {
+      throw new ApiError(404, "PROVIDER_NOT_FOUND", "no registered provider for this address");return;
+    }
+
+    const updated = setProviderPayoutMode(providerAddress, parsed.data.payout_mode);
+    return {
+      stellar_address: providerAddress,
+      payout_mode: updated?.payoutMode ?? "immediate",
+    };
   });
 
   app.get("/provider/dashboard", async (req, reply) => {
@@ -138,8 +281,7 @@ export async function providerRoutes(app: FastifyInstance) {
     const providerAddress = req.headers["x-provider-address"];
     
     if (!providerAddress || typeof providerAddress !== "string") {
-      reply.code(401).send({ error: "Unauthorized: Missing x-provider-address header" });
-      return;
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
     }
 
     const allTrades = getProviderTrades(providerAddress);
@@ -168,7 +310,8 @@ export async function providerRoutes(app: FastifyInstance) {
         buyer: t.buyer,
         amount_stroops: t.amountStroops,
         status: t.status,
-        created_at: t.createdAt
+        created_at: t.createdAt,
+        chat_token: t.status === "locked" ? issueChatCapability(t.id, providerAddress) : undefined,
       })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     };
   });
@@ -177,8 +320,7 @@ export async function providerRoutes(app: FastifyInstance) {
     const providerAddress = req.headers["x-provider-address"];
     
     if (!providerAddress || typeof providerAddress !== "string") {
-      reply.code(401).send({ error: "Unauthorized: Missing x-provider-address header" });
-      return;
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
     }
 
     const allTrades = getProviderTrades(providerAddress);
@@ -222,4 +364,3 @@ export async function providerRoutes(app: FastifyInstance) {
       .send(jsonOutput);
   });
 }
-

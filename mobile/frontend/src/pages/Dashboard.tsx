@@ -8,6 +8,7 @@ interface Trade {
   amount_stroops: string;
   status: string;
   created_at: string;
+  chat_token?: string;
 }
 
 interface DashboardMetrics {
@@ -34,7 +35,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/dashboard`, {
         headers: {
           'x-provider-address': providerAddress
@@ -57,7 +58,7 @@ export default function Dashboard() {
 
   const exportData = async (format: 'csv' | 'json') => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5182';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/export?format=${format}`, {
         headers: {
           'x-provider-address': address
@@ -191,12 +192,12 @@ export default function Dashboard() {
                         </p>
                         {trade.status === "locked" && (
                           <a
-                            href={`/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}`}
+                            href={`/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}&token=${encodeURIComponent(trade.chat_token ?? "")}`}
                             className="text-sm text-blue-600 hover:text-blue-800 underline"
                             onClick={(e) => {
                               e.preventDefault();
                               window.open(
-                                `/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}`,
+                                `/chat/${trade.id}?participant=${encodeURIComponent(data?.address ?? "")}&token=${encodeURIComponent(trade.chat_token ?? "")}`,
                                 "_blank",
                                 "width=460,height=700"
                               );

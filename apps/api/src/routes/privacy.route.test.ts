@@ -63,6 +63,40 @@ describe("privacy-preserving proximity matching", () => {
     expect(raw).not.toContain("6.52447");
     expect(raw).not.toContain("3.37921");
     expect(body.privacy.precision).toBeGreaterThanOrEqual(4);
+    expect(body.availability).toEqual({ state: "available" });
+  });
+
+  it("returns a deliberate cold-start state when no providers are nearby", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/cash/agents?lat=-80&lng=0&radius=1",
+      headers: { "x-payment": "ok" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      agents: [],
+      availability: {
+        state: "no_providers_nearby",
+        suggested_action: "check_back_later",
+        retry_after_seconds: 3600,
+      },
+    });
+    expect(res.json().availability.message).toContain(
+      "no approved cash providers nearby",
+    );
+  });
+
+  it("keeps invalid discovery requests distinct from a cold start", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/cash/agents?lat=not-a-number&lng=0",
+      headers: { "x-payment": "ok" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toHaveProperty("error");
+    expect(res.json()).not.toHaveProperty("availability");
   });
 
   it("does not reveal a provider location without a confirmed match", async () => {

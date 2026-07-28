@@ -36,7 +36,17 @@ fn setup() -> Fixture {
 
     let contract_id = env.register_contract(None, EscrowContract);
     let client = EscrowContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr, &50);
+
+    let keys: Vec<BytesN<32>> = Vec::new(&env);
+    let arb_set = ArbitratorSet {
+        keys,
+        threshold_epoch1: 1,
+        threshold_epoch2: 1,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    };
+
+    client.initialize(&admin, &token_addr, &50, &arb_set);
 
     let secret = BytesN::from_array(&env, &[7u8; 32]);
     let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();

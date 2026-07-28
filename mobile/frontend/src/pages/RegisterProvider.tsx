@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/LanguageSwitcher.js';
 
-const STELLAR_ADDRESS_REGEX = /^G[1-9A-HJ-NP-Za-km-z]{55}$/;
+const STELLAR_ADDRESS_REGEX = /^G[A-Z2-7]{55}$/;
 
 export default function RegisterProvider() {
   const { t } = useTranslation();
@@ -13,6 +13,7 @@ export default function RegisterProvider() {
   const [lng, setLng] = useState('');
   const [rate, setRate] = useState('1.0');
   const [availability, setAvailability] = useState<'available' | 'unavailable'>('available');
+  const [verificationDocument, setVerificationDocument] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -60,6 +61,14 @@ export default function RegisterProvider() {
       setError(t("register.invalidRate"));
       return;
     }
+    if (!verificationDocument) {
+      setError(t("register.verificationDocumentRequired"));
+      return;
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(verificationDocument.type) || verificationDocument.size > 5 * 1024 * 1024) {
+      setError(t("register.invalidVerificationDocument"));
+      return;
+    }
 
     setLoading(true);
 
@@ -90,6 +99,20 @@ export default function RegisterProvider() {
           errMessage = await response.text() || errMessage;
         }
         throw new Error(errMessage);
+      }
+
+      const documentResponse = await fetch(`${apiUrl}/api/v1/provider/verification-document`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': verificationDocument.type,
+          'x-provider-address': trimmedAddress,
+          'x-file-name': verificationDocument.name,
+        },
+        body: verificationDocument,
+      });
+      if (!documentResponse.ok) {
+        const documentError = await documentResponse.json().catch(() => ({}));
+        throw new Error(documentError.error || t("register.documentUploadFailed"));
       }
 
       setSuccess(true);
@@ -233,6 +256,22 @@ export default function RegisterProvider() {
                 <option value="available">{t("register.available")}</option>
                 <option value="unavailable">{t("register.unavailable")}</option>
               </select>
+            </div>
+
+            <div>
+              <label htmlFor="verificationDocument" className="block text-sm font-medium text-gray-700">
+                {t("register.verificationDocument")}
+              </label>
+              <p className="mt-1 text-xs text-gray-500">{t("register.verificationDocumentHelp")}</p>
+              <input
+                id="verificationDocument"
+                name="verificationDocument"
+                type="file"
+                required
+                accept="image/jpeg,image/png,image/webp"
+                className="mt-2 block w-full text-sm text-gray-700"
+                onChange={(e) => setVerificationDocument(e.target.files?.[0] ?? null)}
+              />
             </div>
           </div>
 
