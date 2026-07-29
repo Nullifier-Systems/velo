@@ -23,12 +23,15 @@
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",
+    "graphql": "^17.0.2",
     "h3-js": "^4.5.0",
+    "pg": "^8.22.0",
     "redis": "^5.12.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4",
