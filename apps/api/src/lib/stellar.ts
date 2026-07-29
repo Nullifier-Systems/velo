@@ -650,6 +650,7 @@ export async function releaseEscrow(
   params: ReleaseParams,
   logger: StellarLogger = noopLogger,
   buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
+  pollTimeoutMs: number = RPC_TIMEOUTS.releasePoll,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
   return invokeContract(
@@ -668,6 +669,7 @@ export async function refundEscrow(
   params: RefundParams,
   logger: StellarLogger = noopLogger,
   buildSimTimeoutMs: number = RPC_TIMEOUTS.refundBuildSim,
+  pollTimeoutMs: number = RPC_TIMEOUTS.refundPoll,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
   return invokeContract(
