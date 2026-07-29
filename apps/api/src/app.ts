@@ -21,6 +21,9 @@ import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
+import { Pool } from "pg";
+import { PostgresEventStore } from "./lib/stellar-event-store.js";
+import { graphqlRoutes } from "./routes/graphql.js";
 
 const usedPayments = new Set<string>();
 
@@ -56,6 +59,14 @@ export const app = Fastify({
     return randomUUID();
   },
 });
+
+export const pgPool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
+export const stellarEventStore = pgPool
+  ? new PostgresEventStore(pgPool)
+  : undefined;
+if (pgPool) app.decorate("pg", pgPool);
 
 // Echo the request ID back to the client so a failed call can be traced
 // in the logs — see docs/request-tracing.md.
@@ -306,3 +317,6 @@ app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
+if (stellarEventStore) {
+  app.register(graphqlRoutes, { store: stellarEventStore });
+}
