@@ -6,6 +6,8 @@ import {
   SETTLEMENT_CHAIN_DEFAULT_TIMEOUT_LEDGERS,
   DEFAULT_CHAT_RETENTION_MS,
   DEFAULT_DISPUTE_EVIDENCE_RETENTION_MS,
+  buildRefundCountdown,
+  AVERAGE_LEDGER_CLOSE_SECONDS,
 } from "./timeouts.js";
 import {
   getCashRequest,
@@ -231,6 +233,27 @@ describe("Timeout Policy Invariants", () => {
       expect(SETTLEMENT_CHAIN_DEFAULT_TIMEOUT_LEDGERS).toBeGreaterThan(
         CASH_DEFAULT_TIMEOUT_LEDGERS,
       );
+    });
+  });
+
+  describe("buildRefundCountdown", () => {
+    it("reports remaining ledgers and estimated seconds before timeout", () => {
+      expect(buildRefundCountdown(1_100, 1_050)).toEqual({
+        timeoutLedger: 1_100,
+        latestLedger: 1_050,
+        ledgersUntilRefund: 50,
+        refundAvailable: false,
+        estimatedSecondsUntilRefund: 50 * AVERAGE_LEDGER_CLOSE_SECONDS,
+      });
+    });
+
+    it("reports refund available once the timeout ledger is reached", () => {
+      expect(buildRefundCountdown(1_100, 1_100)).toMatchObject({
+        ledgersUntilRefund: 0,
+        refundAvailable: true,
+        estimatedSecondsUntilRefund: 0,
+      });
+      expect(buildRefundCountdown(1_100, 1_200).refundAvailable).toBe(true);
     });
   });
 });
