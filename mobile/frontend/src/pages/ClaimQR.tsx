@@ -329,7 +329,7 @@ export default function ClaimQR() {
                   </div>
                   {status.releasedAmount && (
                     <p className="claim-ticket__tranche-amount">
-                      {formatStroops(status.releasedAmount)} / {formatStroops(status.amountStroops)} released
+                      {formatStroops(status.releasedAmount)} / {formatStroops(status.amountStroops)} {t("claim.trancheReleased")}
                     </p>
                   )}
                 </div>
