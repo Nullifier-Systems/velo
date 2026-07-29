@@ -835,6 +835,162 @@ export async function resolveEscrow(params: ResolveParams) {
   );
 }
 
+export interface ChainReleaseToLockParams {
+    contractId: string;
+    /** Trade A: the trade being released. */
+    releaseTradeId: string;
+    releaseSecretHex: string;
+    /** The counterparty for the new trade (trade B). */
+    newSeller: string;
+    newSecretHashHex: string;
+    newTimeoutLedgers: number;
+    /**
+     * chain_release_to_lock() requires releaseTradeId's *seller* to
+     * authorize the chain (see the contract's doc comment on that
+     * function) — the API never holds that key, so this must always be
+     * supplied and must be that seller's account.
+     */
+    signerPublicKey: string;
+}
+
+function chainReleaseToLockArgs(params: ChainReleaseToLockParams): xdr.ScVal[] {
+    return [
+        hexToBytesScVal(params.releaseTradeId),
+        hexToBytesScVal(params.releaseSecretHex),
+        nativeToScVal(params.newSeller, { type: "address" }),
+        hexToBytesScVal(params.newSecretHashHex),
+        nativeToScVal(params.newTimeoutLedgers, { type: "u32" }),
+    ];
+}
+
+/**
+ * Builds an unsigned transaction for chain_release_to_lock(). Must be
+ * signed by `params.signerPublicKey` (releaseTradeId's seller) before it
+ * can be submitted via `submitChainReleaseToLockTx` — this is a
+ * non-custodial-only operation, unlike release()/lock(), because the
+ * contract requires that specific party's authorization.
+ */
+export async function buildChainReleaseToLockTransaction(params: ChainReleaseToLockParams): Promise<string> {
+    return rpcTimeout("chainReleaseToLock/buildTx", RPC_TIMEOUTS.genericBuildSim, async () => {
+        const account = await server.getAccount(params.signerPublicKey);
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: params.contractId,
+                    function: "chain_release_to_lock",
+                    args: chainReleaseToLockArgs(params),
+                })
+            )
+            .setTimeout(30)
+            .build();
+
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            throw new Error(`simulation failed: ${sim.error}`);
+        }
+
+        const prepared = assembleTransaction(tx, sim).build();
+        return prepared.toXDR();
+    });
+}
+
+/**
+ * Submits a signed chain_release_to_lock() envelope and returns the new
+ * trade's id, decoded from the contract call's own return value — the
+ * same id `select_arbitrator`-style Result<BytesN<32>, Error> functions
+ * elsewhere in this codebase (e.g. batch_release) return directly as their
+ * Ok payload.
+ */
+export async function submitChainReleaseToLockTx(signedXdr: string): Promise<{ hash: string; newTradeId: string }> {
+    const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+    const sendResult = await server.sendTransaction(txToSubmit);
+    if (sendResult.status === "ERROR") {
+        throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+    }
+
+    const getResult = await rpcTimeout("chainReleaseToLock/poll", RPC_TIMEOUTS.genericPoll, async () => {
+        let result = await server.getTransaction(sendResult.hash);
+        while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+            await new Promise((r) => setTimeout(r, 1500));
+            result = await server.getTransaction(sendResult.hash);
+        }
+        return result;
+    });
+
+    if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+        throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+    }
+    if (!getResult.returnValue) {
+        throw new Error(`tx ${sendResult.hash} succeeded but returned no value`);
+    }
+
+    const newTradeId = Buffer.from(scValToNative(getResult.returnValue) as Buffer).toString("hex");
+    return { hash: sendResult.hash, newTradeId };
+}
+
+export interface OnChainTradeState {
+    seller: string;
+    buyer: string;
+    amountStroops: string;
+    secretHashHex: string;
+    timeoutLedger: number;
+    status: string;
+}
+
+/**
+ * Reads a trade's current on-chain state via get_trade() (a read-only
+ * call, simulated but never submitted/signed). Used after
+ * chain_release_to_lock() to learn trade B's actual escrowed amount —
+ * derived on-chain from trade A's amount minus the platform fee, which
+ * this API does not independently track. `sourcePublicKey` just needs to
+ * be some existing account to simulate from; it does not sign anything.
+ */
+export async function getTradeState(
+    contractId: string,
+    tradeId: string,
+    sourcePublicKey: string,
+): Promise<OnChainTradeState | undefined> {
+    return rpcTimeout("getTradeState", RPC_TIMEOUTS.genericBuildSim, async () => {
+        const account = await server.getAccount(sourcePublicKey);
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: NETWORK_PASSPHRASE,
+        })
+            .addOperation(
+                Operation.invokeContractFunction({
+                    contract: contractId,
+                    function: "get_trade",
+                    args: [hexToBytesScVal(tradeId)],
+                })
+            )
+            .setTimeout(30)
+            .build();
+
+        const sim = await server.simulateTransaction(tx);
+        if (Api.isSimulationError(sim)) {
+            throw new Error(`simulation failed: ${sim.error}`);
+        }
+
+        const retval = sim.result?.retval;
+        if (!retval) return undefined;
+        const native = scValToNative(retval) as Record<string, unknown> | null;
+        if (!native) return undefined;
+
+        return {
+            seller: String(native.seller),
+            buyer: String(native.buyer),
+            amountStroops: String(native.amount),
+            secretHashHex: Buffer.from(native.secret_hash as Buffer).toString("hex"),
+            timeoutLedger: Number(native.timeout_ledger),
+            status: String(native.status),
+        };
+    });
+}
+
 /**
  * Submits a signed transaction XDR to the Stellar network.
  * Waits for transaction confirmation and returns the result.
