@@ -750,6 +750,31 @@ export const openApiDocument = {
           qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
           status: { type: "string", enum: ["locked", "expired", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
+          timeoutLedger: {
+            type: "integer",
+            description:
+              "First Stellar ledger at which permissionless refund() succeeds.",
+          },
+          latestLedger: {
+            type: "integer",
+            description:
+              "Chain tip used to compute the refund countdown (locked/expired only).",
+          },
+          ledgersUntilRefund: {
+            type: "integer",
+            description:
+              "Ledgers remaining before refund becomes available; 0 when available.",
+          },
+          refundAvailable: {
+            type: "boolean",
+            description:
+              "True once latestLedger >= timeoutLedger. Funds still require a refund call.",
+          },
+          estimatedSecondsUntilRefund: {
+            type: "integer",
+            description:
+              "Wall-clock estimate only (ledgers × ~6s). Not an on-chain gate.",
+          },
           disputedAt: { type: "string", format: "date-time" },
           disputedBy: { type: "string" },
           disputeReason: { type: "string" },

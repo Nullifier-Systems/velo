@@ -174,6 +174,40 @@ const ____: unknown = ((): unknown => {
   return null;
 })();
 
+/**
+ * Typical Stellar ledger close time used only for human-readable estimates.
+ * On-chain refund eligibility is always ledger-based; this value is never a gate.
+ */
+export const AVERAGE_LEDGER_CLOSE_SECONDS = 6;
+
+/** Public countdown for when permissionless refund becomes available. */
+export interface RefundCountdown {
+  timeoutLedger: number;
+  latestLedger: number;
+  ledgersUntilRefund: number;
+  refundAvailable: boolean;
+  estimatedSecondsUntilRefund: number;
+}
+
+/**
+ * Build a refund countdown from stored timeout ledger + current chain tip.
+ * `ledgersUntilRefund` is 0 once `latestLedger >= timeoutLedger`.
+ */
+export function buildRefundCountdown(
+  timeoutLedger: number,
+  latestLedger: number,
+): RefundCountdown {
+  const ledgersUntilRefund = Math.max(0, timeoutLedger - latestLedger);
+  return {
+    timeoutLedger,
+    latestLedger,
+    ledgersUntilRefund,
+    refundAvailable: latestLedger >= timeoutLedger,
+    estimatedSecondsUntilRefund:
+      ledgersUntilRefund * AVERAGE_LEDGER_CLOSE_SECONDS,
+  };
+}
+
 // Export a summary for logging/debugging
 export const TIMEOUT_POLICY_SUMMARY = {
   cashTradeTimeout: `${CASH_DEFAULT_TIMEOUT_LEDGERS} ledgers (~15 min)`,
