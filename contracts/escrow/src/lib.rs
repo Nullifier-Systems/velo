@@ -14,7 +14,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus};
+use htlc_core::{Htlc, Tranche, TradeState, TradeStatus};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Vec,
@@ -1456,11 +1456,21 @@ impl EscrowContract {
         env.storage().persistent().set(&release_key, &release_state);
 
         let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
+        
+        // Create a single-tranche trade for the chained lock
+        let mut new_tranches = Vec::new(&env);
+        new_tranches.push_back(Tranche {
+            amount: payout,
+            secret_hash: new_secret_hash.clone(),
+            released: false,
+        });
+
         let new_state = TradeState {
             seller: new_seller,
             buyer: release_state.seller.clone(),
             amount: payout,
             secret_hash: new_secret_hash,
+            tranches: new_tranches,
             timeout_ledger: new_timeout_ledger,
             status: TradeStatus::Locked,
         };
@@ -1722,11 +1732,21 @@ impl EscrowContract {
         }
 
         let timeout_ledger = current_ledger + timeout_ledgers;
+        
+        // Create a single-tranche trade for backward compatibility
+        let mut tranches = Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer: buyer.clone(),
             amount,
             secret_hash,
+            tranches,
             timeout_ledger,
             status: TradeStatus::Locked,
         };
@@ -1969,11 +1989,20 @@ impl Htlc for EscrowContract {
 
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
+        // Create a single-tranche trade for backward compatibility
+        let mut tranches = Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer: buyer.clone(),
             amount,
             secret_hash,
+            tranches,
             timeout_ledger,
             status: TradeStatus::Locked,
         };
@@ -2023,6 +2052,206 @@ impl Htlc for EscrowContract {
             .publish((symbol_short(&env, "locked"), id), amount);
     }
 
+    /// Lock funds with multiple tranches, each with its own secret hash.
+    /// Each tranche can be released independently by revealing its secret.
+    /// The sum of tranche amounts MUST equal the total amount parameter.
+    pub fn lock_with_tranches(
+        env: Env,
+        id: BytesN<32>,
+        seller: Address,
+        buyer: Address,
+        amount: i128,
+        tranches: Vec<Tranche>,
+        timeout_ledgers: u32,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+        Self::flatten_branch_cost(&env);
+        buyer.require_auth();
+
+        if amount <= 0 || amount > (i128::MAX / 10_000) {
+            return Err(Error::InvalidAmount);
+        }
+        if timeout_ledgers == 0 || timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            return Err(Error::InvalidTimeout);
+        }
+        if tranches.is_empty() {
+            return Err(Error::NoTranches);
+        }
+
+        // Critical: validate that tranche amounts sum exactly to the total
+        let mut tranche_sum: i128 = 0;
+        for tranche in tranches.iter() {
+            if tranche.amount <= 0 {
+                return Err(Error::InvalidAmount);
+            }
+            tranche_sum = tranche_sum
+                .checked_add(tranche.amount)
+                .ok_or(Error::InvalidAmount)?;
+        }
+        if tranche_sum != amount {
+            return Err(Error::TrancheSumMismatch);
+        }
+
+        let key = DataKey::Trade(id.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(Error::TradeAlreadyExists);
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
+
+        // Use first tranche's secret_hash for backward compatibility with single-secret queries
+        let first_secret_hash = tranches.get(0).unwrap().secret_hash.clone();
+
+        let state = TradeState {
+            seller,
+            buyer: buyer.clone(),
+            amount,
+            secret_hash: first_secret_hash,
+            tranches,
+            timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+
+        // CEI (issue #273): write trade (+ optional bond) bookkeeping before pulls.
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        let params = bond_params(&env);
+        let need_bond =
+            params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold;
+        if need_bond {
+            env.storage()
+                .instance()
+                .set(&DataKey::Bond(id.clone()), &params.bond_amount);
+        }
+
+        // Issue #283: Record trade in sequential index for reputation scanning.
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeCounter)
+            .unwrap_or(0);
+        let next_idx = counter + 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeCounter, &next_idx);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeId(next_idx), &id);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&buyer, &env.current_contract_address(), &amount);
+
+        // Issue #280: an "unestablished" buyer posts a refundable bond.
+        if need_bond {
+            client.transfer(
+                &buyer,
+                &env.current_contract_address(),
+                &params.bond_amount,
+            );
+        }
+
+        env.events()
+            .publish((symbol_short(&env, "locked"), id), amount);
+        Ok(())
+    }
+
+    /// Release a specific tranche by index, revealing its secret.
+    /// Returns the amount released (after fee).
+    pub fn release_tranche(
+        env: Env,
+        id: BytesN<32>,
+        tranche_index: u32,
+        secret: BytesN<32>,
+    ) -> Result<i128, Error> {
+        // Issue #266: intentionally does NOT call check_not_paused.
+        let key = DataKey::Trade(id.clone());
+        let mut state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        if tranche_index >= state.tranches.len() {
+            return Err(Error::InvalidTrancheIndex);
+        }
+
+        let mut tranche = state.tranches.get(tranche_index).unwrap();
+        if tranche.released {
+            return Err(Error::TrancheAlreadyReleased);
+        }
+
+        // Verify the secret matches this tranche's hash
+        let computed = env.crypto().sha256(&secret.into());
+        if computed.to_bytes() != tranche.secret_hash {
+            return Err(Error::InvalidSecret);
+        }
+
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(0);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+
+        let fee = (tranche.amount * fee_bps as i128) / 10_000;
+        let payout = tranche.amount - fee;
+
+        // Mark this tranche as released
+        tranche.released = true;
+        state.tranches.set(tranche_index, tranche);
+
+        // Check if all tranches are now released
+        let mut all_released = true;
+        for i in 0..state.tranches.len() {
+            if !state.tranches.get(i).unwrap().released {
+                all_released = false;
+                break;
+            }
+        }
+
+        // If all tranches are released, mark the entire trade as Released
+        if all_released {
+            state.status = TradeStatus::Released;
+            // Complete with bond refund only when fully released
+            Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
+        }
+
+        // CEI pattern: update state before external calls
+        env.storage().persistent().set(&key, &state);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &state.seller, &payout);
+        if fee > 0 {
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        env.events().publish(
+            (symbol_short(&env, "tranche_rel"), id.clone()),
+            (tranche_index, payout),
+        );
+
+        if all_released {
+            env.events()
+                .publish((symbol_short(&env, "released"), id), state.amount);
+        }
+
+        Ok(payout)
+    }
+
     fn release(env: Env, id: BytesN<32>, secret: BytesN<32>) {
         // Issue #266: intentionally does NOT call check_not_paused.
         // Pause only closes the front door (new `lock`s). `release` and
@@ -2039,29 +2268,55 @@ impl Htlc for EscrowContract {
             return;
         }
 
-        let computed = env.crypto().sha256(&secret.into());
-        if computed.to_bytes() != state.secret_hash {
+        // For backward compatibility: if trade has a single tranche, release it
+        // Otherwise, verify against the legacy secret_hash field (first tranche)
+        if state.tranches.len() == 1 {
+            let tranche = state.tranches.get(0).unwrap();
+            if tranche.released {
+                return;
+            }
+            
+            let computed = env.crypto().sha256(&secret.into());
+            if computed.to_bytes() != tranche.secret_hash {
+                panic_with_error(&env, Error::InvalidSecret);
+            }
+
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let fee_bps: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::PlatformFeeBps)
+                .unwrap_or(0);
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+
+            let fee = (state.amount * fee_bps as i128) / 10_000;
+            let payout = state.amount - fee;
+
+            // CEI pattern: update state before external calls
+            state.status = TradeStatus::Released;
+            env.storage().persistent().set(&key, &state);
+
+            Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
+
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &state.seller, &payout);
+            if fee > 0 {
+                client.transfer(&env.current_contract_address(), &admin, &fee);
+            }
+
+            env.events()
+                .publish((symbol_short(&env, "released"), id), payout);
+        } else {
+            // For multi-tranche trades, users should use release_tranche()
+            // But we check the first tranche's secret for compatibility
+            let computed = env.crypto().sha256(&secret.into());
+            if computed.to_bytes() != state.secret_hash {
+                panic_with_error(&env, Error::InvalidSecret);
+            }
+            // If secret matches, this is an error - use release_tranche instead
             panic_with_error(&env, Error::InvalidSecret);
         }
-
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let fee_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::PlatformFeeBps)
-            .unwrap_or(0);
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-
-        let fee = (state.amount * fee_bps as i128) / 10_000;
-        let payout = state.amount - fee;
-
-        // CEI pattern: update state before external calls
-        state.status = TradeStatus::Released;
-        env.storage().persistent().set(&key, &state);
-
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&env.current_contract_address(), &state.seller, &payout);
-        if fee > 0 {
+    }
             client.transfer(&env.current_contract_address(), &admin, &fee);
         }
 
@@ -2087,16 +2342,28 @@ impl Htlc for EscrowContract {
             panic_with_error(&env, Error::TimeoutNotReached);
         }
 
+        // Calculate the unreleased amount (sum of all unreleased tranches)
+        let mut refund_amount: i128 = 0;
+        for i in 0..state.tranches.len() {
+            let tranche = state.tranches.get(i).unwrap();
+            if !tranche.released {
+                refund_amount += tranche.amount;
+            }
+        }
+
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
+        // Only transfer if there's an unreleased amount to refund
+        if refund_amount > 0 {
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &state.buyer, &refund_amount);
+        }
 
         env.events()
-            .publish((symbol_short(&env, "refunded"), id), state.amount);
+            .publish((symbol_short(&env, "refunded"), id), refund_amount);
     }
 }
 

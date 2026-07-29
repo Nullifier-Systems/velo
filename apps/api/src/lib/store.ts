@@ -162,6 +162,26 @@ export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
     );
 }
 
+export interface ReputationMetrics {
+    total_trades: number;
+    successful_claims: number;
+    completion_rate: number;
+    trusted: boolean;
+}
+
+/**
+ * Aggregate trust signal for a Stellar address from local trade history.
+ * `trusted` requires at least 5 trades and a ≥90% release completion rate.
+ */
+export function getReputationMetrics(address: string): ReputationMetrics {
+    const trades = getProviderTrades(address);
+    const total_trades = trades.length;
+    const successful_claims = trades.filter((t) => t.status === "released").length;
+    const completion_rate = total_trades === 0 ? 0 : successful_claims / total_trades;
+    const trusted = total_trades >= 5 && completion_rate >= 0.9;
+    return { total_trades, successful_claims, completion_rate, trusted };
+}
+
 export function setProviderPayoutMode(
     stellarAddress: string,
     payoutMode: "immediate" | "batched"
