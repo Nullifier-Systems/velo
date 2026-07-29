@@ -16,6 +16,8 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
+import { sessionRoutes } from "./routes/session.js";
+import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
@@ -258,7 +260,7 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
 
     const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
     const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
-    
+
     if (tx.memo.value?.toString() !== "velo:request") {
       throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
@@ -316,7 +318,6 @@ app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
+app.register(sessionRoutes, { prefix: "/api/v1" });
+app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
-if (stellarEventStore) {
-  app.register(graphqlRoutes, { store: stellarEventStore });
-}
