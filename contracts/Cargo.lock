@@ -668,9 +668,20 @@ checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
 name = "escrow"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "htlc-core",
  "proptest",
+ "rand 0.8.7",
  "soroban-sdk",
+]
+
+[[package]]
+name = "escrow-fuzz"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand 0.8.7",
+ "sha2",
 ]
 
 [[package]]
@@ -1249,6 +1260,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "reputation"
+version = "0.1.0"
+dependencies = [
+ "htlc-core",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "rfc6979"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1410,6 +1429,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "settlement-chain"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -2094,6 +2120,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "zk-credential"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

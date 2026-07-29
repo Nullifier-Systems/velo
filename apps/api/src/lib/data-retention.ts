@@ -9,21 +9,30 @@
  * dispute tracing, and reputation score integrity.
  */
 import { getAllCashRequests, type CashRequestRecord } from "./store.js";
-import { getChatInfrastructure, type ChatInfrastructure } from "./chat-infrastructure.js";
+import {
+  getChatInfrastructure,
+  type ChatInfrastructure,
+} from "./chat-infrastructure.js";
 import { deleteMessagesForTrade } from "./chat-store.js";
 import { deleteKeysForTrade } from "./key-store.js";
 import { deleteDisputeEvidenceForTrade } from "./dispute-evidence-store.js";
+import {
+  DEFAULT_CHAT_RETENTION_MS,
+  DEFAULT_DISPUTE_EVIDENCE_RETENTION_MS,
+  DEFAULT_DATA_RETENTION_POLL_INTERVAL_MS,
+} from "./timeouts.js";
 
-/** Default retention periods in milliseconds */
-export const DEFAULT_CHAT_RETENTION_MS = Number(
-  process.env.CHAT_RETENTION_MS ?? 30 * 24 * 60 * 60 * 1000 // 30 days
-);
-export const DEFAULT_DISPUTE_EVIDENCE_RETENTION_MS = Number(
-  process.env.DISPUTE_EVIDENCE_RETENTION_MS ?? 90 * 24 * 60 * 60 * 1000 // 90 days
-);
-export const DEFAULT_DATA_RETENTION_POLL_INTERVAL_MS = Number(
-  process.env.DATA_RETENTION_POLL_INTERVAL_MS ?? 60 * 60 * 1000 // 1 hour
-);
+// Re-export for backward compatibility
+export {
+  DEFAULT_CHAT_RETENTION_MS,
+  DEFAULT_DISPUTE_EVIDENCE_RETENTION_MS,
+  DEFAULT_DATA_RETENTION_POLL_INTERVAL_MS,
+};
+
+/**
+ * IMPORTANT: Retention constants are now defined in timeouts.ts
+ * See docs/TIMEOUT_POLICY.md for the complete policy.
+ */
 
 export interface RetentionPurgeOptions {
   chatRetentionMs?: number;
@@ -60,7 +69,7 @@ export function getTradeFinalizedTimestamp(record: CashRequestRecord): number {
  * Exported standalone so it can be invoked on-demand in background workers or tests.
  */
 export async function runRetentionPurgeTick(
-  options: RetentionPurgeOptions = {}
+  options: RetentionPurgeOptions = {},
 ): Promise<RetentionPurgeResult> {
   const chatRetentionMs = options.chatRetentionMs ?? DEFAULT_CHAT_RETENTION_MS;
   const evidenceRetentionMs =
@@ -95,7 +104,7 @@ export async function runRetentionPurgeTick(
         purgedChats += chatCount;
         purgedChatTrades++;
         console.log(
-          `[data-retention] Purged chat history (${chatCount} message(s)) for trade ${trade.id} (reason: retention_expired)`
+          `[data-retention] Purged chat history (${chatCount} message(s)) for trade ${trade.id} (reason: retention_expired)`,
         );
       }
     }
@@ -109,13 +118,13 @@ export async function runRetentionPurgeTick(
         try {
           const res = await options.pg.query(
             "DELETE FROM dispute_evidence WHERE trade_id = $1",
-            [trade.id]
+            [trade.id],
           );
           deletedPgEvidence = res?.rowCount ?? 0;
         } catch (err) {
           console.error(
             `[data-retention] Error deleting SQL dispute evidence for trade ${trade.id}:`,
-            err
+            err,
           );
         }
       }
@@ -125,7 +134,7 @@ export async function runRetentionPurgeTick(
         purgedEvidence += evidenceCount;
         purgedEvidenceTrades++;
         console.log(
-          `[data-retention] Purged dispute evidence (${evidenceCount} file(s)) for trade ${trade.id} (reason: retention_expired)`
+          `[data-retention] Purged dispute evidence (${evidenceCount} file(s)) for trade ${trade.id} (reason: retention_expired)`,
         );
       }
     }
@@ -133,7 +142,7 @@ export async function runRetentionPurgeTick(
 
   if (purgedChats > 0 || purgedEvidence > 0) {
     console.log(
-      `[data-retention] Purge complete: ${purgedChats} chat message(s) across ${purgedChatTrades} trade(s), ${purgedEvidence} evidence file(s) across ${purgedEvidenceTrades} trade(s).`
+      `[data-retention] Purge complete: ${purgedChats} chat message(s) across ${purgedChatTrades} trade(s), ${purgedEvidence} evidence file(s) across ${purgedEvidenceTrades} trade(s).`,
     );
   }
 
@@ -151,12 +160,12 @@ export async function runRetentionPurgeTick(
  */
 export function startDataRetentionScheduler(
   intervalMs: number = DEFAULT_DATA_RETENTION_POLL_INTERVAL_MS,
-  options?: RetentionPurgeOptions
+  options?: RetentionPurgeOptions,
 ): void {
   if (schedulerHandle) return;
   schedulerHandle = setInterval(() => {
     runRetentionPurgeTick(options).catch((err) =>
-      console.error("[data-retention] Purge tick failed:", err)
+      console.error("[data-retention] Purge tick failed:", err),
     );
   }, intervalMs);
   schedulerHandle.unref?.();

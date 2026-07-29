@@ -1,0 +1,47 @@
+config:
+  target: "{{ $processEnvironment.BASE_URL || 'http://localhost:3000' }}"
+  phases:
+    - name: "Warm-up (1 VU)"
+      duration: 10
+      arrivalRate: 1
+    - name: "Ramp up to Low Concurrency (10 VUs)"
+      duration: 15
+      arrivalRate: 1
+      rampto: 10
+    - name: "Medium Concurrency (50 VUs)"
+      duration: 20
+      arrivalRate: 10
+      rampto: 50
+    - name: "High Concurrency (100 VUs)"
+      duration: 20
+      arrivalRate: 50
+      rampto: 100
+    - name: "Peak Concurrency (250 VUs)"
+      duration: 20
+      arrivalRate: 100
+      rampto: 250
+  ensure:
+    p95: 2000
+    maxErrorRate: 10
+  plugins:
+    expect: {}
+
+scenarios:
+  - name: "Public and API Endpoint Mix"
+    flow:
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/api/v1/services"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/api/v1/status"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/api/v1/cash/agents?lat=19.4326&lng=-99.1332"
+      - get:
+          url: "/api/v1/reputation/GACW7A3VJ436Z4IFXRB45Z3P5VTLJSA4LDTR46YQ4P5VL4NFXZ4V63GA"

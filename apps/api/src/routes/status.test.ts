@@ -15,6 +15,7 @@ vi.mock("../lib/stellar.js", async (importOriginal) => {
 import { statusRoutes } from "./status.js";
 import { saveCashRequest, clearStore } from "../lib/store.js";
 
+
 describe("GET /api/v1/status", () => {
   beforeEach(() => {
     clearStore();

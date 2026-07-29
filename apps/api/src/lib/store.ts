@@ -14,7 +14,7 @@ export interface CashRequestRecord {
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
-    status: "locked" | "expired" | "released" | "refunded" | "disputed" | "pending_signature" | "pending_batch";
+    status: "locked" | "expired" | "released" | "refunded" | "disputed" | "resolved" | "pending_signature" | "pending_batch";
     createdAt: string;
     /** First ledger at which the on-chain escrow can be refunded. */
     timeoutLedger?: number;
@@ -24,6 +24,8 @@ export interface CashRequestRecord {
     resolvedAt?: string;
     resolvedBy?: string;
     resolution?: string;
+    /** Buyer's share of the disputed amount, in basis points, once resolved via resolve_dispute. */
+    buyerShareBps?: number;
     notificationType?: "email" | "sms" | "none";
     contactInfo?: string;
     // Set when the trade enters "pending_batch" — the secret revealed at
@@ -53,6 +55,9 @@ export interface ProviderRecord {
     payoutMode?: "immediate" | "batched";
 }
 
+import { globalH3SpatialIndex } from "./h3-spatial-index.js";
+import { globalOrderAllocator } from "./order-allocator.js";
+
 const store = new Map<string, CashRequestRecord>();
 const providersStore = new Map<string, ProviderRecord>();
 
@@ -63,10 +68,14 @@ export function saveCashRequest(record: CashRequestRecord) {
 export function clearStore() {
     store.clear();
     providersStore.clear();
+    globalH3SpatialIndex.clear();
+    globalOrderAllocator.clear();
 }
 
 export function saveProvider(record: ProviderRecord) {
     providersStore.set(record.id, record);
+    globalH3SpatialIndex.indexProvider(record);
+    globalOrderAllocator.registerProviderCapacity(record.id);
 }
 
 export function getProviders(): ProviderRecord[] {
@@ -91,7 +100,10 @@ export function setProviderVerificationStatus(
     status: ProviderRecord["kycStatus"]
 ): ProviderRecord | undefined {
     const record = providersStore.get(id);
-    if (record) record.kycStatus = status;
+    if (record) {
+        record.kycStatus = status;
+        globalH3SpatialIndex.indexProvider(record);
+    }
     return record;
 }
 

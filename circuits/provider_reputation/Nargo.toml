@@ -1,0 +1,7 @@
+[package]
+name = "provider_reputation"
+type = "bin"
+authors = ["velo"]
+compiler_version = ">=0.25.0"
+
+[dependencies]
