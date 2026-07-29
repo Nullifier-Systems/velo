@@ -89,6 +89,10 @@ enum DataKey {
     DynamicFeeConfig,
     /// Nonce tracking for replay protection.
     Nonce(BytesN<32>, u64),
+    /// Upgrade timelock: scheduled Wasm hash awaiting execution.
+    PendingUpgrade,
+    /// Ledger at which a pending upgrade becomes executable.
+    UpgradeExecutableLedger,
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -97,6 +101,16 @@ enum DataKey {
 /// mempool; short enough to still act as a real emergency circuit breaker
 /// (~50s at Stellar's ~5s ledger close time).
 pub const PAUSE_DELAY_LEDGERS: u32 = 10;
+
+/// Ledgers that must elapse between announcing an upgrade and executing it.
+///
+/// At roughly 5s/ledger, this is ~7 days — enough time for operators to review
+/// the new Wasm binary, verify storage compatibility, and for users with active
+/// locked trades to observe the upcoming change. This is the primary defense
+/// against malicious upgrades: no instant contract replacement.
+///
+/// See docs/contract-upgrade-safety.md for the full upgrade procedure.
+pub const UPGRADE_TIMELOCK_LEDGERS: u32 = 6 * 60 * 24 * 7;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -150,6 +164,12 @@ pub enum Error {
     InsufficientSignatures = 29,
     /// Signature replay attempt detected (nonce already used).
     NonceAlreadyUsed = 30,
+    /// Upgrade timelock not yet reached — cannot execute upgrade.
+    UpgradeTimelockActive = 31,
+    /// No upgrade has been announced.
+    NoUpgradePending = 32,
+    /// Upgrade already announced and still pending.
+    UpgradeAlreadyPending = 33,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -259,6 +279,22 @@ pub struct ArbitratorMeta {
     pub pending_disputes: u32,
 }
 
+/// Upgrade announcement state for the timelock mechanism.
+///
+/// Created by `announce_upgrade()`, consumed by `execute_upgrade()`.
+/// The timelock ensures observers have time to review the new Wasm before
+/// it goes live — critical for a contract holding user funds.
+#[derive(Clone)]
+#[contracttype]
+pub struct UpgradeAnnouncement {
+    /// Hash of the new Wasm binary to be deployed.
+    pub new_wasm_hash: BytesN<32>,
+    /// Ledger sequence at which this upgrade was announced.
+    pub announced_at: u32,
+    /// Ledger sequence at which this upgrade becomes executable.
+    pub executable_at: u32,
+}
+
 /// Pool-selection state for one disputed trade, created by `raise_dispute()`
 /// and consumed by `select_arbitrator()` / `resolve_dispute()` /
 /// `refund_after_dispute_timeout()`.
@@ -279,6 +315,8 @@ pub struct DisputeSelection {
     pub eligible: Vec<Address>,
     /// Filled in by `select_arbitrator()` once drawn. `None` until then.
     pub selected: Option<Address>,
+}
+
 /// Issue #280 — tunable anti-spam bond parameters.
 #[derive(Clone)]
 #[contracttype]
@@ -1081,6 +1119,180 @@ impl EscrowContract {
             .instance()
             .remove(&DataKey::PauseEffectiveLedger);
         Ok(())
+    }
+
+    /// Announce an upcoming contract upgrade (admin / multisig only).
+    ///
+    /// This is the first of two steps required to upgrade this contract's Wasm
+    /// binary using Soroban's native upgrade mechanism. The announced upgrade
+    /// cannot be executed until `UPGRADE_TIMELOCK_LEDGERS` have elapsed, giving
+    /// operators time to review the new binary and users with active locked
+    /// trades time to observe the upcoming change.
+    ///
+    /// ## Parameters
+    /// - `new_wasm_hash`: SHA-256 hash of the new Wasm binary to deploy. This
+    ///   hash must match the Wasm passed to `execute_upgrade()`, preventing
+    ///   a last-second substitution attack.
+    /// - `signers`: Admin authorization (single admin or multisig depending on
+    ///   current governance mode).
+    ///
+    /// ## Storage Layout Compatibility
+    /// Before calling this function, the new Wasm **must** preserve the storage
+    /// layout for all existing data structures, particularly:
+    /// - `TradeState` field order and types must remain identical
+    /// - `DataKey` enum variants for `Trade`, `Dispute`, `ArbitratorMember`, etc.
+    /// - All persistent storage keys used by existing locked trades
+    ///
+    /// See docs/contract-upgrade-safety.md for the full compatibility checklist.
+    ///
+    /// ## Events
+    /// Emits an `upgrade_announced` event with the Wasm hash and executable ledger.
+    pub fn announce_upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        signers: Vec<Address>,
+    ) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+
+        // Only one upgrade can be pending at a time — forcing sequential upgrades
+        // prevents confusion about which announced hash is actually scheduled.
+        if env.storage().instance().has(&DataKey::PendingUpgrade) {
+            return Err(Error::UpgradeAlreadyPending);
+        }
+
+        let now = env.ledger().sequence();
+        let executable_at = now.saturating_add(UPGRADE_TIMELOCK_LEDGERS);
+
+        let announcement = UpgradeAnnouncement {
+            new_wasm_hash: new_wasm_hash.clone(),
+            announced_at: now,
+            executable_at,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgrade, &announcement);
+
+        env.events().publish(
+            (symbol_short(&env, "upgrade_announced"),),
+            (new_wasm_hash, executable_at),
+        );
+
+        Ok(())
+    }
+
+    /// Execute a previously announced upgrade (admin / multisig only).
+    ///
+    /// This is the second and final step of the upgrade process. The timelock
+    /// must have elapsed since `announce_upgrade()` was called, and the Wasm
+    /// hash passed here must match the one that was announced.
+    ///
+    /// ## Parameters
+    /// - `new_wasm_hash`: Must match the hash passed to `announce_upgrade()`.
+    ///   This prevents a substitution attack where an admin announces one
+    ///   binary for review but executes a different one.
+    /// - `signers`: Admin authorization (single admin or multisig).
+    ///
+    /// ## Safety
+    /// This function calls Soroban's native `update_current_contract_wasm()`
+    /// host function, which atomically replaces the contract's executable code
+    /// while preserving all storage at this contract address. If the new Wasm
+    /// is storage-incompatible with existing data, subsequent calls will trap.
+    ///
+    /// **Critical:** Test the upgrade on a clone of mainnet state before
+    /// executing it in production. A storage-incompatible upgrade can brick
+    /// every locked trade.
+    ///
+    /// ## Events
+    /// Emits an `upgrade_executed` event with the Wasm hash.
+    pub fn execute_upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        signers: Vec<Address>,
+    ) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+
+        let announcement: UpgradeAnnouncement = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingUpgrade)
+            .ok_or(Error::NoUpgradePending)?;
+
+        // Verify the hash matches what was announced — this is the primary
+        // defense against announcing one binary for review but executing another.
+        if new_wasm_hash != announcement.new_wasm_hash {
+            return Err(Error::Unauthorized);
+        }
+
+        // Enforce the timelock — observers must have had the full delay period
+        // to review the announced Wasm binary.
+        if env.ledger().sequence() < announcement.executable_at {
+            return Err(Error::UpgradeTimelockActive);
+        }
+
+        // Clear the pending upgrade before calling the host function — if the
+        // host function traps, this state change will roll back, but if it
+        // succeeds we want the announcement consumed so a new one can be made
+        // for the next upgrade.
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        // Soroban's native upgrade mechanism: atomically replaces the Wasm
+        // executable at this contract address while keeping the same address
+        // and all storage intact. This is NOT deploying a new contract — it's
+        // hot-swapping the code of the existing one.
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+
+        env.events().publish(
+            (symbol_short(&env, "upgrade_executed"),),
+            new_wasm_hash,
+        );
+
+        Ok(())
+    }
+
+    /// Cancel a pending upgrade (admin / multisig only).
+    ///
+    /// Removes the announced upgrade before its timelock expires. This allows
+    /// an admin to abort an upgrade if a problem is discovered during the
+    /// review period (e.g., a storage compatibility issue or a security flaw
+    /// in the new Wasm).
+    ///
+    /// ## Events
+    /// Emits an `upgrade_cancelled` event with the hash that was cancelled.
+    pub fn cancel_upgrade(env: Env, signers: Vec<Address>) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+
+        let announcement: UpgradeAnnouncement = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingUpgrade)
+            .ok_or(Error::NoUpgradePending)?;
+
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        env.events().publish(
+            (symbol_short(&env, "upgrade_cancelled"),),
+            announcement.new_wasm_hash,
+        );
+
+        Ok(())
+    }
+
+    /// Read-only accessor for the current pending upgrade, if any.
+    ///
+    /// Returns `None` if no upgrade is currently announced, or `Some(announcement)`
+    /// with the Wasm hash and executable ledger if one is pending.
+    ///
+    /// Off-chain systems should monitor this to detect upcoming upgrades and
+    /// alert operators for review before the timelock expires.
+    pub fn get_pending_upgrade(env: Env) -> Option<UpgradeAnnouncement> {
+        env.storage().instance().get(&DataKey::PendingUpgrade)
+    }
+
+    /// Fixed delay (in ledgers) between announcing and executing an upgrade.
+    pub fn upgrade_timelock_ledgers(_env: Env) -> u32 {
+        UPGRADE_TIMELOCK_LEDGERS
     }
 
     /// Release many trades in a single invocation — the on-chain half of
@@ -1951,8 +2163,6 @@ fn release_arbitrator_slot(env: &Env, arbitrator: &Address) {
     }
 }
 
-fn check_not_paused(env: &Env) {
-    if let Some(paused) = env
 fn is_effectively_paused(env: &Env) -> bool {
     let armed: bool = env
         .storage()
@@ -2874,6 +3084,9 @@ mod test {
         assert!(f
             .client
             .try_chain_release_to_lock(&f.id, &wrong_secret, &new_seller, &new_secret_hash, &50)
+            .is_err());
+    }
+
     // Permissionless, collusion-resistant arbitrator selection (issue #279).
     //
     // The pool is opt-in and layers on top of the single `Arbitrator`
@@ -3973,3 +4186,6 @@ mod malicious_token;
 
 #[cfg(test)]
 mod reentrancy_test;
+
+#[cfg(test)]
+mod upgrade_test;
