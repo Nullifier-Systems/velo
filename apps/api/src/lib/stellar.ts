@@ -552,6 +552,11 @@ export interface LockParams {
   timeoutLedgers: number;
 }
 
+export interface TimeoutOptions {
+  buildSimTimeout?: number;
+  pollTimeout?: number;
+}
+
 export interface ReleaseParams {
   contractId: string;
   tradeId: string;
@@ -587,8 +592,7 @@ export interface BatchReleaseParams {
 export async function lockEscrow(
   params: LockParams,
   logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.lockBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.lockPoll,
+  options?: TimeoutOptions,
 ): Promise<number> {
   const signer = loadSignerKeypair();
   const amount = params.amountStroops ?? params.amount;
@@ -649,8 +653,7 @@ export async function buildLockEscrowTransaction(
 export async function releaseEscrow(
   params: ReleaseParams,
   logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.releasePoll,
+  options?: TimeoutOptions,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
   return invokeContract(
@@ -668,8 +671,7 @@ export async function releaseEscrow(
 export async function refundEscrow(
   params: RefundParams,
   logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.refundBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.refundPoll,
+  options?: TimeoutOptions,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
   return invokeContract(
