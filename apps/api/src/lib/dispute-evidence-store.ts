@@ -15,13 +15,24 @@ export interface DisputeEvidenceRecord {
   contentType: string;
   sizeBytes: number;
   data: Buffer;
+  encryptedNonce: Buffer;
+  encryptedTag: Buffer;
+  wrappedKey: Buffer;
+  wrappedKeyNonce: Buffer;
+  merkleRoot: string;
   createdAt: string;
 }
+
+/** Fields required to create a new evidence record. */
+export type CreateDisputeEvidenceInput = Omit<
+  DisputeEvidenceRecord,
+  "id" | "createdAt" | "sizeBytes"
+>;
 
 const evidenceStore = new Map<string, DisputeEvidenceRecord>();
 
 export function saveDisputeEvidence(
-  evidence: Omit<DisputeEvidenceRecord, "id" | "createdAt" | "sizeBytes">,
+  evidence: CreateDisputeEvidenceInput,
 ): DisputeEvidenceRecord {
   const record: DisputeEvidenceRecord = {
     ...evidence,
@@ -31,6 +42,17 @@ export function saveDisputeEvidence(
   };
   evidenceStore.set(record.id, record);
   return record;
+}
+
+export function updateDisputeEvidence(
+  id: string,
+  updates: Partial<DisputeEvidenceRecord>,
+): DisputeEvidenceRecord | undefined {
+  const existing = evidenceStore.get(id);
+  if (!existing) return undefined;
+  const updated = { ...existing, ...updates };
+  evidenceStore.set(id, updated);
+  return updated;
 }
 
 export function getDisputeEvidence(id: string): DisputeEvidenceRecord | undefined {
@@ -57,4 +79,3 @@ export function deleteDisputeEvidenceForTrade(tradeId: string): number {
 export function clearDisputeEvidence(): void {
   evidenceStore.clear();
 }
-

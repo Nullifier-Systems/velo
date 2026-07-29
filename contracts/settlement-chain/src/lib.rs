@@ -404,8 +404,7 @@ impl SettlementChainContract {
             .persistent()
             .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
-        env.events()
-            .publish((s(&env, "chain_refunded"), id), ());
+        env.events().publish((s(&env, "chain_refunded"), id), ());
 
         Ok(())
     }
@@ -672,10 +671,7 @@ mod tests {
         client.initialize(&admin, &token_addr);
 
         // D tries to create a chain involving A and B — only D authorizes.
-        let hops = vec![
-            &env,
-            hop(a.clone(), b.clone(), 100),
-        ];
+        let hops = vec![&env, hop(a.clone(), b.clone(), 100)];
         let id = BytesN::from_array(&env, &[1u8; 32]);
 
         // This fails because A and B are not authorized.
@@ -767,10 +763,7 @@ mod tests {
     fn test_refund_chain_after_timeout() {
         let f = setup();
 
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         // Advance ledger past timeout
@@ -831,10 +824,7 @@ mod tests {
     fn test_double_settlement_is_noop() {
         let f = setup();
 
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         // First settlement succeeds
@@ -881,10 +871,7 @@ mod tests {
     #[test]
     fn test_refund_before_timeout_fails() {
         let f = setup();
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         // Attempt refund before timeout
@@ -899,10 +886,7 @@ mod tests {
     #[test]
     fn test_settle_after_timeout_fails() {
         let f = setup();
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         // Advance ledger past timeout
@@ -920,10 +904,7 @@ mod tests {
     #[test]
     fn test_refund_twice_fails() {
         let f = setup();
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         f.env.ledger().with_mut(|li| li.sequence_number += 101);
@@ -937,10 +918,7 @@ mod tests {
     #[test]
     fn test_settle_refunded_chain_fails() {
         let f = setup();
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         f.env.ledger().with_mut(|li| li.sequence_number += 101);
@@ -955,26 +933,18 @@ mod tests {
     fn test_initialize_twice_fails() {
         let f = setup();
         let other_admin = Address::generate(&f.env);
-        let result = f
-            .client
-            .try_initialize(&other_admin, &f.token.address);
+        let result = f.client.try_initialize(&other_admin, &f.token.address);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_duplicate_chain_id_rejected() {
         let f = setup();
-        let hops = vec![
-            &f.env,
-            hop(f.a.clone(), f.b.clone(), 100),
-        ];
+        let hops = vec![&f.env, hop(f.a.clone(), f.b.clone(), 100)];
         f.client.create_chain(&f.id, &hops, &100);
 
         // Same ID again
-        let hops2 = vec![
-            &f.env,
-            hop(f.b.clone(), f.c.clone(), 50),
-        ];
+        let hops2 = vec![&f.env, hop(f.b.clone(), f.c.clone(), 50)];
         let result = f.client.try_create_chain(&f.id, &hops2, &100);
         assert!(result.is_err());
     }

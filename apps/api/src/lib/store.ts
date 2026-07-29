@@ -55,6 +55,9 @@ export interface ProviderRecord {
     payoutMode?: "immediate" | "batched";
 }
 
+import { globalH3SpatialIndex } from "./h3-spatial-index.js";
+import { globalOrderAllocator } from "./order-allocator.js";
+
 const store = new Map<string, CashRequestRecord>();
 const providersStore = new Map<string, ProviderRecord>();
 
@@ -65,10 +68,14 @@ export function saveCashRequest(record: CashRequestRecord) {
 export function clearStore() {
     store.clear();
     providersStore.clear();
+    globalH3SpatialIndex.clear();
+    globalOrderAllocator.clear();
 }
 
 export function saveProvider(record: ProviderRecord) {
     providersStore.set(record.id, record);
+    globalH3SpatialIndex.indexProvider(record);
+    globalOrderAllocator.registerProviderCapacity(record.id);
 }
 
 export function getProviders(): ProviderRecord[] {
@@ -93,7 +100,10 @@ export function setProviderVerificationStatus(
     status: ProviderRecord["kycStatus"]
 ): ProviderRecord | undefined {
     const record = providersStore.get(id);
-    if (record) record.kycStatus = status;
+    if (record) {
+        record.kycStatus = status;
+        globalH3SpatialIndex.indexProvider(record);
+    }
     return record;
 }
 

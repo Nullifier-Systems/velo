@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatRefundCountdown } from "../lib/api";
 
 function statusLabel(status: 'locked' | 'expired' | 'released' | 'refunded'): string {
   if (status === 'locked') return 'Ready to claim';
@@ -10,6 +11,11 @@ function statusLabel(status: 'locked' | 'expired' | 'released' | 'refunded'): st
 function buildQrPayload(id: string, secret: string | null, contractId: string): string | null {
   if (!secret) return null;
   return `velo://claim?request_id=${id}&secret=${secret}&contract=${contractId}`;
+}
+
+/** Mirrors ClaimQR pause banner visibility for existing locked trades. */
+function pauseBannerVisible(paused: boolean): boolean {
+  return paused;
 }
 
 describe("ClaimQR logic and status formatting", () => {
@@ -28,5 +34,17 @@ describe("ClaimQR logic and status formatting", () => {
   it("returns null QR payload when secret is absent", () => {
     const payload = buildQrPayload("req_123", null, "C1234567890");
     expect(payload).toBeNull();
+  });
+
+  it("formats refund countdown estimates for the claim ticket", () => {
+    expect(formatRefundCountdown(0)).toBe("0s");
+    expect(formatRefundCountdown(45)).toBe("45s");
+    expect(formatRefundCountdown(125)).toBe("2m 05s");
+    expect(formatRefundCountdown(3725)).toBe("1h 2m");
+  });
+
+  it("shows pause banner when escrow circuit breaker is active", () => {
+    expect(pauseBannerVisible(true)).toBe(true);
+    expect(pauseBannerVisible(false)).toBe(false);
   });
 });

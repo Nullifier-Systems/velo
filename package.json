@@ -19,7 +19,8 @@
     "dev:api": "npm run dev -w apps/api",
     "dev:frontend": "npm run dev -w mobile/frontend",
     "dev:backend": "npm run dev -w mobile/backend",
-    "post-deploy-check": "npm run post-deploy-check -w apps/api"
+    "post-deploy-check": "npm run post-deploy-check -w apps/api",
+    "test:load": "node scripts/run-load-test.js"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

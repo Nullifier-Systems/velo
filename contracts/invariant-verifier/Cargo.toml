@@ -1,0 +1,20 @@
+[package]
+name = "invariant-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "Automated contract upgrade invariant verification framework for Soroban smart contracts"
+license = "Apache-2.0"
+
+[[bin]]
+name = "invariant-verifier"
+path = "src/main.rs"
+
+[dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+htlc-core = { path = "../htlc-core" }
+escrow = { path = "../escrow" }
+atomic-swap = { path = "../atomic-swap" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+proptest = { version = "1", default-features = false, features = ["std"] }

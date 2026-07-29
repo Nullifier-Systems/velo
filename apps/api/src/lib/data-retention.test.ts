@@ -138,6 +138,11 @@ describe("Data Retention & Automated Deletion", () => {
       fileName: "active.png",
       contentType: "image/png",
       data: Buffer.from("fake_png_data"),
+      encryptedNonce: Buffer.alloc(12),
+      encryptedTag: Buffer.alloc(16),
+      wrappedKey: Buffer.alloc(48),
+      wrappedKeyNonce: Buffer.alloc(12),
+      merkleRoot: "0".repeat(64),
     });
 
     // Populate recent trade
@@ -153,6 +158,11 @@ describe("Data Retention & Automated Deletion", () => {
       fileName: "recent.png",
       contentType: "image/png",
       data: Buffer.from("fake_png_data_recent"),
+      encryptedNonce: Buffer.alloc(12),
+      encryptedTag: Buffer.alloc(16),
+      wrappedKey: Buffer.alloc(48),
+      wrappedKeyNonce: Buffer.alloc(12),
+      merkleRoot: "0".repeat(64),
     });
 
     const result = await runRetentionPurgeTick({
@@ -181,6 +191,11 @@ describe("Data Retention & Automated Deletion", () => {
       fileName: "bank_receipt.jpg",
       contentType: "image/jpeg",
       data: Buffer.from("jpg_bytes"),
+      encryptedNonce: Buffer.alloc(12),
+      encryptedTag: Buffer.alloc(16),
+      wrappedKey: Buffer.alloc(48),
+      wrappedKeyNonce: Buffer.alloc(12),
+      merkleRoot: "0".repeat(64),
     });
 
     const mockPgQuery = vi.fn().mockResolvedValue({ rowCount: 1 });
@@ -216,6 +231,11 @@ describe("Data Retention & Automated Deletion", () => {
       fileName: "evidence.jpg",
       contentType: "image/jpeg",
       data: Buffer.from("image_bytes"),
+      encryptedNonce: Buffer.alloc(12),
+      encryptedTag: Buffer.alloc(16),
+      wrappedKey: Buffer.alloc(48),
+      wrappedKeyNonce: Buffer.alloc(12),
+      merkleRoot: "0".repeat(64),
     });
 
     await runRetentionPurgeTick({

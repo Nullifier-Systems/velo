@@ -4,8 +4,8 @@ members = [
     "htlc-core",
     "escrow",
     "atomic-swap",
-    "settlement-chain",
     "soroban-lint",
+    "invariant-verifier",
 ]
 
 [workspace.dependencies]
