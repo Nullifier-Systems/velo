@@ -20,7 +20,12 @@ describe("providerRoutes", () => {
     });
 
     expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: "Unauthorized: Missing x-provider-address header" });
+    expect(response.json()).toEqual({
+      code: "MISSING_PROVIDER_ADDRESS",
+      error: "Unauthorized",
+      message: "Unauthorized: Missing x-provider-address header",
+      statusCode: 401,
+    });
     await app.close();
   });
 

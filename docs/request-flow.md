@@ -87,6 +87,11 @@ closed Stellar ledger. Once the timeout is reached, the API records and returns
 `expired`. This is a display/workflow state only: funds are not returned until a
 caller separately invokes `POST /api/v1/cash/request/:id/refund`, after which the
 request becomes `refunded`.
+
+While the request is still `locked` or `expired`, the same GET response includes a
+refund countdown (`ledgersUntilRefund`, `refundAvailable`,
+`estimatedSecondsUntilRefund`) so either party can see when permissionless refund
+opens. See [stuck-trades.md](stuck-trades.md).
 12. The **API Layer** verifies the database record and returns the metadata.
 13. The merchant terminal displays the verification screen.
 

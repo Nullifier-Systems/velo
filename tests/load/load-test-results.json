@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-07-27T14:00:06.361Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "tier": "1 VU Baseline",
+      "vus": 1,
+      "durationSec": 4.173,
+      "totalRequests": 29,
+      "rps": 6.95,
+      "errorRatePct": 0,
+      "latenciesMs": {
+        "p50": 2,
+        "p90": 541,
+        "p95": 554,
+        "p99": 1598
+      },
+      "statusCodes": {
+        "200": 17,
+        "402": 12
+      }
+    },
+    {
+      "tier": "10 VUs Low Concurrency",
+      "vus": 10,
+      "durationSec": 6.003,
+      "totalRequests": 4359,
+      "rps": 726.14,
+      "errorRatePct": 65.89,
+      "latenciesMs": {
+        "p50": 4,
+        "p90": 10,
+        "p95": 15,
+        "p99": 504
+      },
+      "statusCodes": {
+        "200": 1439,
+        "402": 48,
+        "500": 2872
+      }
+    },
+    {
+      "tier": "50 VUs Medium Concurrency",
+      "vus": 50,
+      "durationSec": 8.017,
+      "totalRequests": 21389,
+      "rps": 2667.96,
+      "errorRatePct": 70.88,
+      "latenciesMs": {
+        "p50": 17,
+        "p90": 28,
+        "p95": 33,
+        "p99": 54
+      },
+      "statusCodes": {
+        "200": 6229,
+        "500": 15160
+      }
+    },
+    {
+      "tier": "100 VUs High Concurrency",
+      "vus": 100,
+      "durationSec": 10.035,
+      "totalRequests": 29525,
+      "rps": 2942.2,
+      "errorRatePct": 70.35,
+      "latenciesMs": {
+        "p50": 30,
+        "p90": 47,
+        "p95": 57,
+        "p99": 125
+      },
+      "statusCodes": {
+        "200": 8755,
+        "500": 20770
+      }
+    },
+    {
+      "tier": "250 VUs Peak Concurrency",
+      "vus": 250,
+      "durationSec": 10.324,
+      "totalRequests": 26005,
+      "rps": 2518.89,
+      "errorRatePct": 69.79,
+      "latenciesMs": {
+        "p50": 84,
+        "p90": 158,
+        "p95": 198,
+        "p99": 315
+      },
+      "statusCodes": {
+        "200": 7857,
+        "500": 18148
+      }
+    }
+  ]
+}

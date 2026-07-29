@@ -6,7 +6,10 @@ import LanguageSwitcher from "../components/LanguageSwitcher.js";
 import {
   fetchCashRequest,
   releaseCashRequest,
+  refundCashRequest,
+  fetchEscrowPauseState,
   formatStroops,
+  formatRefundCountdown,
   shortAddress,
   type CashRequestStatus,
 } from '../lib/api';
@@ -76,6 +79,9 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+  const [escrowPaused, setEscrowPaused] = useState(false);
   const [releaseElapsed, setReleaseElapsed] = useState(0);
   const releaseStartRef = useRef<number | null>(null);
   const releaseTickRef  = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -114,22 +120,54 @@ export default function ClaimQR() {
     try {
       const result = await fetchCashRequest(id);
       setStatus(result);
+      if (
+        typeof result.estimatedSecondsUntilRefund === "number" &&
+        (result.status === "locked" || result.status === "expired")
+      ) {
+        setCountdownSeconds(result.estimatedSecondsUntilRefund);
+      } else {
+        setCountdownSeconds(null);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("claim.somethingWentWrong"));
     }
   }, [id, t]);
 
+  const loadPauseState = useCallback(async () => {
+    try {
+      const pause = await fetchEscrowPauseState();
+      setEscrowPaused(pause.paused);
+    } catch {
+      // Best-effort: claim flow for existing trades must keep working.
+      setEscrowPaused(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadPauseState();
     const interval = setInterval(() => {
       setStatus((current) => {
-        if (current?.status === 'locked') load();
+        if (current?.status === "locked" || current?.status === "expired") load();
         return current;
       });
+      loadPauseState();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadPauseState]);
+
+  // Tick the wall-clock estimate between API polls so the countdown feels live.
+  useEffect(() => {
+    if (status?.status !== "locked" && status?.status !== "expired") return;
+    if (typeof status.estimatedSecondsUntilRefund !== "number") return;
+    const tick = setInterval(() => {
+      setCountdownSeconds((prev) =>
+        prev === null || prev <= 0 ? prev : prev - 1,
+      );
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [status?.id, status?.status, status?.estimatedSecondsUntilRefund]);
 
   const statusLabel = (s: CashRequestStatus["status"]): string => {
     if (s === "locked") return t("claim.statusReady");
@@ -254,6 +292,13 @@ export default function ClaimQR() {
           </span>
         </div>
 
+        {escrowPaused && (
+          <div className="claim-ticket__pause-banner" role="status" aria-live="polite">
+            <strong>{t("claim.pausedTitle")}</strong>
+            <p>{t("claim.pausedBody")}</p>
+          </div>
+        )}
+
         <div className="claim-ticket__qr-window">
           {status.status === 'locked' && qrPayload ? (
             <>
@@ -309,24 +354,65 @@ export default function ClaimQR() {
               {shortAddress(status.id)}
             </span>
           </div>
+          {(status.status === "locked" || status.status === "expired") &&
+            status.timeoutLedger !== undefined && (
+              <div className="claim-ticket__row claim-ticket__row--refund">
+                <span className="claim-ticket__label">{t("claim.refundWindow")}</span>
+                <span
+                  className="claim-ticket__value claim-ticket__countdown"
+                  aria-live="polite"
+                >
+                  {status.refundAvailable ||
+                  status.status === "expired" ||
+                  (countdownSeconds !== null && countdownSeconds <= 0)
+                    ? t("claim.refundAvailableNow")
+                    : t("claim.refundIn", {
+                        time: formatRefundCountdown(countdownSeconds ?? status.estimatedSecondsUntilRefund ?? 0),
+                        ledgers: status.ledgersUntilRefund ?? "—",
+                      })}
+                </span>
+              </div>
+            )}
         </div>
 
-        {status.status === "locked" && (
+        {(status.status === "locked" || status.status === "expired") && (
           <div className="claim-ticket__actions">
-            <a
-              href={`/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`}
-              className="claim-ticket__chat-link"
-              onClick={(e) => {
-                e.preventDefault();
-                window.open(
-                  `/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`,
-                  "chat",
-                  "width=460,height=700"
-                );
-              }}
-            >
-              {t("claim.chatWithProvider")}
-            </a>
+            {status.status === "locked" && (
+              <a
+                href={`/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`}
+                className="claim-ticket__chat-link"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.open(
+                    `/chat/${status.id}?participant=${encodeURIComponent(status.buyer)}&token=${encodeURIComponent(chatToken)}`,
+                    "chat",
+                    "width=460,height=700"
+                  );
+                }}
+              >
+                {t("claim.chatWithProvider")}
+              </a>
+            )}
+            {(status.refundAvailable || status.status === "expired") && (
+              <button
+                type="button"
+                className="claim-ticket__refund-button"
+                disabled={refunding}
+                onClick={async () => {
+                  setRefunding(true);
+                  try {
+                    await refundCashRequest(status.id);
+                    await load();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : t("claim.refundFailed"));
+                  } finally {
+                    setRefunding(false);
+                  }
+                }}
+              >
+                {refunding ? t("claim.refunding") : t("claim.requestRefund")}
+              </button>
+            )}
           </div>
         )}
 
