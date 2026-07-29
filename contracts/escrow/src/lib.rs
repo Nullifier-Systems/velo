@@ -89,6 +89,9 @@ enum DataKey {
     DynamicFeeConfig,
     /// Nonce tracking for replay protection.
     Nonce(BytesN<32>, u64),
+    /// Proof-of-reserve: running total of all currently locked funds.
+    /// Incremented atomically on every lock(), decremented on every release()/refund().
+    TotalLocked,
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -279,6 +282,8 @@ pub struct DisputeSelection {
     pub eligible: Vec<Address>,
     /// Filled in by `select_arbitrator()` once drawn. `None` until then.
     pub selected: Option<Address>,
+}
+
 /// Issue #280 — tunable anti-spam bond parameters.
 #[derive(Clone)]
 #[contracttype]
@@ -330,6 +335,32 @@ fn bond_params(env: &Env) -> BondParams {
             establish_threshold: ESTABLISH_THRESHOLD,
             min_establish_amount: MIN_ESTABLISH_AMOUNT,
         })
+}
+
+/// Atomically increment the running total of locked funds.
+/// Called immediately after recording a new trade in Locked status.
+fn increment_total_locked(env: &Env, amount: i128) {
+    let current: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::TotalLocked)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalLocked, &(current + amount));
+}
+
+/// Atomically decrement the running total of locked funds.
+/// Called immediately after a trade transitions from Locked to Released/Refunded/Resolved.
+fn decrement_total_locked(env: &Env, amount: i128) {
+    let current: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::TotalLocked)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalLocked, &(current.saturating_sub(amount)));
 }
 
 // Invariant: funds can only ever leave this contract's balance through
@@ -479,6 +510,58 @@ impl EscrowContract {
 
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
         env.storage().persistent().get(&DataKey::Trade(id))
+    }
+
+    /// Returns the current aggregate of all funds locked in active trades.
+    /// This is the on-chain-maintained sum that `verify_reserve()` compares
+    /// against the contract's actual token balance.
+    pub fn get_total_locked(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalLocked)
+            .unwrap_or(0)
+    }
+
+    /// Proof-of-reserve verification: checks whether the contract's actual
+    /// token balance is >= the sum of all funds currently locked in trades.
+    ///
+    /// Returns `true` if the reserve is fully backed (balance >= total_locked),
+    /// `false` otherwise.
+    ///
+    /// # Edge case: extra tokens sent directly to the contract
+    ///
+    /// If someone transfers tokens directly to this contract's address outside
+    /// of `lock()` (e.g., via a plain `token.transfer()`), the balance will
+    /// exceed `total_locked`. This is *not* a problem:
+    ///
+    /// - The extra tokens cannot be claimed by any trade (trades only unlock
+    ///   the amounts recorded in their `TradeState`).
+    /// - `verify_reserve()` returns `true` (over-collateralized is fine).
+    /// - The contract remains fully solvent for all existing trades.
+    /// - An admin could recover the excess via a future governance feature,
+    ///   but that is out of scope for this issue.
+    ///
+    /// The dangerous direction is balance *below* total_locked, which would
+    /// indicate a bug (double-spend, missing increment/decrement, etc.) or
+    /// a malicious external actor somehow draining funds. This function
+    /// detects that scenario.
+    pub fn verify_reserve(env: Env) -> bool {
+        let total_locked: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalLocked)
+            .unwrap_or(0);
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized));
+
+        let client = token::Client::new(&env, &token_addr);
+        let balance = client.balance(&env.current_contract_address());
+
+        balance >= total_locked
     }
 
     /// Register as an arbitrator, joining the selection pool. Permissionless
@@ -883,6 +966,9 @@ impl EscrowContract {
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
 
+        // Proof-of-reserve: decrement total_locked when dispute is resolved.
+        decrement_total_locked(&env, state.amount);
+
         if buyer_amount > 0 {
             client.transfer(&env.current_contract_address(), &state.buyer, &buyer_amount);
         }
@@ -961,6 +1047,9 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
+
+        // Proof-of-reserve: decrement total_locked when dispute times out and refunds.
+        decrement_total_locked(&env, state.amount);
 
         // Slashing: Admin seizes all stakes from arbitrators since they failed to resolve.
         // For simplicity, we zero out all stakes in `arb_set.keys` and send to admin.
@@ -1137,6 +1226,9 @@ impl EscrowContract {
             state.status = TradeStatus::Released;
             env.storage().persistent().set(&key, &state);
 
+            // Proof-of-reserve: decrement total_locked for each successfully released trade.
+            decrement_total_locked(&env, state.amount);
+
             client.transfer(&env.current_contract_address(), &state.seller, &payout);
             if fee > 0 {
                 client.transfer(&env.current_contract_address(), &admin, &fee);
@@ -1243,6 +1335,9 @@ impl EscrowContract {
         release_state.status = TradeStatus::Released;
         env.storage().persistent().set(&release_key, &release_state);
 
+        // Proof-of-reserve: decrement for the released trade.
+        decrement_total_locked(&env, release_state.amount);
+
         let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
         let new_state = TradeState {
             seller: new_seller,
@@ -1256,6 +1351,10 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .extend_ttl(&new_key, 100_000, 100_000);
+
+        // Proof-of-reserve: increment for the new locked trade.
+        // Net effect: total_locked decreases by `fee` (the only amount that left the contract).
+        increment_total_locked(&env, payout);
 
         if fee > 0 {
             let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
@@ -1336,6 +1435,9 @@ impl EscrowContract {
             // CEI pattern: update state before external calls.
             state.status = TradeStatus::Released;
             env.storage().persistent().set(&key, &state);
+
+            // Proof-of-reserve: decrement total_locked for each released trade.
+            decrement_total_locked(&env, state.amount);
 
             client.transfer(&env.current_contract_address(), &state.seller, &payout);
             if fee > 0 {
@@ -1526,6 +1628,9 @@ impl EscrowContract {
             .extend_ttl(&key, 100_000, 100_000);
         env.storage().persistent().remove(&commitment_key);
 
+        // Proof-of-reserve: increment total_locked when revealing creates a locked trade.
+        increment_total_locked(&env, amount);
+
         let token_addr: Address = env
             .storage()
             .instance()
@@ -1627,6 +1732,9 @@ impl EscrowContract {
 
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
+
+        // Proof-of-reserve: decrement total_locked when releasing via multi-party threshold.
+        decrement_total_locked(&env, state.amount);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &recipient_address, &payout);
@@ -1772,6 +1880,9 @@ impl Htlc for EscrowContract {
             .persistent()
             .extend_ttl(&key, 100_000, 100_000);
 
+        // Proof-of-reserve: atomically increment total_locked when a trade is locked.
+        increment_total_locked(&env, amount);
+
         let params = bond_params(&env);
         let need_bond =
             params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold;
@@ -1847,6 +1958,9 @@ impl Htlc for EscrowContract {
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
 
+        // Proof-of-reserve: atomically decrement total_locked when a trade is released.
+        decrement_total_locked(&env, state.amount);
+
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.seller, &payout);
         if fee > 0 {
@@ -1879,6 +1993,9 @@ impl Htlc for EscrowContract {
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
 
+        // Proof-of-reserve: atomically decrement total_locked when a trade is refunded.
+        decrement_total_locked(&env, state.amount);
+
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
@@ -1901,6 +2018,8 @@ fn chained_trade_id(
     let mut msg: Bytes = release_trade_id.clone().into();
     msg.append(&new_secret_hash.clone().into());
     env.crypto().sha256(&msg).to_bytes()
+}
+
 /// Builds the list of arbitrators eligible to be drawn for a dispute raised
 /// at `at_ledger`: pool members who are currently active and who joined at
 /// least `ARBITRATOR_ACTIVATION_LEDGERS` before `at_ledger`. Bounded by
@@ -1951,8 +2070,6 @@ fn release_arbitrator_slot(env: &Env, arbitrator: &Address) {
     }
 }
 
-fn check_not_paused(env: &Env) {
-    if let Some(paused) = env
 fn is_effectively_paused(env: &Env) -> bool {
     let armed: bool = env
         .storage()
@@ -2037,7 +2154,6 @@ mod test {
     use super::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
-        testutils::{Address as _, Ledger},
         token, vec, Address, BytesN, Env, IntoVal,
     };
 
@@ -2874,6 +2990,9 @@ mod test {
         assert!(f
             .client
             .try_chain_release_to_lock(&f.id, &wrong_secret, &new_seller, &new_secret_hash, &50)
+            .is_err());
+    }
+
     // Permissionless, collusion-resistant arbitrator selection (issue #279).
     //
     // The pool is opt-in and layers on top of the single `Arbitrator`
@@ -3790,6 +3909,256 @@ mod test {
             assert_eq!(f.token.balance(&seller2), 390);
             assert_eq!(f.token.balance(&f.admin), 35);
         }
+    }
+}
+
+#[cfg(test)]
+mod proof_of_reserve_tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        token, vec, Address, BytesN, Env,
+    };
+
+    struct Fixture {
+        env: Env,
+        client: EscrowContractClient<'static>,
+        token: token::Client<'static>,
+        contract_id: Address,
+        admin: Address,
+        seller: Address,
+        buyer: Address,
+        secret: BytesN<32>,
+        secret_hash: BytesN<32>,
+        id: BytesN<32>,
+    }
+
+    fn setup(initial_balance: i128, fee_bps: u32) -> Fixture {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_addr = sac.address();
+        let token = token::Client::new(&env, &token_addr);
+        let token_admin = token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&buyer, &initial_balance);
+
+        let contract_id = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &contract_id);
+
+        let arbitrator_keys = vec![
+            &env,
+            BytesN::from_array(&env, &[1u8; 32]),
+            BytesN::from_array(&env, &[2u8; 32]),
+            BytesN::from_array(&env, &[3u8; 32]),
+        ];
+
+        let arb_set = ArbitratorSet {
+            keys: arbitrator_keys,
+            threshold_epoch1: 2,
+            threshold_epoch2: 1,
+            t1_ledgers: 100,
+            t2_ledgers: 200,
+        };
+
+        client.initialize(&admin, &token_addr, &fee_bps, &arb_set);
+
+        let id = BytesN::from_array(&env, &[1u8; 32]);
+        let secret = BytesN::from_array(&env, &[7u8; 32]);
+        let secret_hash = env.crypto().sha256(&secret.into()).to_bytes();
+
+        Fixture {
+            env,
+            client,
+            token,
+            contract_id,
+            admin,
+            seller,
+            buyer,
+            secret,
+            secret_hash,
+            id,
+        }
+    }
+
+    #[test]
+    fn test_total_locked_starts_at_zero() {
+        let f = setup(1_000, 100);
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_lock_increments_total_locked() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        assert_eq!(f.client.get_total_locked(), 500);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_release_decrements_total_locked() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        f.client.release(&f.id, &f.secret);
+
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_refund_decrements_total_locked() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        f.env.ledger().with_mut(|li| li.sequence_number += 101);
+        f.client.refund(&f.id);
+
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_multiple_trades_accumulate_correctly() {
+        let f = setup(2_000, 100);
+
+        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+        let secret_hash2 = f.env.crypto().sha256(&secret2.into()).to_bytes();
+
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        f.client
+            .lock(&id2, &f.seller, &f.buyer, &300, &secret_hash2, &100);
+        assert_eq!(f.client.get_total_locked(), 800);
+
+        f.client.release(&f.id, &f.secret);
+        assert_eq!(f.client.get_total_locked(), 300);
+
+        f.env.ledger().with_mut(|li| li.sequence_number += 101);
+        f.client.refund(&id2);
+        assert_eq!(f.client.get_total_locked(), 0);
+
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_batch_release_decrements_correctly() {
+        let f = setup(2_000, 100);
+        let seller2 = Address::generate(&f.env);
+        let secret2 = BytesN::from_array(&f.env, &[8u8; 32]);
+        let secret_hash2 = f.env.crypto().sha256(&secret2.clone().into()).to_bytes();
+        let id2 = BytesN::from_array(&f.env, &[2u8; 32]);
+
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client
+            .lock(&id2, &seller2, &f.buyer, &300, &secret_hash2, &100);
+
+        assert_eq!(f.client.get_total_locked(), 800);
+
+        let releases = vec![
+            &f.env,
+            BatchReleaseItem {
+                id: f.id.clone(),
+                secret: f.secret.clone(),
+            },
+            BatchReleaseItem {
+                id: id2.clone(),
+                secret: secret2,
+            },
+        ];
+        f.client.batch_release(&releases);
+
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_verify_reserve_with_extra_tokens() {
+        let f = setup(1_000, 100);
+
+        // Lock 500
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        // Someone sends extra tokens directly to the contract
+        f.token.mint(&f.contract_id, &200);
+
+        // verify_reserve should still return true (over-collateralized is fine)
+        assert_eq!(f.client.verify_reserve(), true);
+
+        // Contract balance: 500 (locked) + 200 (extra) = 700
+        // total_locked: 500
+        // 700 >= 500 → true
+        assert_eq!(f.token.balance(&f.contract_id), 700);
+    }
+
+    #[test]
+    fn test_chain_release_to_lock_maintains_total_locked() {
+        let f = setup(1_000, 100); // 1% fee
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        let new_seller = Address::generate(&f.env);
+        let new_secret = BytesN::from_array(&f.env, &[42u8; 32]);
+        let new_secret_hash = f.env.crypto().sha256(&new_secret.into()).to_bytes();
+
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // After chain_release_to_lock:
+        // - Old trade (500) is released → decrements 500
+        // - New trade (500 - 1% fee = 495) is locked → increments 495
+        // - Net: total_locked = 495
+        assert_eq!(f.client.get_total_locked(), 495);
+        assert_eq!(f.client.verify_reserve(), true);
+
+        // Release the chained trade
+        f.client.release(&new_id, &new_secret);
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
+    }
+
+    #[test]
+    fn test_resolve_dispute_decrements_total_locked() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        f.client.raise_dispute(&f.buyer, &f.id);
+
+        // total_locked should still be 500 after raising dispute
+        assert_eq!(f.client.get_total_locked(), 500);
+
+        // Resolve dispute (50/50 split)
+        let signatures = vec![&f.env];
+        f.client.resolve_dispute(&f.id, &5_000, &signatures);
+
+        // After resolution, total_locked should be 0
+        assert_eq!(f.client.get_total_locked(), 0);
+        assert_eq!(f.client.verify_reserve(), true);
     }
 }
 
