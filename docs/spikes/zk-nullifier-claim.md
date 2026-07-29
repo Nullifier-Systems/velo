@@ -1,4 +1,4 @@
-﻿# ZK Nullifier Claim Verification on Soroban ΓÇö Feasibility Spike
+# ZK Nullifier Claim Verification on Soroban — Feasibility Spike
 
 ## Executive Summary
 
@@ -18,7 +18,7 @@ off-chain oracle attestation for high-value claims.
 
 | Limit | Value | Implication for ark-groth16 |
 |-------|-------|---------------------------|
-| WASM binary | 100 KB | ark-ec + ark-ff + ark-poly + ark-serialize ΓåÆ 500 KB+ ΓÇö **blows limit** |
+| WASM binary | 100 KB | ark-ec + ark-ff + ark-poly + ark-serialize → 500 KB+ — **blows limit** |
 | WASM modules | 1 per tx | Cannot split verification across contracts |
 
 Soroban v28 (future) may raise the limit, but no current timeline.
@@ -27,8 +27,8 @@ Soroban v28 (future) may raise the limit, but no current timeline.
 
 | Operation | Approx. Cost | Count Needed | Total |
 |-----------|-------------|-------------|-------|
-| BN254 pairing check (Miller loop) | 12ΓÇô18M | 3 (Groth16) | 36ΓÇô54M |
-| Pippenger MSM (multi-exp) | 8ΓÇô12M | 1 | 8ΓÇô12M |
+| BN254 pairing check (Miller loop) | 12–18M | 3 (Groth16) | 36–54M |
+| Pippenger MSM (multi-exp) | 8–12M | 1 | 8–12M |
 | SHA-256 (64 B) | 4k | 2 | 8k |
 | Storage read/write | 20k | 2 | 40k |
 
@@ -40,7 +40,7 @@ typical RPC providers cap this.
 ### Memory
 
 WASM linear memory starts at 64 pages (4 MB). BN254 scalar multiplication
-tables need ~2ΓÇô3 MB. Combined with the proving key material, memory is tight.
+tables need ~2–3 MB. Combined with the proving key material, memory is tight.
 
 ### Crypto Primitives Available
 
@@ -55,7 +55,7 @@ tables need ~2ΓÇô3 MB. Combined with the proving key material, memory is tigh
 
 **No elliptic-curve pairing precompile exists.** A custom WASM
 implementation would add 200 KB+ to the binary and still need pairings
-implemented in WASM, which is 10ΓÇô100├ù slower than native.
+implemented in WASM, which is 10–100× slower than native.
 
 ---
 
@@ -71,10 +71,10 @@ pub enum DataKey {
                              // value = bool (spent)
 }
 
-// ΓöÇΓöÇ Record ΓöÇΓöÇ
+// ── Record ──
 env.storage().persistent().set(&DataKey::Nullifier(hash), &true);
 
-// ΓöÇΓöÇ Check ΓöÇΓöÇ
+// ── Check ──
 if env.storage().persistent().has(&DataKey::Nullifier(hash)) {
     return Err(Error::NullifierAlreadySpent);
 }
@@ -107,8 +107,8 @@ nullifier), and the rent cost is paid by the claim initiator.
 | Criterion | On-Chain WASM | Off-Chain Oracle |
 |-----------|--------------|------------------|
 | **ZK proof verification** | Infeasible (pairing precompiles missing; budget blown) | Feasible (Barretenberg runs natively on verifier node) |
-| **Proof size** | ~200 B (Groth16) ΓÇö fits | ~200 B (Groth16) ΓÇö fits in tx calldata |
-| **Latency** | Immediate (~5 s finality) | ~1ΓÇô2 rounds (prover submits, oracle attestation settles) |
+| **Proof size** | ~200 B (Groth16) — fits | ~200 B (Groth16) — fits in tx calldata |
+| **Latency** | Immediate (~5 s finality) | ~1–2 rounds (prover submits, oracle attestation settles) |
 | **Trust model** | Trustless (Soroban consensus) | Trusted oracle set (threshold signature or attestation) |
 | **Nullifier recording** | On-chain `persistent()` | On-chain `persistent()` (oracle attests and records) |
 | **Upgradeability** | Hard (contract must be replaced) | Easy (oracle software updates) |
@@ -120,28 +120,28 @@ nullifier), and the rent cost is paid by the claim initiator.
 | Use Case | Verdict | Rationale |
 |----------|---------|-----------|
 | Low-value private claims (< 100 USDC) | **On-chain hash commitment** | Don't need full ZK; SHA256(root \|\| nullifier) is sufficient to bind proof |
-| Medium-value claims (100ΓÇô10k USDC) | **Off-chain ZK + on-chain nullifier** | Prove off-chain, record nullifier on-chain via oracle attestation |
+| Medium-value claims (100–10k USDC) | **Off-chain ZK + on-chain nullifier** | Prove off-chain, record nullifier on-chain via oracle attestation |
 | High-value claims (> 10k USDC) | **Off-chain ZK + oracle attestation + dispute period** | Full ZK proof verified by multiple oracles with slashing |
-| Cross-chain claims (Stellar ΓåÆ EVM) | **Off-chain ZK + relayer** | Proof verified off-chain, relayer submits lightweight attestation |
+| Cross-chain claims (Stellar → EVM) | **Off-chain ZK + relayer** | Proof verified off-chain, relayer submits lightweight attestation |
 
 ---
 
 ## 4. Recommended Architecture
 
 ```
-ΓöîΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ     Groth16 proof      ΓöîΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ
-Γöé   Claimant   Γöé ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓû╢ Γöé ZK Verifier   Γöé
-Γöé  (Noir Prover)Γöé                        Γöé   Node        Γöé
-ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ                        Γöé (Barretenberg)Γöé
-                                         ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
-                                                 Γöé
+┌──────────────┐     Groth16 proof      ┌───────────────┐
+│   Claimant   │ ──────────────────────▶ │ ZK Verifier   │
+│  (Noir Prover)│                        │   Node        │
+└──────────────┘                        │ (Barretenberg)│
+                                         └───────┬───────┘
+                                                 │
                                           attestation sig
-                                                 Γöé
-                                                 Γû╝
-                                   ΓöîΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ
-                                   Γöé  Soroban: Escrow Claim   Γöé
-                                   Γöé  + Nullifier Registry    Γöé
-                                   ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
+                                                 │
+                                                 ▼
+                                   ┌─────────────────────────┐
+                                   │  Soroban: Escrow Claim   │
+                                   │  + Nullifier Registry    │
+                                   └─────────────────────────┘
 ```
 
 ### Key Components
@@ -162,15 +162,15 @@ nullifier), and the rent cost is paid by the claim initiator.
 
 | Constraint | How We Stay Within It |
 |-----------|----------------------|
-| 100 KB WASM | Ed25519 verify + SHA-256 + storage ΓÇö under 40 KB binary |
-| 40M CPU budget | Ed25519 verify (~200k) + SHA-256 (~4k) + storage (~20k) ΓÇö under 1M total |
+| 100 KB WASM | Ed25519 verify + SHA-256 + storage — under 40 KB binary |
+| 40M CPU budget | Ed25519 verify (~200k) + SHA-256 (~4k) + storage (~20k) — under 1M total |
 | No pairing precompile | Pairings happen off-chain in Barretenberg |
 
 ---
 
 ## 5. Implementation Roadmap
 
-### Phase 1 (Current ΓÇö zk-credential exists)
+### Phase 1 (Current — zk-credential exists)
 - Nullifier storage via `persistent()`
 - Hash-based commitment binding (SHA-256)
 - Merkle root registry

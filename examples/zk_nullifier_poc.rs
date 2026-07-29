@@ -1,4 +1,4 @@
-﻿//! POC: ZK nullifier claim verification on Soroban.
+//! POC: ZK nullifier claim verification on Soroban.
 //!
 //! Demonstrates the hybrid architecture:
 //!   1. Off-chain ZK proof is verified by a ZK Verifier Node (Barretenberg).
