@@ -1,0 +1,38 @@
+[package]
+name = "escrow-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "escrow_fuzz_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "differential_fuzz"
+path = "src/bin/differential_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "arithmetic_overflow_fuzz"
+path = "src/bin/arithmetic_overflow_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "state_transition_fuzz"
+path = "src/bin/state_transition_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "invariant_fuzz"
+path = "src/bin/invariant_fuzz.rs"
+test = false
+doc = false
+
+[dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+sha2 = "0.10"
+rand = "0.8"

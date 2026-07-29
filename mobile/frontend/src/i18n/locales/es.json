@@ -63,6 +63,8 @@
     "confirmHandoff": "Confirmar entrega (liberar fondos)",
     "releaseFailed": "error al liberar",
     "somethingWentWrong": "algo salió mal",
+    "pausedTitle": "Nuevos intercambios en pausa",
+    "pausedBody": "Velo ha detenido temporalmente las nuevas solicitudes de efectivo. Este reclamo existente aún puede liberarse o reembolsarse — tus fondos bloqueados no quedan atrapados.",
     "waitNormal": "Bloqueando fondos en Stellar…",
     "waitLonger": "Está tardando un poco más de lo habitual — el nodo RPC puede estar ocupado. Tus fondos están seguros.",
     "waitStill": "Seguimos trabajando. La transacción fue enviada; estamos esperando confirmación en la cadena.",

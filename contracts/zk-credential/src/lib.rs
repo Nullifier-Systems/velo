@@ -10,7 +10,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes, BytesN, Env
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
+    BytesN, Env,
 };
 
 const TREE_DEPTH: u32 = 8;
@@ -59,24 +60,38 @@ impl ZkCredentialContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Price, &price);
-        env.storage().instance().set(&DataKey::CommitmentCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::CommitmentCount, &0u32);
 
         // Initialize empty tree root
         let initial_root = Self::compute_tree_root(&env, 0);
-        env.storage().instance().set(&DataKey::MerkleRoot, &initial_root);
-        env.storage().persistent().set(&DataKey::KnownRoots(initial_root.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &initial_root);
+        env.storage()
+            .persistent()
+            .set(&DataKey::KnownRoots(initial_root.clone()), &true);
 
         Ok(())
     }
 
     /// Participant purchases a credential by depositing payment and appending their `commitment` to the Merkle tree.
-    pub fn buy_credential(env: Env, buyer: Address, commitment: BytesN<32>) -> Result<(u32, BytesN<32>), Error> {
+    pub fn buy_credential(
+        env: Env,
+        buyer: Address,
+        commitment: BytesN<32>,
+    ) -> Result<(u32, BytesN<32>), Error> {
         if !env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::NotInitialized);
         }
         buyer.require_auth();
 
-        let count: u32 = env.storage().instance().get(&DataKey::CommitmentCount).unwrap();
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CommitmentCount)
+            .unwrap();
         if count >= MAX_LEAVES {
             return Err(Error::TreeFull);
         }
@@ -90,19 +105,27 @@ impl ZkCredentialContract {
         }
 
         // Store leaf commitment
-        env.storage().persistent().set(&DataKey::Leaf(count), &commitment);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Leaf(count), &commitment);
         let new_count = count + 1;
-        env.storage().instance().set(&DataKey::CommitmentCount, &new_count);
+        env.storage()
+            .instance()
+            .set(&DataKey::CommitmentCount, &new_count);
 
         // Recompute Merkle root and record in valid roots
         let new_root = Self::compute_tree_root(&env, new_count);
-        env.storage().instance().set(&DataKey::MerkleRoot, &new_root);
-        env.storage().persistent().set(&DataKey::KnownRoots(new_root.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &new_root);
+        env.storage()
+            .persistent()
+            .set(&DataKey::KnownRoots(new_root.clone()), &true);
 
         // Emit buy event
         env.events().publish(
             (symbol_short!("buy"), buyer),
-            (count, commitment, new_root.clone())
+            (count, commitment, new_root.clone()),
         );
 
         Ok((count, new_root))
@@ -115,7 +138,7 @@ impl ZkCredentialContract {
         spender: Address,
         root: BytesN<32>,
         nullifier_hash: BytesN<32>,
-        proof: Bytes
+        proof: Bytes,
     ) -> Result<bool, Error> {
         if !env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::NotInitialized);
@@ -123,12 +146,20 @@ impl ZkCredentialContract {
         spender.require_auth();
 
         // 1. Verify Merkle root is valid (known past or present root)
-        if !env.storage().persistent().has(&DataKey::KnownRoots(root.clone())) {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::KnownRoots(root.clone()))
+        {
             return Err(Error::RootNotFound);
         }
 
         // 2. Prevent double spending via nullifier tracking
-        if env.storage().persistent().has(&DataKey::Nullifier(nullifier_hash.clone())) {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Nullifier(nullifier_hash.clone()))
+        {
             return Err(Error::NullifierAlreadySpent);
         }
 
@@ -138,20 +169,22 @@ impl ZkCredentialContract {
         }
 
         // 4. Mark nullifier as spent
-        env.storage().persistent().set(&DataKey::Nullifier(nullifier_hash.clone()), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Nullifier(nullifier_hash.clone()), &true);
 
         // Emit spend event
-        env.events().publish(
-            (symbol_short!("spend"), spender),
-            (root, nullifier_hash)
-        );
+        env.events()
+            .publish((symbol_short!("spend"), spender), (root, nullifier_hash));
 
         Ok(true)
     }
 
     /// Returns whether a nullifier has already been spent.
     pub fn is_nullifier_spent(env: Env, nullifier_hash: BytesN<32>) -> bool {
-        env.storage().persistent().has(&DataKey::Nullifier(nullifier_hash))
+        env.storage()
+            .persistent()
+            .has(&DataKey::Nullifier(nullifier_hash))
     }
 
     /// Returns whether a Merkle root is registered as valid.
@@ -166,7 +199,10 @@ impl ZkCredentialContract {
 
     /// Returns total number of purchased commitments.
     pub fn get_commitment_count(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::CommitmentCount).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::CommitmentCount)
+            .unwrap_or(0)
     }
 
     /// Helper to recompute Merkle root over registered leaves.
@@ -190,7 +226,7 @@ impl ZkCredentialContract {
             while i < len {
                 let left = level.get(i).unwrap();
                 let right = level.get(i + 1).unwrap();
-                
+
                 let combined = Self::hash_pair(env, &left, &right);
                 next_level.push_back(combined);
                 i += 2;
@@ -214,23 +250,23 @@ impl ZkCredentialContract {
         env: &Env,
         root: &BytesN<32>,
         nullifier_hash: &BytesN<32>,
-        proof: &Bytes
+        proof: &Bytes,
     ) -> bool {
         if proof.len() < 32 {
             return false;
         }
-        
+
         // Proof commitment payload check for Soroban verification:
         // Verification asserts proof signature matches SHA256(root || nullifier_hash || prefix_tag)
         let mut expected = Bytes::new(env);
         expected.append(&root.clone().into());
         expected.append(&nullifier_hash.clone().into());
-        
+
         let tag = Bytes::from_slice(env, b"noir_zk_proof_v1");
         expected.append(&tag);
-        
+
         let expected_hash = env.crypto().sha256(&expected);
-        
+
         // The first 32 bytes of a valid proof must match expected_hash digest
         let proof_prefix = proof.slice(0..32);
         proof_prefix == expected_hash.into()

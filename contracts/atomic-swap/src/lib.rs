@@ -32,7 +32,7 @@ enum DataKey {
     Token,
     Trade(BytesN<32>),
     /// Cross-chain reorg protection: per-EVM-chain-ID, minimum k-confirmations required
-    ChainFinality(u32),  // chain_id -> k_confirmations
+    ChainFinality(u32), // chain_id -> k_confirmations
     /// Merkle proof cache: caches verified proofs to prevent re-verification
     ProofCache(BytesN<32>), // proof_hash -> true/false
     /// Cross-chain state: EVM tx hash -> (secret, block_height, revealed_at_ledger)
@@ -78,11 +78,11 @@ const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledg
 
 /// Cross-chain reorg protection: finality depth per EVM chain
 /// These are chain_id -> k_confirmations mappings
-const ETHEREUM_MAINNET_FINALITY: u32 = 64;      // ~15 minutes
-const ARBITRUM_FINALITY: u32 = 100;             // ~100 blocks (~3-5 mins with fast blocks)
-const POLYGON_FINALITY: u32 = 256;              // ~20 minutes
-const OPTIMISM_FINALITY: u32 = 1;               // L2, finalized immediately
-const BASE_FINALITY: u32 = 1;                   // L2, finalized immediately
+const ETHEREUM_MAINNET_FINALITY: u32 = 64; // ~15 minutes
+const ARBITRUM_FINALITY: u32 = 100; // ~100 blocks (~3-5 mins with fast blocks)
+const POLYGON_FINALITY: u32 = 256; // ~20 minutes
+const OPTIMISM_FINALITY: u32 = 1; // L2, finalized immediately
+const BASE_FINALITY: u32 = 1; // L2, finalized immediately
 
 /// Maximum reorg window (in Soroban ledgers) — extend timelock by this if reorg detected
 /// ~50 ledgers ≈ 5 minutes buffer for EVM reorg recovery
@@ -176,7 +176,7 @@ impl AtomicSwapContract {
         let confirmations = evm_current_block.saturating_sub(evm_block_height);
 
         // Get required finality for this chain
-        let required_finality = Self::get_chain_finality(&env, chain_id)?;
+        let required_finality = Self::get_chain_finality(env.clone(), chain_id)?;
 
         // If confirmations below threshold, signal reorg risk and extend timelock
         let timelock_extension = if confirmations < required_finality {
@@ -214,10 +214,7 @@ impl AtomicSwapContract {
 
     /// Cross-chain: Extend a trade's timelock to account for EVM reorg risk.
     /// Only called if record_evm_reveal() detected insufficient finality.
-    pub fn extend_timelock_for_reorg(
-        env: Env,
-        trade_id: BytesN<32>,
-    ) -> Result<u32, Error> {
+    pub fn extend_timelock_for_reorg(env: Env, trade_id: BytesN<32>) -> Result<u32, Error> {
         let key = DataKey::Trade(trade_id.clone());
         let mut state: TradeState = env
             .storage()
@@ -229,7 +226,7 @@ impl AtomicSwapContract {
             return Err(Error::TradeNotFound);
         }
 
-        let current_ledger = env.ledger().sequence();
+        let _current_ledger = env.ledger().sequence();
         let old_timeout = state.timeout_ledger;
 
         // Extend by MAX_REORG_WINDOW, but prevent extending past a reasonable maximum

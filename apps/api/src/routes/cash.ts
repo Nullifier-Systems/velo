@@ -10,6 +10,7 @@ import {
   submitSignedTransaction,
   submitReleaseTx,
   submitRefundTx,
+  getEscrowPauseState,
   batchReleaseEscrow,
   releaseBatchEscrow,
   NETWORK_PASSPHRASE,
@@ -50,9 +51,38 @@ import { t, type Locale } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
 import { ApiError } from "../lib/errors.js";
+import { globalH3SpatialIndex, type H3Resolution } from "../lib/h3-spatial-index.js";
+import { globalMatchingEngine } from "../lib/matching-engine.js";
+import { globalOrderAllocator } from "../lib/order-allocator.js";
 
 const ESCROW_CONTRACT_ID =
   process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
+
+const PAUSED_NEW_TRADE_MESSAGE =
+  "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
+
+/** Reject new locks when the on-chain circuit breaker is effective (issue #266). */
+async function rejectIfEscrowPaused(
+  req: { log: { warn: (err: unknown, msg: string) => void } },
+  reply: { code: (n: number) => { send: (body: unknown) => void } },
+): Promise<boolean> {
+  try {
+    const state = await getEscrowPauseState(ESCROW_CONTRACT_ID);
+    if (state.paused) {
+      reply.code(503).send({
+        error: "escrow_paused",
+        message: PAUSED_NEW_TRADE_MESSAGE,
+        pause_effective_ledger: state.pause_effective_ledger,
+      });
+      return true;
+    }
+  } catch (err) {
+    // If the pause read fails, allow the lock attempt — the contract itself
+    // still enforces pause; this is a UX pre-check only.
+    req.log.warn(err, "getEscrowPauseState failed; continuing without pause pre-check");
+  }
+  return false;
+}
 
 const cashRequestSchema = z.object({
   seller: z
@@ -126,8 +156,33 @@ function discoveryAvailability(agentCount: number, locale: Locale) {
  *                                    embedded in the scanned QR (free)
  * POST /api/v1/cash/request/:id/refund  — refund escrow back to the buyer
  *                                    if the trade times out or fails (free)
+ * GET  /api/v1/cash/pause         — on-chain circuit breaker state (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
+  app.get(
+    "/cash/pause",
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const state = await getEscrowPauseState(ESCROW_CONTRACT_ID);
+        return {
+          ...state,
+          message: state.paused ? PAUSED_NEW_TRADE_MESSAGE : null,
+        };
+      } catch (err) {
+        req.log.error(err, "getEscrowPauseState failed");
+        reply.code(502).send({
+          error: "failed to read escrow pause state",
+          detail: String(err),
+        });
+      }
+    }
+  );
+
   app.get<{
     Querystring: {
       lat?: string;
@@ -291,6 +346,70 @@ export async function cashRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{
+    Body: {
+      lat: number;
+      lng: number;
+      radius?: number;
+      amount_stroops?: string;
+      h3_resolution?: H3Resolution;
+    };
+  }>("/cash/match", async (req, reply) => {
+    const { lat, lng, radius, amount_stroops, h3_resolution } = req.body ?? {};
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      throw new ApiError(400, "MISSING_COORDINATES", "lat and lng numeric coordinates are required");
+    }
+
+    const searchRadiusKm = radius && radius > 0 ? radius : 5.0;
+    const amount = BigInt(amount_stroops ?? "100000000"); // Default 10 USDC
+
+    // 1. Uber H3 Hierarchical Spatial Indexing O(1) query with boundary hex crossings
+    const h3Candidates = globalH3SpatialIndex.findProvidersInRadius(
+      lat,
+      lng,
+      searchRadiusKm,
+      h3_resolution
+    );
+
+    if (h3Candidates.length === 0) {
+      return reply.code(404).send({
+        matched: false,
+        message: "No liquidity providers available in the specified spatial area",
+        availability: discoveryAvailability(0, (req as any).locale ?? "en"),
+      });
+    }
+
+    // 2. Multi-Parametric Matching Engine Scoring
+    const scoredCandidates = globalMatchingEngine.scoreCandidates(
+      h3Candidates,
+      searchRadiusKm
+    );
+
+    // 3. Lock-Free Optimistic Concurrency Control Order Allocation
+    const allocation = globalOrderAllocator.attemptAllocation(amount, scoredCandidates);
+
+    if (!allocation.success || !allocation.matchedProvider) {
+      return reply.code(409).send({
+        matched: false,
+        error: allocation.error ?? "ALLOCATION_FAILED",
+        message: "Liquidity providers are fully committed or lack sufficient balance",
+        attempts: allocation.attempts,
+      });
+    }
+
+    return reply.code(200).send({
+      matched: true,
+      provider: toPublicProvider(
+        allocation.matchedProvider,
+        { lat, lng, precision: DEFAULT_PRECISION },
+        DEFAULT_PRECISION
+      ),
+      matching_score: allocation.score,
+      allocated_amount_stroops: allocation.allocatedAmountStroops?.toString(),
+      attempts: allocation.attempts,
+    });
+  });
+
   const requestSchema = z.object({
     seller: z
       .string()
@@ -347,6 +466,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const body = parseBody(prepareLockSchema, req.body, reply);
       if (!body) return;
+
+      if (await rejectIfEscrowPaused(req, reply)) return;
 
       const {
         seller,
@@ -518,6 +639,8 @@ export async function cashRoutes(app: FastifyInstance) {
 
       const body = parseBody(cashRequestSchema, req.body, reply);
       if (!body) return;
+
+      if (await rejectIfEscrowPaused(req, reply)) return;
 
       const {
         seller,

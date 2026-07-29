@@ -27,7 +27,7 @@ export const CASH_DEFAULT_TIMEOUT_LEDGERS = 100;
  *
  * See: contracts/escrow/src/lib.rs line 78
  */
-export const ESCROW_MAX_TIMEOUT_LEDGERS_POLICY = 6 * 60 * 24 * 7; // 604,800
+export const ESCROW_MAX_TIMEOUT_LEDGERS_POLICY = 6 * 60 * 24 * 7; // 60,480
 
 /**
  * Dispute resolution window (in ledgers) enforced by the escrow contract.
@@ -43,7 +43,7 @@ export const ESCROW_MAX_TIMEOUT_LEDGERS_POLICY = 6 * 60 * 24 * 7; // 604,800
  *
  * See: contracts/escrow/src/lib.rs line 90
  */
-export const DISPUTE_RESOLUTION_WINDOW_LEDGERS = 12 * 60 * 24 * 3; // 259,200
+export const DISPUTE_RESOLUTION_WINDOW_LEDGERS = 12 * 60 * 24 * 3; // 51,840
 
 /**
  * Settlement chain default lock duration (in ledgers).

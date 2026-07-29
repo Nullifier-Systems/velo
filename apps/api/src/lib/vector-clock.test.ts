@@ -7,7 +7,7 @@ import {
   compareClocks,
   canDeliver,
   normalizeClock,
-  VectorClock,
+  type VectorClock,
 } from "./vector-clock.js";
 
 describe("Vector Clock Operations", () => {

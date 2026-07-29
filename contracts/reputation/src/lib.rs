@@ -7,7 +7,8 @@
 
 use htlc_core::{TradeState, TradeStatus};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN, Env, IntoVal, Map, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN,
+    Env, IntoVal, Map, Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,18 +43,16 @@ const DECAY_TABLE: [u32; 356] = [
     137_197, 135_859, 134_532, 133_217, 131_913, 130_621, 129_339, 128_069, 126_809, 125_560,
     124_321, 123_093, 121_874, 120_665, 119_465, 118_275, 117_094, 115_922, 114_759, 113_605,
     112_459, 111_322, 110_193, 109_072, 107_959, 106_854, 105_757, 104_667, 103_585, 102_510,
-    101_442, 100_381, 99_327, 98_280, 97_239, 96_205, 95_177, 94_155, 93_140, 92_130,
-    91_127, 90_129, 89_137, 88_151, 87_170, 86_194, 85_224, 84_259, 83_299, 82_345,
-    81_395, 80_450, 79_510, 78_575, 77_644, 76_718, 75_796, 74_879, 73_966, 73_057,
-    72_153, 71_252, 70_356, 69_464, 68_575, 67_691, 66_810, 65_933, 65_060, 64_190,
-    63_324, 62_461, 61_602, 60_746, 59_894, 59_045, 58_199, 57_357, 56_518, 55_682,
-    54_849, 54_019, 53_192, 52_369, 51_548, 50_731, 49_916, 49_104, 48_296, 47_490,
-    46_687, 45_887, 45_089, 44_294, 43_502, 42_713, 41_926, 41_142, 40_360, 39_581,
-    38_804, 38_030, 37_258, 36_489, 35_722, 34_957, 34_195, 33_435, 32_678, 31_923,
-    31_170, 30_419, 29_671, 28_925, 28_181, 27_439, 26_699, 25_962, 25_227, 24_494,
-    23_763, 23_034, 22_308, 21_583, 20_861, 20_141, 19_423, 18_707, 17_993, 17_281,
-    16_571, 15_864, 15_158, 14_455, 13_753, 13_054, 12_357, 11_662, 10_969, 10_278,
-    9_590, 8_903, 8_218, 7_536, 6_856, 6_178, 5_502, 4_829, 4_158, 3_489,
+    101_442, 100_381, 99_327, 98_280, 97_239, 96_205, 95_177, 94_155, 93_140, 92_130, 91_127,
+    90_129, 89_137, 88_151, 87_170, 86_194, 85_224, 84_259, 83_299, 82_345, 81_395, 80_450, 79_510,
+    78_575, 77_644, 76_718, 75_796, 74_879, 73_966, 73_057, 72_153, 71_252, 70_356, 69_464, 68_575,
+    67_691, 66_810, 65_933, 65_060, 64_190, 63_324, 62_461, 61_602, 60_746, 59_894, 59_045, 58_199,
+    57_357, 56_518, 55_682, 54_849, 54_019, 53_192, 52_369, 51_548, 50_731, 49_916, 49_104, 48_296,
+    47_490, 46_687, 45_887, 45_089, 44_294, 43_502, 42_713, 41_926, 41_142, 40_360, 39_581, 38_804,
+    38_030, 37_258, 36_489, 35_722, 34_957, 34_195, 33_435, 32_678, 31_923, 31_170, 30_419, 29_671,
+    28_925, 28_181, 27_439, 26_699, 25_962, 25_227, 24_494, 23_763, 23_034, 22_308, 21_583, 20_861,
+    20_141, 19_423, 18_707, 17_993, 17_281, 16_571, 15_864, 15_158, 14_455, 13_753, 13_054, 12_357,
+    11_662, 10_969, 10_278, 9_590, 8_903, 8_218, 7_536, 6_856, 6_178, 5_502, 4_829, 4_158, 3_489,
     2_823, 2_159, 1_497, 838, 181, 0,
 ];
 
@@ -128,7 +127,9 @@ impl ReputationContract {
             return Err(Error::Unauthorized);
         }
 
-        env.storage().persistent().set(&RepDataKey::VerifiedRoot(root), &true);
+        env.storage()
+            .persistent()
+            .set(&RepDataKey::VerifiedRoot(root), &true);
         Ok(())
     }
 
@@ -148,22 +149,39 @@ impl ReputationContract {
         provider.require_auth();
 
         // 1. Verify identity root is registered
-        if !env.storage().persistent().has(&RepDataKey::VerifiedRoot(identity_root.clone())) {
+        if !env
+            .storage()
+            .persistent()
+            .has(&RepDataKey::VerifiedRoot(identity_root.clone()))
+        {
             return Err(Error::InvalidIdentityRoot);
         }
 
         // 2. Prevent double-spending / double-claiming in the epoch via nullifier check
-        if env.storage().persistent().has(&RepDataKey::SpentNullifier(nullifier_hash.clone())) {
+        if env
+            .storage()
+            .persistent()
+            .has(&RepDataKey::SpentNullifier(nullifier_hash.clone()))
+        {
             return Err(Error::NullifierAlreadyUsed);
         }
 
         // 3. Verify zero-knowledge proof payload
-        if !Self::verify_zk_proof(&env, &identity_root, min_reputation, epoch_id, &nullifier_hash, &proof) {
+        if !Self::verify_zk_proof(
+            &env,
+            &identity_root,
+            min_reputation,
+            epoch_id,
+            &nullifier_hash,
+            &proof,
+        ) {
             return Err(Error::InvalidProof);
         }
 
         // 4. Mark nullifier as spent for the epoch
-        env.storage().persistent().set(&RepDataKey::SpentNullifier(nullifier_hash.clone()), &true);
+        env.storage()
+            .persistent()
+            .set(&RepDataKey::SpentNullifier(nullifier_hash.clone()), &true);
 
         // Emit verification event
         env.events().publish(
@@ -176,12 +194,16 @@ impl ReputationContract {
 
     /// Check if a nullifier has already been claimed/spent.
     pub fn is_nullifier_spent(env: Env, nullifier_hash: BytesN<32>) -> bool {
-        env.storage().persistent().has(&RepDataKey::SpentNullifier(nullifier_hash))
+        env.storage()
+            .persistent()
+            .has(&RepDataKey::SpentNullifier(nullifier_hash))
     }
 
     /// Check if an identity Merkle root is valid.
     pub fn is_identity_root_valid(env: Env, root: BytesN<32>) -> bool {
-        env.storage().persistent().has(&RepDataKey::VerifiedRoot(root))
+        env.storage()
+            .persistent()
+            .has(&RepDataKey::VerifiedRoot(root))
     }
 
     /// Low-instruction ZK verifier engine (< 5,000,000 CPU instructions)
@@ -250,7 +272,11 @@ impl ReputationContract {
             }
 
             total += 1;
-            let counterparty = if is_seller { t.buyer.clone() } else { t.seller.clone() };
+            let counterparty = if is_seller {
+                t.buyer.clone()
+            } else {
+                t.seller.clone()
+            };
             counterparties.set(counterparty, true);
 
             match t.status {
@@ -266,7 +292,13 @@ impl ReputationContract {
         }
 
         let score = compute_score_internal(
-            total, completed, disputed, volume, counterparties.len(), total, &env,
+            total,
+            completed,
+            disputed,
+            volume,
+            counterparties.len(),
+            total,
+            &env,
         );
 
         env.storage()
@@ -300,11 +332,7 @@ impl ReputationContract {
 // ---------------------------------------------------------------------------
 
 fn call_escrow_u32(env: &Env, escrow: &Address, func: &str) -> u32 {
-    env.invoke_contract(
-        escrow,
-        &Symbol::new(env, func),
-        Vec::new(env),
-    )
+    env.invoke_contract(escrow, &Symbol::new(env, func), Vec::new(env))
 }
 
 fn call_escrow_get_trade_id(env: &Env, escrow: &Address, index: u32) -> Option<BytesN<32>> {
