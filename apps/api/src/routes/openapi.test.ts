@@ -35,6 +35,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/services",
       "/api/v1/status",
       "/api/v1/cash/agents",
+      "/api/v1/cash/pause",
       "/api/v1/cash/request",
       "/api/v1/cash/request/prepare",
       "/api/v1/cash/request/submit",
