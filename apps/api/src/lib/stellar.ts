@@ -596,20 +596,91 @@ export async function lockEscrow(
 ): Promise<number> {
   const signer = loadSignerKeypair();
   const amount = params.amountStroops ?? params.amount;
-  const result = await invokeContract(
-    params.contractId,
-    "lock",
-    [
-      nativeToScVal(params.tradeId, { type: "bytes" }),
-      nativeToScVal(params.buyer, { type: "address" }),
-      nativeToScVal(params.seller, { type: "address" }),
-      nativeToScVal(amount, { type: "u128" }),
-      nativeToScVal(params.timeoutLedgers, { type: "u32" }),
-    ],
-    signer,
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.lockBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.lockPoll;
+
+  const log = logger.child({ contract: params.contractId, fn: "lock" });
+
+  log.info({ stage: "build" }, "building lock transaction");
+
+  const account = await rpcTimeout(
+    "lock/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
   );
-  // Return the ledger number from the result
-  return (result as { locked_at_ledger: number }).locked_at_ledger;
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "lock",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(params.buyer, { type: "address" }),
+          nativeToScVal(params.seller, { type: "address" }),
+          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  log.info({ stage: "simulate" }, "simulating lock transaction");
+
+  const sim = await rpcTimeout(
+    "lock/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    log.error({ stage: "simulate", error: sim.error }, "simulation failed");
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  log.info({ stage: "sign" }, "signing lock transaction");
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  log.info({ stage: "submit" }, "submitting lock transaction");
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    log.error({ stage: "submit", error: sendResult.errorResult }, "submission failed");
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `lock/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    log.error({ stage: "poll", error: getResult.status }, "transaction failed");
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  log.info({ stage: "poll", hash: sendResult.hash }, "transaction confirmed");
+
+  const result = getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
+  // Return the ledger number from the result if available, otherwise undefined
+  if (result != null && typeof result === 'object' && 'locked_at_ledger' in result) {
+    return (result as { locked_at_ledger: number }).locked_at_ledger;
+  }
+  return undefined as any;
 }
 
 /** Builds an unsigned transaction for the escrow lock operation. */
@@ -629,7 +700,7 @@ export async function buildLockEscrowTransaction(
         contract: params.contractId,
         function: "lock",
         args: [
-          nativeToScVal(params.tradeId, { type: "bytes" }),
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
           nativeToScVal(params.buyer, { type: "address" }),
           nativeToScVal(params.seller, { type: "address" }),
           nativeToScVal(amount, { type: "u128" }),
@@ -656,15 +727,68 @@ export async function releaseEscrow(
   options?: TimeoutOptions,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "release",
-    [
-      nativeToScVal(params.tradeId, { type: "bytes" }),
-      nativeToScVal(params.releaseTo, { type: "address" }),
-    ],
-    signer,
-  ) as Promise<{ hash: string }>;
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.releaseBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.releasePoll;
+
+  const account = await rpcTimeout(
+    "release/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "release",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(params.releaseTo, { type: "address" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    "release/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `release/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  return { hash: sendResult.hash };
 }
 
 /** Testnet-only: custodial refund (API signs). */
@@ -674,12 +798,65 @@ export async function refundEscrow(
   options?: TimeoutOptions,
 ): Promise<{ hash: string }> {
   const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "refund",
-    [nativeToScVal(params.tradeId, { type: "bytes" })],
-    signer,
-  ) as Promise<{ hash: string }>;
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.refundBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.refundPoll;
+
+  const account = await rpcTimeout(
+    "refund/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "refund",
+        args: [nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" })],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    "refund/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `refund/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  return { hash: sendResult.hash };
 }
 
 /** Calls escrow's raise_dispute(caller, id). Flagged by either buyer or seller. */
@@ -690,7 +867,7 @@ export async function disputeEscrow(params: DisputeParams) {
     "raise_dispute",
     [
       nativeToScVal(params.caller, { type: "address" }),
-      nativeToScVal(params.tradeId, { type: "bytes" }),
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
     ],
     signer,
   );
@@ -704,7 +881,7 @@ export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
     params.contractId,
     "resolve_dispute",
     [
-      nativeToScVal(params.tradeId, { type: "bytes" }),
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
       nativeToScVal(buyerShare, { type: "u32" }),
     ],
     signer,
@@ -828,7 +1005,7 @@ export async function batchReleaseEscrow(
       params.contractId,
       "release",
       [
-        nativeToScVal(trade.tradeId, { type: "bytes" }),
+        nativeToScVal(Buffer.from(trade.tradeId, "hex"), { type: "bytes" }),
         nativeToScVal(trade.releaseTo, { type: "address" }),
       ],
       signer,
@@ -865,7 +1042,7 @@ export async function getTradeOnChain(
         Operation.invokeContractFunction({
           contract: contractId,
           function: "get_trade",
-          args: [nativeToScVal(tradeId, { type: "bytes" })],
+          args: [nativeToScVal(Buffer.from(tradeId, "hex"), { type: "bytes" })],
         }),
       )
       .setTimeout(30)
