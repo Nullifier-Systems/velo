@@ -98,6 +98,12 @@ enum DataKey {
 /// (~50s at Stellar's ~5s ledger close time).
 pub const PAUSE_DELAY_LEDGERS: u32 = 10;
 
+/// Default TTL extension (in ledgers) for persistent storage entries during
+/// active interactions. ~5.8 days at ~5s/ledger. Long enough for clients,
+/// relayers, and reputation-scanners to observe terminal trade states, but
+/// short enough that archived entries are eventually reclaimed.
+const TTL_EXTEND: u32 = 100_000;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum Error {
@@ -709,6 +715,9 @@ impl EscrowContract {
 
         state.status = TradeStatus::Disputed;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let info = DisputeInfo {
             start_ledger: env.ledger().sequence(),
@@ -716,6 +725,9 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(id.clone()), &info);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Dispute(id.clone()), TTL_EXTEND, TTL_EXTEND);
 
         // Snapshot arbitrator-pool eligibility now, before anyone can react
         // to this dispute existing. `resolve_dispute()` and
@@ -881,6 +893,9 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &state);
         env.storage()
             .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+        env.storage()
+            .persistent()
             .remove(&DataKey::Dispute(id.clone()));
 
         if buyer_amount > 0 {
@@ -958,6 +973,9 @@ impl EscrowContract {
 
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
         env.storage()
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
@@ -1136,6 +1154,9 @@ impl EscrowContract {
             // CEI pattern, same as release(): update state before external calls.
             state.status = TradeStatus::Released;
             env.storage().persistent().set(&key, &state);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
             client.transfer(&env.current_contract_address(), &state.seller, &payout);
             if fee > 0 {
@@ -1242,6 +1263,9 @@ impl EscrowContract {
         // property this function exists to provide.
         release_state.status = TradeStatus::Released;
         env.storage().persistent().set(&release_key, &release_state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&release_key, TTL_EXTEND, TTL_EXTEND);
 
         let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
         let new_state = TradeState {
@@ -1336,6 +1360,9 @@ impl EscrowContract {
             // CEI pattern: update state before external calls.
             state.status = TradeStatus::Released;
             env.storage().persistent().set(&key, &state);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
             client.transfer(&env.current_contract_address(), &state.seller, &payout);
             if fee > 0 {
@@ -1607,6 +1634,9 @@ impl EscrowContract {
         }
 
         env.storage().persistent().set(&nonce_key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&nonce_key, TTL_EXTEND, TTL_EXTEND);
 
         let key = DataKey::Trade(escrow_id.clone());
         let mut state: TradeState = env.storage().persistent().get(&key).ok_or(Error::TradeNotFound)?;
@@ -1627,6 +1657,9 @@ impl EscrowContract {
 
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &recipient_address, &payout);
@@ -1793,7 +1826,13 @@ impl Htlc for EscrowContract {
             .set(&DataKey::TradeCounter, &next_idx);
         env.storage()
             .persistent()
+            .extend_ttl(&DataKey::TradeCounter, TTL_EXTEND, TTL_EXTEND);
+        env.storage()
+            .persistent()
             .set(&DataKey::TradeId(next_idx), &id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::TradeId(next_idx), TTL_EXTEND, TTL_EXTEND);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&buyer, &env.current_contract_address(), &amount);
@@ -1846,6 +1885,9 @@ impl Htlc for EscrowContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.seller, &payout);
@@ -1878,6 +1920,9 @@ impl Htlc for EscrowContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
