@@ -2,8 +2,9 @@
 
 use super::*;
 use soroban_sdk::{
+    contract, contractimpl, contracttype,
     testutils::{Address as _, Ledger},
-    token, Address, BytesN, Env, Vec,
+    token, vec, Address, BytesN, Env, Vec,
 };
 
 struct Fixture {
@@ -504,7 +505,7 @@ fn test_release_escrow_invalid_signature_rejection() {
 }
 
 #[test]
-#[should_panic(expected = "30")]
+#[should_panic(expected = "42")]
 fn test_release_escrow_replay_rejection() {
     let f = setup();
     f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
@@ -545,7 +546,7 @@ fn test_release_escrow_replay_rejection() {
 }
 
 #[test]
-#[should_panic(expected = "29")]
+#[should_panic(expected = "41")]
 fn test_release_escrow_insufficient_signatures() {
     let f = setup();
     f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
@@ -573,4 +574,107 @@ fn test_release_escrow_insufficient_signatures() {
         &designated_keys,
         &signatures,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #334 — USD oracle max-value limit
+// ---------------------------------------------------------------------------
+
+#[contracttype]
+#[derive(Clone)]
+enum MockOracleKey {
+    Decimals,
+    Price(Address),
+}
+
+#[contract]
+struct MockPriceOracle;
+
+#[contractimpl]
+impl MockPriceOracle {
+    pub fn init(env: Env, decimals: u32) {
+        env.storage().instance().set(&MockOracleKey::Decimals, &decimals);
+    }
+    pub fn set_price(env: Env, token: Address, price: i128) {
+        env.storage().instance().set(&MockOracleKey::Price(token), &price);
+    }
+    pub fn decimals(env: Env) -> u32 {
+        env.storage().instance().get(&MockOracleKey::Decimals).unwrap_or(0)
+    }
+    pub fn lastprice(env: Env, asset: OracleAsset) -> Option<PriceData> {
+        let token = match asset {
+            OracleAsset::Stellar(addr) => addr,
+            OracleAsset::Other(_) => return None,
+        };
+        let price: i128 = env.storage().instance().get(&MockOracleKey::Price(token))?;
+        Some(PriceData { price, timestamp: env.ledger().timestamp() })
+    }
+}
+
+#[test]
+fn lock_within_usd_limit_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_addr = sac.address();
+    token::StellarAssetClient::new(&env, &token_addr).mint(&buyer, &1_000_000);
+    let oracle_id = env.register_contract(None, MockPriceOracle);
+    MockPriceOracleClient::new(&env, &oracle_id).init(&0);
+    MockPriceOracleClient::new(&env, &oracle_id).set_price(&token_addr, &1);
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let keys: Vec<BytesN<32>> = Vec::new(&env);
+    let arb_set = ArbitratorSet {
+        keys,
+        threshold_epoch1: 0,
+        threshold_epoch2: 0,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    };
+    client.initialize(&admin, &token_addr, &50, &arb_set);
+    let no_sigs: Vec<Address> = Vec::new(&env);
+    client.set_oracle_address(&oracle_id, &no_sigs);
+    client.set_max_usd_limit(&1_000, &no_sigs);
+    let secret = BytesN::from_array(&env, &[7u8; 32]);
+    let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+    let id = BytesN::from_array(&env, &[8u8; 32]);
+    client.lock(&id, &seller, &buyer, &500, &secret_hash, &100);
+    assert_eq!(client.get_trade(&id).unwrap().amount, 500);
+}
+
+#[test]
+#[should_panic(expected = "43")]
+fn lock_exceeding_max_usd_limit_panics_with_exceeds_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_addr = sac.address();
+    token::StellarAssetClient::new(&env, &token_addr).mint(&buyer, &1_000_000);
+    let oracle_id = env.register_contract(None, MockPriceOracle);
+    MockPriceOracleClient::new(&env, &oracle_id).init(&0);
+    MockPriceOracleClient::new(&env, &oracle_id).set_price(&token_addr, &1);
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let keys: Vec<BytesN<32>> = Vec::new(&env);
+    let arb_set = ArbitratorSet {
+        keys,
+        threshold_epoch1: 0,
+        threshold_epoch2: 0,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    };
+    client.initialize(&admin, &token_addr, &50, &arb_set);
+    let no_sigs: Vec<Address> = Vec::new(&env);
+    client.set_oracle_address(&oracle_id, &no_sigs);
+    client.set_max_usd_limit(&1_000, &no_sigs);
+    let secret = BytesN::from_array(&env, &[7u8; 32]);
+    let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+    let id = BytesN::from_array(&env, &[9u8; 32]);
+    client.lock(&id, &seller, &buyer, &1_001, &secret_hash, &100);
 }
