@@ -15,6 +15,14 @@ export interface CashRequestStatus {
   status: "locked" | "expired" | "released" | "refunded";
   createdAt: string;
   timeoutLedger?: number;
+  /** Chain tip used for the refund countdown (locked/expired). */
+  latestLedger?: number;
+  /** Ledgers remaining before permissionless refund; 0 when available. */
+  ledgersUntilRefund?: number;
+  /** True once latestLedger >= timeoutLedger. */
+  refundAvailable?: boolean;
+  /** Wall-clock estimate only (ledgers × ~6s). */
+  estimatedSecondsUntilRefund?: number;
 }
 
 export type ReleaseFailureKind = "uncertain" | "failed";
@@ -42,6 +50,18 @@ export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   return res.json();
 }
 
+/** Submit permissionless refund once the escrow timeout has elapsed. */
+export async function refundCashRequest(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/refund`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({} as { error?: string }));
+    throw new Error(body.error ?? `refund failed (${res.status})`);
+  }
+}
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
   let res: Response;
@@ -172,6 +192,18 @@ export async function fetchStatus(): Promise<StatusResponse> {
   const res = await fetch(`${API_BASE}/api/v1/status`);
   if (!res.ok) throw new Error("status check failed");
   return res.json();
+}
+
+/** Formats a remaining-seconds estimate as a short countdown label. */
+export function formatRefundCountdown(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  if (seconds <= 0) return "0s";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs.toString().padStart(2, "0")}s`;
+  return `${secs}s`;
 }
 
 export interface EscrowPauseState {

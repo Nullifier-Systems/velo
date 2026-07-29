@@ -384,9 +384,9 @@ export async function adminRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Trade request not found." });
       }
 
-      if (record.status !== "locked") {
+      if (record.status !== "locked" && record.status !== "expired") {
         return reply.status(400).send({
-          error: `Cannot refund. Only locked trades can be refunded. Current status is '${record.status}'.`,
+          error: `Cannot refund. Only locked or expired trades can be refunded. Current status is '${record.status}'.`,
         });
       }
 
