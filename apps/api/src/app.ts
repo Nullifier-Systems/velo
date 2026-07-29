@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { randomUUID } from "crypto";
 import "dotenv/config";
 import { ApiError } from "./lib/errors.js";
@@ -9,6 +11,7 @@ import { resolveLocale, t } from "./lib/i18n.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
+import { openApiDocument } from "./openapi.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
@@ -101,6 +104,7 @@ app.register(cors, {
  * Global rate limit:           100 req/min
  * ------------------------------+-----------------
  *   GET /health                 | 100 req/min     (infrastructure health check, free)
+ *   GET /documentation           | 100 req/min     (interactive Swagger UI, global default, free)
  *   GET /api/v1/openapi.json    |  60 req/min     (OpenAPI spec, free)
  *   GET /api/v1/services        |  60 req/min     (catalog endpoint, free)
  *   GET /api/v1/cash/agents     |  30 req/min     (paid — agent discovery)
@@ -118,6 +122,38 @@ app.register(cors, {
  * FASTIFY_TRUST_PROXY when deployed behind a reverse proxy).
  */
 app.register(websocket);
+
+/**
+ * Interactive API documentation (GET /documentation).
+ *
+ * `src/openapi.ts` is already the single hand-maintained source of truth
+ * for the spec (served raw at GET /api/v1/openapi.json and snapshotted to
+ * apps/api/openapi.json — see routes/openapi.ts and
+ * scripts/generate-openapi.ts). Rather than have @fastify/swagger try to
+ * derive a second, competing spec by introspecting per-route schemas
+ * (which this codebase doesn't attach route-by-route), it's registered in
+ * "static" mode pointed at that same document, so there is exactly one
+ * spec and the interactive UI can never drift from it.
+ */
+app.register(swagger, {
+  mode: "static",
+  specification: {
+    // openApiDocument is declared `as const` (see openapi.ts) so every
+    // literal/enum value in it is exactly typed within this codebase. That
+    // makes its arrays/tuples `readonly`, which structurally conflicts with
+    // @fastify/swagger's own OpenAPI type definitions (which want mutable
+    // arrays like ServerObject[]) even though the actual shape is a valid
+    // OpenAPI 3.1 document. The cast only affects what TypeScript sees at
+    // this registration call; the object handed to swagger-ui at runtime
+    // is unchanged.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    document: openApiDocument as any,
+  },
+});
+
+app.register(swaggerUi, {
+  routePrefix: "/documentation",
+});
 
 app.register(rateLimit, {
   global: true,
