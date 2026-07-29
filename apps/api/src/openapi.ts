@@ -628,12 +628,18 @@ export const openApiDocument = {
         responses: {
           "200": {
             description:
-              "Reputation summary. Fields are null until the on-chain " +
-              "reputation source is wired up.",
+              "Reputation summary derived from trade history for the address. " +
+              "Results are cached for 60 seconds.",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Reputation" },
               },
+            },
+          },
+          "400": {
+            description: "Invalid Stellar G-address.",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
             },
           },
           "402": { $ref: "#/components/responses/PaymentRequired" },
@@ -785,12 +791,27 @@ export const openApiDocument = {
       },
       Reputation: {
         type: "object",
-        required: ["address", "completion_rate", "trades", "trusted"],
+        required: [
+          "address",
+          "total_trades",
+          "successful_claims",
+          "completion_rate",
+          "trusted",
+          "cached",
+        ],
         properties: {
           address: { type: "string" },
-          completion_rate: { type: ["number", "null"] },
-          trades: { type: ["integer", "null"] },
-          trusted: { type: ["boolean", "null"] },
+          total_trades: { type: "integer" },
+          successful_claims: { type: "integer" },
+          completion_rate: { type: "number" },
+          trusted: {
+            type: "boolean",
+            description: "True when total_trades >= 5 and completion_rate >= 0.90.",
+          },
+          cached: {
+            type: "boolean",
+            description: "True when the response was served from the 60s cache.",
+          },
         },
       },
     },

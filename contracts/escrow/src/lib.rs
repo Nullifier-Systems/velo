@@ -14,10 +14,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus};
+use htlc_core::{Htlc, Tranche, TradeState, TradeStatus};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Vec,
 };
 
 #[contracttype]
@@ -46,6 +46,22 @@ enum DataKey {
     Threshold,
     /// Whether an admin has armed a pause (may still be in the delay window).
     Paused,
+    Arbitrator,
+    /// Ledger sequence after which an unresolved dispute becomes
+    /// permissionlessly refundable to the buyer in full.
+    DisputeDeadline(BytesN<32>),
+    /// Append-only list of every address that has ever joined the
+    /// permissionless arbitrator pool (order = join order, indices stable —
+    /// entries are never removed, only deactivated via `ArbitratorMember`).
+    ArbitratorPool,
+    /// Per-arbitrator pool membership state, keyed by address. Distinct
+    /// from the single `Arbitrator` above, which remains the fallback
+    /// decision-maker for any dispute raised while the pool has no eligible
+    /// member (e.g. before anyone has joined it).
+    ArbitratorMember(Address),
+    /// Pool-selection state for one disputed trade — which pool members
+    /// were eligible, and (once drawn) who was selected.
+    DisputeSelection(BytesN<32>),
     /// Ledger sequence at which an armed pause becomes effective.
     PauseEffectiveLedger,
     ArbitratorSet,
@@ -108,6 +124,15 @@ pub enum Error {
     InvalidSplit = 20,
     /// A dispute-timeout refund was attempted before `DisputeDeadline` elapsed.
     DisputeTimeoutNotReached = 21,
+    ArbitratorPoolFull = 22,
+    ArbitratorAlreadyActive = 23,
+    ArbitratorNotRegistered = 24,
+    ArbitratorHasPendingDispute = 25,
+    NoDisputeSelection = 26,
+    SelectionNotReady = 27,
+    /// `resolve_dispute()` was called for a trade whose pool draw hasn't
+    /// happened yet — call `select_arbitrator()` first.
+    ArbitratorSelectionPending = 28,
     EmptyBatch = 22,
     /// Commitment hash already exists (replay prevention).
     CommitmentAlreadyExists = 23,
@@ -125,6 +150,14 @@ pub enum Error {
     InsufficientSignatures = 29,
     /// Signature replay attempt detected (nonce already used).
     NonceAlreadyUsed = 30,
+    /// Tranche amounts don't sum to the total locked amount.
+    TrancheSumMismatch = 31,
+    /// Attempted to release a tranche that was already released.
+    TrancheAlreadyReleased = 32,
+    /// Invalid tranche index (out of bounds).
+    InvalidTrancheIndex = 33,
+    /// Tranches array is empty — at least one tranche is required.
+    NoTranches = 34,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -148,6 +181,30 @@ const DISPUTE_RESOLUTION_WINDOW_LEDGERS: u32 = 12 * 60 * 24 * 3;
 /// docs/provider-payout-batching.md for the reasoning behind this figure.
 const MAX_BATCH_SIZE: u32 = 25;
 
+/// How many ledgers an arbitrator must have been continuously active in the
+/// pool before they count as eligible for a *newly raised* dispute. Ledgers
+/// close roughly every 10s on this network (consistent with the ~week-long
+/// `DEFAULT_TIMEOUT_LEDGERS_MAX` above), so this is roughly a day.
+///
+/// This is the primary defense against join-time gaming: eligibility for a
+/// given dispute is decided from the pool as it stood a full activation
+/// window in the past, so joining right after spotting a `lock()` you intend
+/// to (or expect a colluding party to) dispute can never land you in that
+/// dispute's draw. See docs/arbitrator-pool-selection.md.
+const ARBITRATOR_ACTIVATION_LEDGERS: u32 = 6 * 60 * 24;
+
+/// Ledgers to wait, after a dispute is raised, before `select_arbitrator()`
+/// may draw the winner. Combined with the draw being a separate,
+/// permissionless, one-shot call whose result never depends on the caller,
+/// this decouples "who can trigger the draw" from "who can influence it" —
+/// see docs/arbitrator-pool-selection.md for the full reasoning.
+const ARBITRATOR_SELECTION_DELAY_LEDGERS: u32 = 6;
+
+/// Bounds the arbitrator pool so building a per-dispute eligibility snapshot
+/// (one storage read per pool member, done inside `raise_dispute()`) stays
+/// well within Soroban's per-invocation compute budget. Mirrors
+/// `MAX_BATCH_SIZE`'s rationale above.
+const MAX_ARBITRATOR_POOL_SIZE: u32 = 64;
 /// MEV Protection: Commitment state in Phase 1 of commit-reveal protocol.
 #[derive(Clone)]
 #[contracttype]
@@ -191,6 +248,45 @@ pub struct BatchReleaseItem {
     pub secret: BytesN<32>,
 }
 
+/// Per-arbitrator pool membership record.
+#[derive(Clone)]
+#[contracttype]
+pub struct ArbitratorMeta {
+    /// Ledger sequence at which this membership period began. Reset to the
+    /// current ledger every time the arbitrator (re)joins, so a leave/rejoin
+    /// cycle can never be used to shortcut the activation delay.
+    pub joined_ledger: u32,
+    /// Whether currently a member of the pool. `join_arbitrator_pool` /
+    /// `leave_arbitrator_pool` toggle this; the address itself is never
+    /// removed from `DataKey::ArbitratorPool` so pool indices stay stable.
+    pub active: bool,
+    /// Count of disputes currently assigned to this arbitrator that haven't
+    /// been resolved or timed out yet. `leave_arbitrator_pool` refuses to
+    /// let an arbitrator exit while this is nonzero, so a selected
+    /// arbitrator can't dodge a dispute by leaving.
+    pub pending_disputes: u32,
+}
+
+/// Pool-selection state for one disputed trade, created by `raise_dispute()`
+/// and consumed by `select_arbitrator()` / `resolve_dispute()` /
+/// `refund_after_dispute_timeout()`.
+#[derive(Clone)]
+#[contracttype]
+pub struct DisputeSelection {
+    /// Ledger sequence at which the dispute was raised — the point in time
+    /// `eligible` was snapshotted from.
+    pub raised_ledger: u32,
+    /// `select_arbitrator()` only succeeds once the ledger has reached this
+    /// sequence — see `ARBITRATOR_SELECTION_DELAY_LEDGERS`.
+    pub reveal_ledger: u32,
+    /// Arbitrators eligible for this specific dispute, frozen at
+    /// `raised_ledger`. Empty means the pool had no eligible member when the
+    /// dispute was raised — `resolve_dispute()` falls back to the single
+    /// `DataKey::Arbitrator` for this trade, unchanged from before this pool
+    /// existed.
+    pub eligible: Vec<Address>,
+    /// Filled in by `select_arbitrator()` once drawn. `None` until then.
+    pub selected: Option<Address>,
 /// Issue #280 — tunable anti-spam bond parameters.
 #[derive(Clone)]
 #[contracttype]
@@ -393,6 +489,166 @@ impl EscrowContract {
         env.storage().persistent().get(&DataKey::Trade(id))
     }
 
+    /// Register as an arbitrator, joining the selection pool. Permissionless
+    /// — anyone may call this for themselves, which is what makes the pool
+    /// collusion-resistant: no admin gatekeeper decides who's eligible to be
+    /// drawn. A freshly joined (or rejoined) arbitrator only becomes
+    /// eligible for disputes raised at least `ARBITRATOR_ACTIVATION_LEDGERS`
+    /// after this call — see that constant's doc comment for why.
+    pub fn join_arbitrator_pool(env: Env, arbitrator: Address) -> Result<(), Error> {
+        arbitrator.require_auth();
+
+        let key = DataKey::ArbitratorMember(arbitrator.clone());
+        if let Some(meta) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ArbitratorMeta>(&key)
+        {
+            if meta.active {
+                return Err(Error::ArbitratorAlreadyActive);
+            }
+            let meta = ArbitratorMeta {
+                joined_ledger: env.ledger().sequence(),
+                active: true,
+                pending_disputes: meta.pending_disputes,
+            };
+            env.storage().persistent().set(&key, &meta);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, 100_000, 100_000);
+
+            env.events()
+                .publish((symbol_short(&env, "arb_joined"),), arbitrator);
+            return Ok(());
+        }
+
+        let mut pool: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ArbitratorPool)
+            .unwrap_or_else(|| Vec::new(&env));
+        if pool.len() >= MAX_ARBITRATOR_POOL_SIZE {
+            return Err(Error::ArbitratorPoolFull);
+        }
+        pool.push_back(arbitrator.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::ArbitratorPool, &pool);
+
+        let meta = ArbitratorMeta {
+            joined_ledger: env.ledger().sequence(),
+            active: true,
+            pending_disputes: 0,
+        };
+        env.storage().persistent().set(&key, &meta);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(&env, "arb_joined"),), arbitrator);
+        Ok(())
+    }
+
+    /// Leave the arbitrator pool. Requires that no dispute currently
+    /// assigned to this arbitrator is still unresolved — otherwise an
+    /// arbitrator could dodge a dispute they dislike the look of by leaving
+    /// the instant they're drawn. Rejoining later resets the activation
+    /// delay from scratch (see `join_arbitrator_pool`), so a leave/rejoin
+    /// cycle can't be used to re-roll eligibility for a specific dispute.
+    pub fn leave_arbitrator_pool(env: Env, arbitrator: Address) -> Result<(), Error> {
+        arbitrator.require_auth();
+
+        let key = DataKey::ArbitratorMember(arbitrator.clone());
+        let mut meta: ArbitratorMeta = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::ArbitratorNotRegistered)?;
+
+        if !meta.active {
+            return Err(Error::ArbitratorNotRegistered);
+        }
+        if meta.pending_disputes > 0 {
+            return Err(Error::ArbitratorHasPendingDispute);
+        }
+
+        meta.active = false;
+        env.storage().persistent().set(&key, &meta);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(&env, "arb_left"),), arbitrator);
+        Ok(())
+    }
+
+    /// Draw the arbitrator for a disputed trade from the eligibility
+    /// snapshot `raise_dispute()` recorded. Permissionless — anyone may call
+    /// this once the reveal delay has passed, and the outcome never depends
+    /// on who calls it. Idempotent: once a winner has been drawn, further
+    /// calls just return it rather than redrawing (redrawing is what would
+    /// let a caller "reroll" by resubmitting — see
+    /// docs/arbitrator-pool-selection.md).
+    pub fn select_arbitrator(env: Env, id: BytesN<32>) -> Result<Address, Error> {
+        let key = DataKey::DisputeSelection(id.clone());
+        let mut selection: DisputeSelection = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::NoDisputeSelection)?;
+
+        if let Some(existing) = selection.selected.clone() {
+            return Ok(existing);
+        }
+        if selection.eligible.is_empty() {
+            return Err(Error::NoDisputeSelection);
+        }
+        if env.ledger().sequence() < selection.reveal_ledger {
+            return Err(Error::SelectionNotReady);
+        }
+
+        let len = selection.eligible.len() as u64;
+        let index = env.prng().gen_range::<u64>(0..len);
+        let winner = selection.eligible.get(index as u32).unwrap();
+
+        selection.selected = Some(winner.clone());
+        env.storage().persistent().set(&key, &selection);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        let meta_key = DataKey::ArbitratorMember(winner.clone());
+        if let Some(mut meta) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ArbitratorMeta>(&meta_key)
+        {
+            meta.pending_disputes += 1;
+            env.storage().persistent().set(&meta_key, &meta);
+            env.storage()
+                .persistent()
+                .extend_ttl(&meta_key, 100_000, 100_000);
+        }
+
+        env.events()
+            .publish((symbol_short(&env, "arb_picked"), id), winner.clone());
+        Ok(winner)
+    }
+
+    /// Read-only accessor for a dispute's pool-selection state.
+    pub fn get_dispute_selection(env: Env, id: BytesN<32>) -> Option<DisputeSelection> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::DisputeSelection(id))
+    }
+
+    /// Read-only accessor for an arbitrator's pool membership state.
+    pub fn get_arbitrator(env: Env, arbitrator: Address) -> Option<ArbitratorMeta> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ArbitratorMember(arbitrator))
     /// Whether `lock()` is currently rejected (pause armed and delay elapsed).
     pub fn is_paused(env: Env) -> bool {
         is_effectively_paused(&env)
@@ -469,6 +725,27 @@ impl EscrowContract {
             .persistent()
             .set(&DataKey::Dispute(id.clone()), &info);
 
+        // Snapshot arbitrator-pool eligibility now, before anyone can react
+        // to this dispute existing. `resolve_dispute()` and
+        // `select_arbitrator()` only ever consult this frozen snapshot, so
+        // joining or leaving the pool after this point has zero effect on
+        // this specific dispute. An empty snapshot (no eligible pool member)
+        // means `resolve_dispute()` falls back to the single `Arbitrator`,
+        // exactly as if this pool didn't exist.
+        let now = env.ledger().sequence();
+        let eligible = eligible_arbitrators(&env, now);
+        let selection_key = DataKey::DisputeSelection(id.clone());
+        let selection = DisputeSelection {
+            raised_ledger: now,
+            reveal_ledger: now + ARBITRATOR_SELECTION_DELAY_LEDGERS,
+            eligible,
+            selected: None,
+        };
+        env.storage().persistent().set(&selection_key, &selection);
+        env.storage()
+            .persistent()
+            .extend_ttl(&selection_key, 100_000, 100_000);
+
         env.events()
             .publish((symbol_short(&env, "disputed"), id), (caller,));
     }
@@ -477,9 +754,18 @@ impl EscrowContract {
     /// and seller. `buyer_share_bps` is the buyer's cut in basis points
     /// (0 = seller gets everything, minus the platform fee, exactly like
     /// `release()`; 10_000 = buyer gets a full refund, exactly like
-    /// `refund()`; anything in between is a genuine partial split). Callable
-    /// only by the arbitrator — never the admin, and never through the
-    /// multisig — and only once per trade: after this call the trade is
+    /// `refund()`; anything in between is a genuine partial split).
+    ///
+    /// Authorization: if the arbitrator pool had an eligible member when
+    /// this dispute was raised, only the arbitrator drawn by
+    /// `select_arbitrator()` for this specific trade may call this — not
+    /// the single `Arbitrator`, not the admin, not the multisig. That's the
+    /// entire point of a pool: resolution authority for a given dispute
+    /// can't be a known-in-advance party. Otherwise (pool empty at raise
+    /// time), falls back to the single `Arbitrator`, unchanged from before
+    /// this pool existed.
+    ///
+    /// Callable only once per trade: after this call the trade is
     /// `Resolved`, so a second call fails the `TradeNotDisputed` check below.
     ///
     /// Every transfer here happens inside this single Soroban invocation, so
@@ -506,6 +792,29 @@ impl EscrowContract {
             return Err(Error::TradeNotDisputed);
         }
 
+        let selection_key = DataKey::DisputeSelection(id.clone());
+        let selection: Option<DisputeSelection> = env.storage().persistent().get(&selection_key);
+        let pool_active = matches!(&selection, Some(s) if !s.eligible.is_empty());
+
+        if pool_active {
+            let arbitrator = selection
+                .unwrap()
+                .selected
+                .ok_or(Error::ArbitratorSelectionPending)?;
+            arbitrator.require_auth();
+            release_arbitrator_slot(&env, &arbitrator);
+            env.storage().persistent().remove(&selection_key);
+        } else {
+            let arbitrator: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::Arbitrator)
+                .ok_or(Error::NotInitialized)?;
+            arbitrator.require_auth();
+            if selection.is_some() {
+                env.storage().persistent().remove(&selection_key);
+            }
+        }
         let arb_set: ArbitratorSet = env
             .storage()
             .instance()
@@ -637,6 +946,22 @@ impl EscrowContract {
             .saturating_sub(dispute_info.start_ledger);
         if elapsed <= arb_set.t2_ledgers {
             return Err(Error::DisputeTimeoutNotReached);
+        }
+
+        // If the arbitrator pool had drawn a winner for this trade, free up
+        // their pending-dispute slot and drop the selection record — an
+        // unresponsive arbitrator isn't stuck any more than a responsive
+        // one, and can still leave the pool afterward.
+        let selection_key = DataKey::DisputeSelection(id.clone());
+        if let Some(selection) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, DisputeSelection>(&selection_key)
+        {
+            if let Some(arbitrator) = selection.selected {
+                release_arbitrator_slot(&env, &arbitrator);
+            }
+            env.storage().persistent().remove(&selection_key);
         }
 
         state.status = TradeStatus::Refunded;
@@ -833,6 +1158,142 @@ impl EscrowContract {
         Ok(released)
     }
 
+    /// Atomically releases `release_trade_id` and re-locks the payout it
+    /// would have paid out directly into a brand-new trade, instead of
+    /// transferring it to a wallet first. This is how a cash provider who
+    /// just received funds in one trade re-circulates that same value into
+    /// a new trade without it ever sitting outside the contract.
+    ///
+    /// # Authorization
+    ///
+    /// Plain `release()` is permissionless: whoever supplies the correct
+    /// `secret` triggers payout to `release_trade_id`'s `seller`, no matter
+    /// who calls it. Chaining is a materially different action — it
+    /// redirects that same payout into a *new* trade of the caller's
+    /// choosing (a different counterparty, secret hash and timeout) rather
+    /// than paying it to the wallet the seller expects. That decision
+    /// belongs only to the party the funds are owed to, so this function
+    /// requires `seller.require_auth()` in addition to the secret check.
+    /// Without that, anyone who merely observed `release_secret` (e.g. by
+    /// watching it get revealed at hand-off) could hijack someone else's
+    /// incoming payout into a trade they control — exactly the redirection
+    /// this gate exists to prevent.
+    ///
+    /// `release_trade_id`'s `buyer` needs no additional say here: from
+    /// their point of view chaining is indistinguishable from an ordinary
+    /// `release()` — the same secret is checked against the same hash and
+    /// their trade ends up `Released` either way. The new trade's `buyer`
+    /// is always `release_trade_id`'s `seller` (the party recirculating
+    /// its own incoming funds); `new_seller` is the counterparty they're
+    /// choosing for the new trade.
+    ///
+    /// Returns the new trade's id, deterministically derived from
+    /// `release_trade_id` and `new_secret_hash` so callers can look it up
+    /// without the contract needing an extra explicit id argument.
+    pub fn chain_release_to_lock(
+        env: Env,
+        release_trade_id: BytesN<32>,
+        release_secret: BytesN<32>,
+        new_seller: Address,
+        new_secret_hash: BytesN<32>,
+        new_timeout_ledgers: u32,
+    ) -> Result<BytesN<32>, Error> {
+        check_not_paused(&env);
+
+        let release_key = DataKey::Trade(release_trade_id.clone());
+        let mut release_state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&release_key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if release_state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        let computed = env.crypto().sha256(&release_secret.into());
+        if computed.to_bytes() != release_state.secret_hash {
+            return Err(Error::InvalidSecret);
+        }
+
+        // Only the party a plain release() would have paid may redirect
+        // that payout into a new trade instead of their wallet — see the
+        // Authorization section in the doc comment above.
+        release_state.seller.require_auth();
+
+        if new_timeout_ledgers == 0 || new_timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            return Err(Error::InvalidTimeout);
+        }
+
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(0);
+        let fee = (release_state.amount * fee_bps as i128) / 10_000;
+        let payout = release_state.amount - fee;
+        if payout <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let new_id = chained_trade_id(&env, &release_trade_id, &new_secret_hash);
+        let new_key = DataKey::Trade(new_id.clone());
+        if env.storage().persistent().has(&new_key) {
+            return Err(Error::TradeAlreadyExists);
+        }
+
+        // CEI pattern: both trades' state is finalized before the only
+        // external transfer this call makes (the platform fee, if any).
+        // The payout itself never leaves the contract's token balance — it
+        // simply becomes the new trade's escrowed amount instead of an
+        // outbound transfer to release_state.seller's wallet, which is the
+        // property this function exists to provide.
+        release_state.status = TradeStatus::Released;
+        env.storage().persistent().set(&release_key, &release_state);
+
+        let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
+        
+        // Create a single-tranche trade for the chained lock
+        let mut new_tranches = Vec::new(&env);
+        new_tranches.push_back(Tranche {
+            amount: payout,
+            secret_hash: new_secret_hash.clone(),
+            released: false,
+        });
+
+        let new_state = TradeState {
+            seller: new_seller,
+            buyer: release_state.seller.clone(),
+            amount: payout,
+            secret_hash: new_secret_hash,
+            tranches: new_tranches,
+            timeout_ledger: new_timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+        env.storage().persistent().set(&new_key, &new_state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&new_key, 100_000, 100_000);
+
+        if fee > 0 {
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        // Two distinguishable events rather than "released" + "locked" —
+        // off-chain systems need to tell a chained operation apart from
+        // two independent ones. Each cross-references the other trade's
+        // id so a listener can reconstruct the link from either event.
+        env.events().publish(
+            (symbol_short(&env, "chain_rel"), release_trade_id),
+            (new_id.clone(), payout),
+        );
+        env.events()
+            .publish((symbol_short(&env, "chain_lock"), new_id.clone()), payout);
+
+        Ok(new_id)
     /// Atomically release multiple trades in a single transaction.
     /// ALL trades must be valid (exist, Locked, correct secrets) or the
     /// ENTIRE batch fails and reverts — no partial settlement.
@@ -1067,11 +1528,21 @@ impl EscrowContract {
         }
 
         let timeout_ledger = current_ledger + timeout_ledgers;
+        
+        // Create a single-tranche trade for backward compatibility
+        let mut tranches = Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer: buyer.clone(),
             amount,
             secret_hash,
+            tranches,
             timeout_ledger,
             status: TradeStatus::Locked,
         };
@@ -1314,11 +1785,20 @@ impl Htlc for EscrowContract {
 
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
+        // Create a single-tranche trade for backward compatibility
+        let mut tranches = Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer: buyer.clone(),
             amount,
             secret_hash,
+            tranches,
             timeout_ledger,
             status: TradeStatus::Locked,
         };
@@ -1368,6 +1848,206 @@ impl Htlc for EscrowContract {
             .publish((symbol_short(&env, "locked"), id), amount);
     }
 
+    /// Lock funds with multiple tranches, each with its own secret hash.
+    /// Each tranche can be released independently by revealing its secret.
+    /// The sum of tranche amounts MUST equal the total amount parameter.
+    pub fn lock_with_tranches(
+        env: Env,
+        id: BytesN<32>,
+        seller: Address,
+        buyer: Address,
+        amount: i128,
+        tranches: Vec<Tranche>,
+        timeout_ledgers: u32,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+        Self::flatten_branch_cost(&env);
+        buyer.require_auth();
+
+        if amount <= 0 || amount > (i128::MAX / 10_000) {
+            return Err(Error::InvalidAmount);
+        }
+        if timeout_ledgers == 0 || timeout_ledgers > DEFAULT_TIMEOUT_LEDGERS_MAX {
+            return Err(Error::InvalidTimeout);
+        }
+        if tranches.is_empty() {
+            return Err(Error::NoTranches);
+        }
+
+        // Critical: validate that tranche amounts sum exactly to the total
+        let mut tranche_sum: i128 = 0;
+        for tranche in tranches.iter() {
+            if tranche.amount <= 0 {
+                return Err(Error::InvalidAmount);
+            }
+            tranche_sum = tranche_sum
+                .checked_add(tranche.amount)
+                .ok_or(Error::InvalidAmount)?;
+        }
+        if tranche_sum != amount {
+            return Err(Error::TrancheSumMismatch);
+        }
+
+        let key = DataKey::Trade(id.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(Error::TradeAlreadyExists);
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
+
+        // Use first tranche's secret_hash for backward compatibility with single-secret queries
+        let first_secret_hash = tranches.get(0).unwrap().secret_hash.clone();
+
+        let state = TradeState {
+            seller,
+            buyer: buyer.clone(),
+            amount,
+            secret_hash: first_secret_hash,
+            tranches,
+            timeout_ledger,
+            status: TradeStatus::Locked,
+        };
+
+        // CEI (issue #273): write trade (+ optional bond) bookkeeping before pulls.
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        let params = bond_params(&env);
+        let need_bond =
+            params.bond_amount > 0 && read_reputation(&env, &buyer) < params.establish_threshold;
+        if need_bond {
+            env.storage()
+                .instance()
+                .set(&DataKey::Bond(id.clone()), &params.bond_amount);
+        }
+
+        // Issue #283: Record trade in sequential index for reputation scanning.
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeCounter)
+            .unwrap_or(0);
+        let next_idx = counter + 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeCounter, &next_idx);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeId(next_idx), &id);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&buyer, &env.current_contract_address(), &amount);
+
+        // Issue #280: an "unestablished" buyer posts a refundable bond.
+        if need_bond {
+            client.transfer(
+                &buyer,
+                &env.current_contract_address(),
+                &params.bond_amount,
+            );
+        }
+
+        env.events()
+            .publish((symbol_short(&env, "locked"), id), amount);
+        Ok(())
+    }
+
+    /// Release a specific tranche by index, revealing its secret.
+    /// Returns the amount released (after fee).
+    pub fn release_tranche(
+        env: Env,
+        id: BytesN<32>,
+        tranche_index: u32,
+        secret: BytesN<32>,
+    ) -> Result<i128, Error> {
+        // Issue #266: intentionally does NOT call check_not_paused.
+        let key = DataKey::Trade(id.clone());
+        let mut state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        if tranche_index >= state.tranches.len() {
+            return Err(Error::InvalidTrancheIndex);
+        }
+
+        let mut tranche = state.tranches.get(tranche_index).unwrap();
+        if tranche.released {
+            return Err(Error::TrancheAlreadyReleased);
+        }
+
+        // Verify the secret matches this tranche's hash
+        let computed = env.crypto().sha256(&secret.into());
+        if computed.to_bytes() != tranche.secret_hash {
+            return Err(Error::InvalidSecret);
+        }
+
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(0);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+
+        let fee = (tranche.amount * fee_bps as i128) / 10_000;
+        let payout = tranche.amount - fee;
+
+        // Mark this tranche as released
+        tranche.released = true;
+        state.tranches.set(tranche_index, tranche);
+
+        // Check if all tranches are now released
+        let mut all_released = true;
+        for i in 0..state.tranches.len() {
+            if !state.tranches.get(i).unwrap().released {
+                all_released = false;
+                break;
+            }
+        }
+
+        // If all tranches are released, mark the entire trade as Released
+        if all_released {
+            state.status = TradeStatus::Released;
+            // Complete with bond refund only when fully released
+            Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
+        }
+
+        // CEI pattern: update state before external calls
+        env.storage().persistent().set(&key, &state);
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &state.seller, &payout);
+        if fee > 0 {
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        env.events().publish(
+            (symbol_short(&env, "tranche_rel"), id.clone()),
+            (tranche_index, payout),
+        );
+
+        if all_released {
+            env.events()
+                .publish((symbol_short(&env, "released"), id), state.amount);
+        }
+
+        Ok(payout)
+    }
+
     fn release(env: Env, id: BytesN<32>, secret: BytesN<32>) {
         // Issue #266: intentionally does NOT call check_not_paused.
         // Pause only closes the front door (new `lock`s). `release` and
@@ -1384,29 +2064,55 @@ impl Htlc for EscrowContract {
             return;
         }
 
-        let computed = env.crypto().sha256(&secret.into());
-        if computed.to_bytes() != state.secret_hash {
+        // For backward compatibility: if trade has a single tranche, release it
+        // Otherwise, verify against the legacy secret_hash field (first tranche)
+        if state.tranches.len() == 1 {
+            let tranche = state.tranches.get(0).unwrap();
+            if tranche.released {
+                return;
+            }
+            
+            let computed = env.crypto().sha256(&secret.into());
+            if computed.to_bytes() != tranche.secret_hash {
+                panic_with_error(&env, Error::InvalidSecret);
+            }
+
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let fee_bps: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::PlatformFeeBps)
+                .unwrap_or(0);
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+
+            let fee = (state.amount * fee_bps as i128) / 10_000;
+            let payout = state.amount - fee;
+
+            // CEI pattern: update state before external calls
+            state.status = TradeStatus::Released;
+            env.storage().persistent().set(&key, &state);
+
+            Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
+
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &state.seller, &payout);
+            if fee > 0 {
+                client.transfer(&env.current_contract_address(), &admin, &fee);
+            }
+
+            env.events()
+                .publish((symbol_short(&env, "released"), id), payout);
+        } else {
+            // For multi-tranche trades, users should use release_tranche()
+            // But we check the first tranche's secret for compatibility
+            let computed = env.crypto().sha256(&secret.into());
+            if computed.to_bytes() != state.secret_hash {
+                panic_with_error(&env, Error::InvalidSecret);
+            }
+            // If secret matches, this is an error - use release_tranche instead
             panic_with_error(&env, Error::InvalidSecret);
         }
-
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let fee_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::PlatformFeeBps)
-            .unwrap_or(0);
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-
-        let fee = (state.amount * fee_bps as i128) / 10_000;
-        let payout = state.amount - fee;
-
-        // CEI pattern: update state before external calls
-        state.status = TradeStatus::Released;
-        env.storage().persistent().set(&key, &state);
-
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&env.current_contract_address(), &state.seller, &payout);
-        if fee > 0 {
+    }
             client.transfer(&env.current_contract_address(), &admin, &fee);
         }
 
@@ -1432,19 +2138,96 @@ impl Htlc for EscrowContract {
             panic_with_error(&env, Error::TimeoutNotReached);
         }
 
+        // Calculate the unreleased amount (sum of all unreleased tranches)
+        let mut refund_amount: i128 = 0;
+        for i in 0..state.tranches.len() {
+            let tranche = state.tranches.get(i).unwrap();
+            if !tranche.released {
+                refund_amount += tranche.amount;
+            }
+        }
+
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let client = token::Client::new(&env, &token_addr);
-        client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
+        // Only transfer if there's an unreleased amount to refund
+        if refund_amount > 0 {
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &state.buyer, &refund_amount);
+        }
 
         env.events()
-            .publish((symbol_short(&env, "refunded"), id), state.amount);
+            .publish((symbol_short(&env, "refunded"), id), refund_amount);
     }
 }
 
+/// Derives the id for a trade created via `chain_release_to_lock()`:
+/// sha256(release_trade_id || new_secret_hash). Deterministic rather than
+/// caller-supplied so the function's signature needs no extra id argument;
+/// collisions are not a practical concern (sha256 preimage) and the
+/// `TradeAlreadyExists` check still guards against one regardless.
+fn chained_trade_id(
+    env: &Env,
+    release_trade_id: &BytesN<32>,
+    new_secret_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let mut msg: Bytes = release_trade_id.clone().into();
+    msg.append(&new_secret_hash.clone().into());
+    env.crypto().sha256(&msg).to_bytes()
+/// Builds the list of arbitrators eligible to be drawn for a dispute raised
+/// at `at_ledger`: pool members who are currently active and who joined at
+/// least `ARBITRATOR_ACTIVATION_LEDGERS` before `at_ledger`. Bounded by
+/// `MAX_ARBITRATOR_POOL_SIZE` storage reads.
+fn eligible_arbitrators(env: &Env, at_ledger: u32) -> Vec<Address> {
+    let pool: Vec<Address> = env
+        .storage()
+        .instance()
+        .get(&DataKey::ArbitratorPool)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut eligible = Vec::new(env);
+    for addr in pool.iter() {
+        let meta: Option<ArbitratorMeta> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ArbitratorMember(addr.clone()));
+        if let Some(meta) = meta {
+            if meta.active
+                && meta
+                    .joined_ledger
+                    .saturating_add(ARBITRATOR_ACTIVATION_LEDGERS)
+                    <= at_ledger
+            {
+                eligible.push_back(addr);
+            }
+        }
+    }
+    eligible
+}
+
+/// Frees up one pending-dispute slot for `arbitrator`, so `leave_arbitrator_pool`
+/// stops refusing them once their draw is settled. Called from both
+/// `resolve_dispute()` (on success) and `refund_after_dispute_timeout()` (on
+/// an arbitrator who never resolved).
+fn release_arbitrator_slot(env: &Env, arbitrator: &Address) {
+    let meta_key = DataKey::ArbitratorMember(arbitrator.clone());
+    if let Some(mut meta) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, ArbitratorMeta>(&meta_key)
+    {
+        meta.pending_disputes = meta.pending_disputes.saturating_sub(1);
+        env.storage().persistent().set(&meta_key, &meta);
+        env.storage()
+            .persistent()
+            .extend_ttl(&meta_key, 100_000, 100_000);
+    }
+}
+
+fn check_not_paused(env: &Env) {
+    if let Some(paused) = env
 fn is_effectively_paused(env: &Env) -> bool {
     let armed: bool = env
         .storage()
@@ -1528,6 +2311,7 @@ fn symbol_short(env: &Env, s: &str) -> soroban_sdk::Symbol {
 mod test {
     use super::*;
     use soroban_sdk::{
+        testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
         testutils::{Address as _, Ledger},
         token, vec, Address, BytesN, Env, IntoVal,
     };
@@ -2245,6 +3029,517 @@ mod test {
     }
 
     // ------------------------------------------------------------------
+    // Escrow-to-escrow atomic trade chaining (issue #271).
+    //
+    // chain_release_to_lock() releases trade A's logic and re-locks the
+    // same payout directly into a new trade B, so a cash provider can
+    // re-circulate incoming funds without them ever landing in a wallet.
+    // ------------------------------------------------------------------
+
+    fn new_secret_and_hash(env: &Env, byte: u8) -> (BytesN<32>, BytesN<32>) {
+        let secret = BytesN::from_array(env, &[byte; 32]);
+        let hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+        (secret, hash)
+    }
+
+    #[test]
+    fn chain_release_to_lock_relocks_the_payout_without_an_external_transfer() {
+        let f = setup(1_000, 100); // 1% fee
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // Trade A is released...
+        let trade_a = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade_a.status, TradeStatus::Released);
+
+        // ...but its seller never received a wallet transfer: the payout
+        // went straight into trade B instead.
+        assert_eq!(f.token.balance(&f.seller), 0);
+
+        // Trade B exists, Locked, funded for the same payout (amount minus
+        // fee), with f.seller as its buyer and new_seller as its seller.
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Locked);
+        assert_eq!(trade_b.seller, new_seller);
+        assert_eq!(trade_b.buyer, f.seller);
+        assert_eq!(trade_b.amount, 495); // 500 - 1%
+        assert_eq!(trade_b.secret_hash, new_secret_hash);
+
+        // Only the platform fee ever left the contract; the rest of trade
+        // A's escrowed amount is still inside the contract, now backing
+        // trade B.
+        assert_eq!(f.token.balance(&f.admin), 5);
+        assert_eq!(f.token.balance(&f.contract_id), 495);
+
+        // Sanity: trade B's own secret unlocks it exactly like any trade.
+        f.client.release(&new_id, &new_secret);
+        assert_eq!(f.token.balance(&new_seller), 491); // 495 - 1% (fee truncates down)
+    }
+
+    #[test]
+    fn chain_release_to_lock_requires_release_trade_sellers_authorization() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let outsider = Address::generate(&f.env);
+
+        let invoke = MockAuthInvoke {
+            contract: &f.contract_id,
+            fn_name: "chain_release_to_lock",
+            args: (
+                f.id.clone(),
+                f.secret.clone(),
+                new_seller.clone(),
+                new_secret_hash.clone(),
+                50u32,
+            )
+                .into_val(&f.env),
+            sub_invokes: &[],
+        };
+
+        // An outsider — someone who merely knows the secret but is not
+        // trade A's seller — cannot authorize the chain.
+        let result = f
+            .client
+            .mock_auths(&[MockAuth {
+                address: &outsider,
+                invoke: &invoke,
+            }])
+            .try_chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+        assert!(result.is_err());
+
+        // Trade A is untouched — the rejected attempt didn't partially
+        // apply.
+        let trade_a = f.client.get_trade(&f.id).unwrap();
+        assert_eq!(trade_a.status, TradeStatus::Locked);
+
+        // The legitimate recipient (trade A's seller) can authorize it.
+        let new_id = f
+            .client
+            .mock_auths(&[MockAuth {
+                address: &f.seller,
+                invoke: &invoke,
+            }])
+            .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Locked);
+    }
+
+    #[test]
+    fn chain_release_to_lock_rejects_wrong_secret() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let wrong_secret = BytesN::from_array(&f.env, &[0u8; 32]);
+
+        assert!(f
+            .client
+            .try_chain_release_to_lock(&f.id, &wrong_secret, &new_seller, &new_secret_hash, &50)
+    // Permissionless, collusion-resistant arbitrator selection (issue #279).
+    //
+    // The pool is opt-in and layers on top of the single `Arbitrator`
+    // resolution path added by issue #275: a deployment that never
+    // populates a pool behaves exactly as the tests above already show
+    // (resolve_dispute() gated by the single arbitrator). Once arbitrators
+    // exist, `raise_dispute()` snapshots which of them are eligible
+    // *before* anyone could react to the dispute existing, and
+    // `select_arbitrator()` draws from that frozen snapshot only after a
+    // delay. See docs/arbitrator-pool-selection.md for the full reasoning
+    // behind why this is unpredictable and un-gameable at the moment it
+    // matters.
+    // ------------------------------------------------------------------
+
+    struct ArbitratorPoolFixture {
+        f: Fixture,
+        a1: Address,
+        a2: Address,
+        a3: Address,
+    }
+
+    /// Three pool arbitrators, already past the activation delay, so
+    /// they're eligible for whatever dispute a test raises next. `f`'s own
+    /// single `arbitrator` (from `setup()`) still exists as the fallback
+    /// for deployments/trades where the pool has no eligible member.
+    fn setup_pool() -> ArbitratorPoolFixture {
+        let f = setup(1_000, 100);
+        let a1 = Address::generate(&f.env);
+        let a2 = Address::generate(&f.env);
+        let a3 = Address::generate(&f.env);
+        f.client.join_arbitrator_pool(&a1);
+        f.client.join_arbitrator_pool(&a2);
+        f.client.join_arbitrator_pool(&a3);
+        f.env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_ACTIVATION_LEDGERS);
+        ArbitratorPoolFixture { f, a1, a2, a3 }
+    }
+
+    #[test]
+    fn raise_dispute_before_activation_delay_falls_back_to_single_arbitrator() {
+        let f = setup(1_000, 100);
+        let a1 = Address::generate(&f.env);
+        f.client.join_arbitrator_pool(&a1);
+        // No ledgers have passed since joining — a1 is not yet eligible.
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client.raise_dispute(&f.buyer, &f.id);
+
+        let selection = f.client.get_dispute_selection(&f.id).unwrap();
+        assert_eq!(selection.eligible.len(), 0);
+
+        // Falls back to the single Arbitrator, exactly as before the pool
+        // existed.
+        f.client.resolve_dispute(&f.id, &10_000);
+        assert_eq!(f.token.balance(&f.buyer), 1_000);
+    }
+
+    #[test]
+    fn arbitrator_becomes_eligible_after_activation_delay() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+
+        let selection = pool.f.client.get_dispute_selection(&pool.f.id).unwrap();
+        assert_eq!(selection.eligible.len(), 3);
+    }
+
+    #[test]
+    fn select_arbitrator_fails_before_reveal_delay() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+
+        assert!(pool.f.client.try_select_arbitrator(&pool.f.id).is_err());
+    }
+
+    #[test]
+    fn select_arbitrator_result_does_not_depend_on_caller_and_is_idempotent() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+        pool.f
+            .env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_SELECTION_DELAY_LEDGERS);
+
+        // select_arbitrator() takes no caller/address argument at all, so
+        // its outcome cannot structurally depend on who submits the call.
+        let winner = pool.f.client.select_arbitrator(&pool.f.id);
+        assert!(winner == pool.a1 || winner == pool.a2 || winner == pool.a3);
+
+        // Calling again — as if a different, unrelated party raced to call
+        // it too — must return the same address, never redraw. This is what
+        // rules out grinding: there is no "reroll" to try for.
+        let winner_again = pool.f.client.select_arbitrator(&pool.f.id);
+        assert_eq!(winner, winner_again);
+    }
+
+    #[test]
+    fn resolve_dispute_requires_a_draw_before_it_can_be_called() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+
+        // Arbitrator-pool mode is active (the eligible pool is non-empty)
+        // but nobody has drawn a winner yet — resolve_dispute() must not
+        // silently fall back to the single Arbitrator, which would defeat
+        // collusion resistance.
+        assert!(pool
+            .f
+            .client
+            .try_resolve_dispute(&pool.f.id, &10_000)
+            .is_err());
+    }
+
+    #[test]
+    fn chain_release_to_lock_cannot_be_replayed_against_an_already_released_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        f.client
+            .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // Trying to chain the same, now-Released trade again must fail —
+        // it is no longer Locked.
+        let (_again_secret, again_hash) = new_secret_and_hash(&f.env, 43);
+        assert!(f
+            .client
+            .try_chain_release_to_lock(&f.id, &f.secret, &new_seller, &again_hash, &50)
+            .is_err());
+    }
+
+    #[test]
+    fn chained_trade_can_be_refunded_after_its_own_timeout_like_any_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        f.env.ledger().with_mut(|li| li.sequence_number += 51);
+        f.client.refund(&new_id);
+
+        // f.seller is trade B's buyer, so a timed-out trade B refunds back
+        // to f.seller exactly as an ordinary trade would.
+        assert_eq!(f.token.balance(&f.seller), 495);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Refunded);
+    }
+
+    #[test]
+    fn chained_trade_can_be_disputed_and_resolved_like_any_trade() {
+        let f = setup(1_000, 100);
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+        let new_seller = Address::generate(&f.env);
+        let (_new_secret, new_secret_hash) = new_secret_and_hash(&f.env, 42);
+        let new_id =
+            f.client
+                .chain_release_to_lock(&f.id, &f.secret, &new_seller, &new_secret_hash, &50);
+
+        // f.seller is trade B's buyer, and can dispute it exactly like any
+        // other trade's buyer.
+        f.client.dispute(&f.seller, &new_id);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Disputed);
+
+        f.client.resolve(&new_id, &true, &Vec::new(&f.env));
+        assert_eq!(f.token.balance(&f.seller), 495);
+        let trade_b = f.client.get_trade(&new_id).unwrap();
+        assert_eq!(trade_b.status, TradeStatus::Refunded);
+    fn resolve_dispute_succeeds_once_the_drawn_arbitrator_calls_it() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+        pool.f
+            .env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_SELECTION_DELAY_LEDGERS);
+        let winner = pool.f.client.select_arbitrator(&pool.f.id);
+        assert!(winner == pool.a1 || winner == pool.a2 || winner == pool.a3);
+
+        pool.f.client.resolve_dispute(&pool.f.id, &10_000);
+        assert_eq!(pool.f.token.balance(&pool.f.buyer), 1_000);
+        assert_eq!(
+            pool.f.client.get_trade(&pool.f.id).unwrap().status,
+            TradeStatus::Resolved
+        );
+
+        // Cleaned up, and the arbitrator is free to leave once their
+        // pending count drops back to zero.
+        assert!(pool.f.client.get_dispute_selection(&pool.f.id).is_none());
+        let meta = pool.f.client.get_arbitrator(&winner).unwrap();
+        assert_eq!(meta.pending_disputes, 0);
+        assert!(pool.f.client.try_leave_arbitrator_pool(&winner).is_ok());
+    }
+
+    #[test]
+    fn arbitrator_cannot_leave_pool_while_holding_a_pending_dispute() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+        pool.f
+            .env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_SELECTION_DELAY_LEDGERS);
+        let winner = pool.f.client.select_arbitrator(&pool.f.id);
+
+        assert!(pool.f.client.try_leave_arbitrator_pool(&winner).is_err());
+    }
+
+    #[test]
+    fn dispute_timeout_frees_the_drawn_arbitrator_even_though_they_never_resolved() {
+        let pool = setup_pool();
+        pool.f.client.lock(
+            &pool.f.id,
+            &pool.f.seller,
+            &pool.f.buyer,
+            &500,
+            &pool.f.secret_hash,
+            &100,
+        );
+        pool.f.client.raise_dispute(&pool.f.buyer, &pool.f.id);
+        pool.f
+            .env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_SELECTION_DELAY_LEDGERS);
+        let winner = pool.f.client.select_arbitrator(&pool.f.id);
+
+        pool.f
+            .env
+            .ledger()
+            .with_mut(|li| li.sequence_number += DISPUTE_RESOLUTION_WINDOW_LEDGERS);
+        pool.f.client.refund_after_dispute_timeout(&pool.f.id);
+
+        assert_eq!(pool.f.token.balance(&pool.f.buyer), 1_000);
+        assert_eq!(
+            pool.f.client.get_trade(&pool.f.id).unwrap().status,
+            TradeStatus::Refunded
+        );
+
+        // The selection record is cleaned up and the unresponsive
+        // arbitrator is freed to leave the pool.
+        assert!(pool.f.client.get_dispute_selection(&pool.f.id).is_none());
+        let meta = pool.f.client.get_arbitrator(&winner).unwrap();
+        assert_eq!(meta.pending_disputes, 0);
+        assert!(pool.f.client.try_leave_arbitrator_pool(&winner).is_ok());
+    }
+
+    #[test]
+    fn arbitrator_pool_full_rejects_further_joins() {
+        let f = setup(1_000, 100);
+        for _ in 0..MAX_ARBITRATOR_POOL_SIZE {
+            let a = Address::generate(&f.env);
+            f.client.join_arbitrator_pool(&a);
+        }
+        let one_too_many = Address::generate(&f.env);
+        assert!(f.client.try_join_arbitrator_pool(&one_too_many).is_err());
+    }
+
+    #[test]
+    fn leaving_and_rejoining_resets_the_activation_delay() {
+        let f = setup(1_000, 100);
+        let a1 = Address::generate(&f.env);
+        f.client.join_arbitrator_pool(&a1);
+        f.env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_ACTIVATION_LEDGERS);
+        f.client.leave_arbitrator_pool(&a1);
+        f.client.join_arbitrator_pool(&a1);
+
+        // Rejoined at the current (already-advanced) ledger, so a1 is not
+        // eligible for a dispute raised immediately after rejoining — a
+        // leave/rejoin cycle cannot be used to dodge the activation delay.
+        f.client
+            .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+        f.client.raise_dispute(&f.buyer, &f.id);
+        let selection = f.client.get_dispute_selection(&f.id).unwrap();
+        assert_eq!(selection.eligible.len(), 0);
+    }
+
+    #[test]
+    fn selection_covers_the_whole_pool_and_is_reasonably_uniform() {
+        // Soroban's test-mode PRNG is deterministic per invocation order
+        // (seeded to zero, then advanced by call order — see
+        // soroban_sdk::prng's module docs), not truly random. That's fine
+        // here: this test isn't re-verifying the network's CSPRNG, it's
+        // checking that *this contract's* mapping from PRNG output to a
+        // pool index doesn't introduce its own bias (e.g. an off-by-one
+        // that starves the last index, or a modulo that favors low
+        // indices). A real deployment draws on a consensus-seeded PRNG; see
+        // docs/arbitrator-pool-selection.md.
+        let f = setup(1_000_000, 0);
+        let arbitrators: std::vec::Vec<Address> =
+            (0..5).map(|_| Address::generate(&f.env)).collect();
+        for a in arbitrators.iter() {
+            f.client.join_arbitrator_pool(a);
+        }
+        f.env
+            .ledger()
+            .with_mut(|li| li.sequence_number += ARBITRATOR_ACTIVATION_LEDGERS);
+
+        let mut counts: std::vec::Vec<u32> = std::vec::Vec::new();
+        for _ in arbitrators.iter() {
+            counts.push(0);
+        }
+
+        const TRIALS: u32 = 300;
+        for i in 0..TRIALS {
+            let mut id_bytes = [0u8; 32];
+            id_bytes[0..4].copy_from_slice(&i.to_be_bytes());
+            let trade_id = BytesN::from_array(&f.env, &id_bytes);
+
+            let mut secret_bytes = [9u8; 32];
+            secret_bytes[0..4].copy_from_slice(&i.to_be_bytes());
+            let secret = BytesN::from_array(&f.env, &secret_bytes);
+            let hash = f.env.crypto().sha256(&secret.into()).to_bytes();
+
+            f.client
+                .lock(&trade_id, &f.seller, &f.buyer, &1, &hash, &100);
+            f.client.raise_dispute(&f.buyer, &trade_id);
+            f.env
+                .ledger()
+                .with_mut(|li| li.sequence_number += ARBITRATOR_SELECTION_DELAY_LEDGERS);
+            let winner = f.client.select_arbitrator(&trade_id);
+
+            let idx = arbitrators.iter().position(|a| *a == winner).unwrap();
+            counts[idx] += 1;
+        }
+
+        for (idx, count) in counts.iter().enumerate() {
+            assert!(
+                *count > 0,
+                "arbitrator {idx} got zero selections across {TRIALS} disputes"
+            );
+            assert!(
+                *count < TRIALS / 2,
+                "arbitrator {idx} got a suspiciously large share: {count} of {TRIALS}"
+            );
+        }
     // Trade-ID collision resistance (issue #274).
     //
     // These tests confirm the written analysis in lock()'s doc comment:
@@ -2953,3 +4248,6 @@ mod malicious_token;
 
 #[cfg(test)]
 mod reentrancy_test;
+
+#[cfg(test)]
+mod tranche_tests;

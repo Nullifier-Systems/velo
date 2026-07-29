@@ -3,12 +3,9 @@ resolver = "2"
 members = [
     "htlc-core",
     "escrow",
-    "escrow/fuzz",
-    "reputation",
     "atomic-swap",
-    "zk-credential",
-    "settlement-chain",
     "soroban-lint",
+    "invariant-verifier",
 ]
 
 [workspace.dependencies]

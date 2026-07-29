@@ -10,6 +10,9 @@ import {
   submitSignedTransaction,
   submitReleaseTx,
   submitRefundTx,
+  buildChainReleaseToLockTransaction,
+  submitChainReleaseToLockTx,
+  getTradeState,
   getEscrowPauseState,
   batchReleaseEscrow,
   releaseBatchEscrow,
@@ -159,6 +162,17 @@ function discoveryAvailability(agentCount: number, locale: Locale) {
  *                                    embedded in the scanned QR (free)
  * POST /api/v1/cash/request/:id/refund  — refund escrow back to the buyer
  *                                    if the trade times out or fails (free)
+ * POST /api/v1/cash/request/:id/chain — atomically release this trade
+ *                                    directly into a new trade's lock
+ *                                    (chain_release_to_lock), so a cash
+ *                                    provider can re-circulate incoming
+ *                                    funds without them landing in a
+ *                                    wallet first. Non-custodial only —
+ *                                    the contract requires this trade's
+ *                                    seller to sign, so callers first POST
+ *                                    without signed_xdr to get an unsigned
+ *                                    transaction, then POST again with
+ *                                    signed_xdr to submit it (free)
  * GET  /api/v1/cash/pause         — on-chain circuit breaker state (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
@@ -1434,5 +1448,158 @@ export async function cashRoutes(app: FastifyInstance) {
         total_amount: totalPayout.toString(),
       });
     },
+  );
+
+  // See chain_release_to_lock() in contracts/escrow/src/lib.rs and
+  // docs/escrow-chain-release-to-lock.md for the authorization model this
+  // endpoint relies on: only this trade's seller can authorize the chain,
+  // so unlike /release there is no custodial path here — the caller must
+  // build (this endpoint, no signed_xdr), sign as the seller, then submit
+  // (this endpoint again, with signed_xdr).
+  app.post<{
+    Params: { id: string };
+    Body: {
+      release_secret?: string;
+      new_seller?: string;
+      new_secret_hash?: string;
+      new_timeout_ledgers?: number;
+      signed_xdr?: string;
+    };
+  }>(
+    "/cash/request/:id/chain",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        reply.code(404).send({ error: "request not found" });
+        return;
+      }
+
+      if (record.status === "released") {
+        return record.chainedToId
+          ? { id: record.id, status: "released", chained_to: record.chainedToId }
+          : { id: record.id, status: "released" };
+      }
+      if (record.status !== "locked") {
+        reply.code(409).send({ error: `request is already ${record.status}` });
+        return;
+      }
+
+      const chainSchema = z.object({
+        release_secret: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+        new_seller: z.string().trim().min(1).regex(/^G[1-9A-HJ-NP-Za-km-z]{55}$/),
+        new_secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+        new_timeout_ledgers: z.number().int().positive().optional(),
+        signed_xdr: z.string().trim().min(1).optional(),
+      });
+      const body = parseBody(chainSchema, req.body, reply);
+      if (!body) return;
+
+      const { release_secret, new_seller, new_secret_hash, new_timeout_ledgers, signed_xdr } = body;
+      const timeoutLedgers = new_timeout_ledgers ?? DEFAULT_TIMEOUT_LEDGERS;
+
+      if (!signed_xdr) {
+        try {
+          const unsignedXdr = await buildChainReleaseToLockTransaction({
+            contractId: record.contractId,
+            releaseTradeId: record.id,
+            releaseSecretHex: release_secret,
+            newSeller: new_seller,
+            newSecretHashHex: new_secret_hash,
+            newTimeoutLedgers: timeoutLedgers,
+            signerPublicKey: record.seller,
+          });
+          reply.code(200).send({
+            id: record.id,
+            status: record.status,
+            unsigned_xdr: unsignedXdr,
+            network_passphrase: NETWORK_PASSPHRASE,
+            submit_url: `/api/v1/cash/request/${record.id}/chain`,
+            instructions: "Sign as this trade's seller, then POST the signed envelope back to submit_url as signed_xdr.",
+          });
+        } catch (err) {
+          req.log.error(err, "buildChainReleaseToLockTransaction failed");
+          reply.code(502).send({ error: "failed to build chain transaction", detail: String(err) });
+        }
+        return;
+      }
+
+      let newTradeId: string;
+      try {
+        const result = await submitChainReleaseToLockTx(signed_xdr);
+        newTradeId = result.newTradeId;
+      } catch (err) {
+        const current = getCashRequest(record.id);
+        if (current && current.status === "released" && current.chainedToId) {
+          return { id: record.id, status: "released", chained_to: current.chainedToId };
+        }
+        req.log.error(err, "submitChainReleaseToLockTx failed");
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply.code(502).send({ error: "chain release failed", detail: String(err) });
+        }
+        return;
+      }
+
+      // Best-effort: read trade B's authoritative on-chain amount (derived
+      // on-chain from trade A's amount minus the platform fee, which this
+      // API does not independently track). The chain itself already
+      // succeeded regardless of whether this read does.
+      let newAmountStroops = "0";
+      let newTimeoutLedger: number | undefined;
+      try {
+        const onChain = await getTradeState(record.contractId, newTradeId, record.seller);
+        if (onChain) {
+          newAmountStroops = onChain.amountStroops;
+          newTimeoutLedger = onChain.timeoutLedger;
+        }
+      } catch (err) {
+        req.log.warn(err, "could not read chained trade's on-chain state");
+      }
+
+      const qrPayload = `velo://claim?request_id=${newTradeId}&contract=${record.contractId}`;
+      saveCashRequest({
+        id: newTradeId,
+        contractId: record.contractId,
+        seller: new_seller,
+        buyer: record.seller,
+        amountStroops: newAmountStroops,
+        secretHex: "",
+        secretHashHex: new_secret_hash,
+        qrPayload,
+        status: "locked",
+        timeoutLedger: newTimeoutLedger,
+        createdAt: new Date().toISOString(),
+        chainedFromId: record.id,
+      });
+      await registerTradeForChat(getCashRequest(newTradeId)!);
+
+      updateStatus(record.id, "released");
+      record.chainedToId = newTradeId;
+      await notifyTradeStatus(record.id, "released");
+      await sendNotification(record, "released", (req as any).locale ?? "en");
+
+      const baseUrl = process.env.FRONTEND_BASE_URL ?? "https://app.velo.cash";
+      return {
+        id: record.id,
+        status: "released",
+        chained_to: newTradeId,
+        new_trade: {
+          id: newTradeId,
+          claim_url: `${baseUrl}/claim/${newTradeId}`,
+          qr_payload: qrPayload,
+        },
+      };
+    }
   );
 }
