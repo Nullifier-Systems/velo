@@ -311,6 +311,29 @@ export default function ClaimQR() {
                 <br />
                 {t("claim.theyScanIt")}
               </p>
+              {status.tranches && status.tranches.length > 1 && (
+                <div className="claim-ticket__tranche-progress" aria-live="polite">
+                  <p className="claim-ticket__tranche-label">
+                    {t("claim.trancheProgress", { 
+                      released: status.releasedTranchesCount || 0, 
+                      total: status.tranches.length 
+                    })}
+                  </p>
+                  <div className="claim-ticket__tranche-bar">
+                    <div 
+                      className="claim-ticket__tranche-bar-fill"
+                      style={{ 
+                        width: `${((status.releasedTranchesCount || 0) / status.tranches.length) * 100}%` 
+                      }}
+                    />
+                  </div>
+                  {status.releasedAmount && (
+                    <p className="claim-ticket__tranche-amount">
+                      {formatStroops(status.releasedAmount)} / {formatStroops(status.amountStroops)} {t("claim.trancheReleased")}
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           ) : status.status === 'released' ? (
             <p className="claim-ticket__instruction">

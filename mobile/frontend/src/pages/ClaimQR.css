@@ -503,3 +503,50 @@ html.dark .claim-ticket__skeleton-value {
     font-size: 12px;
   }
 }
+
+/* Tranche progress display */
+.claim-ticket__tranche-progress {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+html.dark .claim-ticket__tranche-progress {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.claim-ticket__tranche-label {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 8px 0;
+  text-align: center;
+}
+
+.claim-ticket__tranche-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.claim-ticket__tranche-bar-fill {
+  height: 100%;
+  background: var(--stamp-green);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.claim-ticket__tranche-amount {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 6px 0 0 0;
+  text-align: center;
+}

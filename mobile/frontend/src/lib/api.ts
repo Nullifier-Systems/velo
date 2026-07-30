@@ -5,6 +5,12 @@ function createIdempotencyKey(): string {
   return `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+export interface TrancheInfo {
+  amount: string;
+  secretHashHex: string;
+  released: boolean;
+}
+
 export interface CashRequestStatus {
   id: string;
   contractId: string;
@@ -23,6 +29,12 @@ export interface CashRequestStatus {
   refundAvailable?: boolean;
   /** Wall-clock estimate only (ledgers × ~6s). */
   estimatedSecondsUntilRefund?: number;
+  /** Tranches for partial/incremental releases */
+  tranches?: TrancheInfo[];
+  /** Count of released tranches */
+  releasedTranchesCount?: number;
+  /** Total amount released so far (sum of released tranches) */
+  releasedAmount?: string;
 }
 
 export type ReleaseFailureKind = "uncertain" | "failed";
