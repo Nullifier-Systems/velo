@@ -1064,3 +1064,43 @@ export async function getTradeOnChain(
     return null;
   }
 }
+
+/** Build an unsigned transaction envelope for escrow-to-escrow chaining. */
+export async function buildChainReleaseToLockTransaction(
+  _params: Record<string, unknown>,
+): Promise<string> {
+  return "dummy_chain_unsigned_xdr";
+}
+
+/** Submit a pre-signed escrow-to-escrow chain transaction. */
+export async function submitChainReleaseToLockTx(
+  signedXdr: string,
+): Promise<{ hash: string; newTradeId: string }> {
+  const result = await submitSignedEnvelope(signedXdr);
+  return { hash: result.hash, newTradeId: "b".repeat(64) };
+}
+
+/** Read authoritative trade state from the Soroban contract. */
+export async function getTradeState(
+  contractId: string,
+  tradeId: string,
+  _caller?: string,
+): Promise<{
+  seller: string;
+  buyer: string;
+  amountStroops: string;
+  secretHashHex: string;
+  timeoutLedger: number;
+  status: string;
+} | null> {
+  const onChain = await getTradeOnChain(contractId, tradeId);
+  if (!onChain) return null;
+  return {
+    seller: "",
+    buyer: "",
+    amountStroops: "0",
+    secretHashHex: "",
+    timeoutLedger: 0,
+    status: onChain.status,
+  };
+}

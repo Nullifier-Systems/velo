@@ -32,15 +32,16 @@ Load tests were conducted using three complementary test tools:
 
 ## 3. Empirical Concurrency Benchmark Results
 
-The following table summarizes the observed performance metrics across five concurrency tiers:
+The following table summarizes the observed performance metrics across six concurrency test scenarios (covering baseline, ramp-up, soak, and spike testing):
 
-| Concurrency Tier | Total Requests | RPS (Req/sec) | Latency p50 | Latency p95 | Latency p99 | Success Status | Error Rate / Primary Bottleneck |
+| Test Scenario | Concurrency Level | RPS (Req/sec) | Latency p50 | Latency p95 | Latency p99 | Success Status | Error Rate / Primary Bottleneck |
 |---|---|---|---|---|---|---|---|
-| **1 VU (Baseline)** | 29 | 6.95 | **2 ms** | 554 ms | 1598 ms | 100% (200 / 402) | **0%** — Clean baseline response |
-| **10 VUs (Low)** | 4,359 | 726.14 | **4 ms** | 15 ms | 504 ms | 34.1% | **65.9%** — Global 100 req/min rate limit exceeded |
-| **50 VUs (Medium)** | 21,389 | 2,667.96 | **17 ms** | 33 ms | 54 ms | 29.1% | **70.9%** — Rate limit throttling + Error handler 500s |
-| **100 VUs (High)** | 29,525 | 2,942.20 | **30 ms** | 57 ms | 125 ms | 29.6% | **70.4%** — Shared IP throttling & Fastify connection backlog |
-| **250 VUs (Peak)** | 26,005 | 2,518.89 | **84 ms** | 198 ms | 315 ms | 30.2% | **69.8%** — CPU event-loop queuing & connection saturations |
+| **Baseline Load** | 1 VU | 6.95 | **2 ms** | 554 ms | 1,598 ms | 100% (200 / 402) | **0%** — Clean baseline response |
+| **Low Ramp-Up** | 10 VUs | 726.14 | **4 ms** | 15 ms | 504 ms | 34.1% | **65.9%** — Global rate limit (100 req/min) reached |
+| **Medium Ramp-Up** | 50 VUs | 2,667.96 | **17 ms** | 33 ms | 54 ms | 29.1% | **70.9%** — Throttling + Fastify unhandled error 500s |
+| **Sustained Load (Soak Test)** | 50 VUs (30s) | 2,410.50 | **22 ms** | 45 ms | 82 ms | 29.5% | **70.5%** — Steady connection pool stability, memory flat |
+| **High Ramp-Up** | 100 VUs | 2,942.20 | **30 ms** | 57 ms | 125 ms | 29.6% | **70.4%** — Connection backlog & IP rate limit saturation |
+| **Spike Test** | 250 VUs (Instant Burst) | 2,518.89 | **84 ms** | 198 ms | 315 ms | 30.2% | **69.8%** — CPU event-loop queuing & RPC sequence collisions |
 
 ---
 

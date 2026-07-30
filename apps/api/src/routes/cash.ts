@@ -1500,7 +1500,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!body) return;
 
       const { release_secret, new_seller, new_secret_hash, new_timeout_ledgers, signed_xdr } = body;
-      const timeoutLedgers = new_timeout_ledgers ?? DEFAULT_TIMEOUT_LEDGERS;
+      const timeoutLedgers = new_timeout_ledgers ?? CASH_DEFAULT_TIMEOUT_LEDGERS;
 
       if (!signed_xdr) {
         try {
