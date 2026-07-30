@@ -17,55 +17,40 @@ const successRate = new Rate('successful_requests');
 
 export const options = {
   scenarios: {
-    // Stage 1: Baseline single-user execution
+    // Stage 1: Baseline load (light concurrency)
     baseline: {
       executor: 'constant-vus',
       vus: 1,
       duration: '10s',
     },
-    // Stage 2: Low Concurrency (10 VUs)
-    low_concurrency: {
+    // Stage 2: Ramp-up concurrency steps (1 -> 10 -> 50 VUs)
+    ramp_up: {
       executor: 'ramping-vus',
       startVUs: 1,
       stages: [
         { duration: '5s', target: 10 },
-        { duration: '15s', target: 10 },
+        { duration: '10s', target: 50 },
         { duration: '5s', target: 0 },
       ],
       startTime: '10s',
     },
-    // Stage 3: Medium Concurrency (50 VUs)
-    medium_concurrency: {
-      executor: 'ramping-vus',
-      startVUs: 10,
-      stages: [
-        { duration: '5s', target: 50 },
-        { duration: '20s', target: 50 },
-        { duration: '5s', target: 0 },
-      ],
-      startTime: '35s',
+    // Stage 3: Sustained load (soak test - 50 VUs constant)
+    soak_test: {
+      executor: 'constant-vus',
+      vus: 50,
+      duration: '30s',
+      startTime: '30s',
     },
-    // Stage 4: High Concurrency (100 VUs)
-    high_concurrency: {
+    // Stage 4: Spike test (sudden burst to 250 VUs)
+    spike_test: {
       executor: 'ramping-vus',
-      startVUs: 50,
+      startVUs: 1,
       stages: [
-        { duration: '5s', target: 100 },
-        { duration: '20s', target: 100 },
-        { duration: '5s', target: 0 },
+        { duration: '2s', target: 250 },
+        { duration: '10s', target: 250 },
+        { duration: '3s', target: 0 },
       ],
-      startTime: '65s',
-    },
-    // Stage 5: Peak Concurrency Stress Test (250 VUs)
-    peak_concurrency: {
-      executor: 'ramping-vus',
-      startVUs: 100,
-      stages: [
-        { duration: '5s', target: 250 },
-        { duration: '20s', target: 250 },
-        { duration: '5s', target: 0 },
-      ],
-      startTime: '95s',
+      startTime: '60s',
     },
   },
   thresholds: {
