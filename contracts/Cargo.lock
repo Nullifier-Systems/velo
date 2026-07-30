@@ -671,7 +671,7 @@ dependencies = [
  "ed25519-dalek",
  "htlc-core",
  "proptest",
- "rand 0.8.7",
+ "rand 0.9.5",
  "soroban-sdk",
 ]
 
