@@ -17,6 +17,10 @@ use soroban_sdk::{
 const TREE_DEPTH: u32 = 8;
 const MAX_LEAVES: u32 = 256; // 2^TREE_DEPTH
 
+/// TTL extension (in ledgers) for persistent storage entries. ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key.
+const TTL_EXTEND: u32 = 100_000;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
@@ -72,6 +76,9 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .set(&DataKey::KnownRoots(initial_root.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::KnownRoots(initial_root), TTL_EXTEND, TTL_EXTEND);
 
         Ok(())
     }
@@ -108,6 +115,9 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .set(&DataKey::Leaf(count), &commitment);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Leaf(count), TTL_EXTEND, TTL_EXTEND);
         let new_count = count + 1;
         env.storage()
             .instance()
@@ -121,6 +131,9 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .set(&DataKey::KnownRoots(new_root.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::KnownRoots(new_root), TTL_EXTEND, TTL_EXTEND);
 
         // Emit buy event
         env.events().publish(
@@ -172,6 +185,9 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .set(&DataKey::Nullifier(nullifier_hash.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Nullifier(nullifier_hash.clone()), TTL_EXTEND, TTL_EXTEND);
 
         // Emit spend event
         env.events()
