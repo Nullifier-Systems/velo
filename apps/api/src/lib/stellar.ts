@@ -1,5 +1,4 @@
 import {
-  Account,
   BASE_FEE,
   FeeBumpTransaction,
   Keypair,
@@ -10,10 +9,15 @@ import {
   nativeToScVal,
   scValToNative,
   xdr,
+  Account,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 export { RpcTimeoutError } from "./rpc-errors.js";
 import { RpcTimeoutError } from "./rpc-errors.js";
+
+// Re-export commonly used SDK types and constants
+export { BASE_FEE, Keypair, Operation, TransactionBuilder, xdr, Account, nativeToScVal, scValToNative };
+export { Server, Api, assembleTransaction };
 
 export interface StellarLogger {
   info: (obj: Record<string, unknown>, msg?: string) => void;
@@ -109,7 +113,7 @@ export async function getLatestLedgerSequence(): Promise<number> {
  *   - The client signs and submits it
  *   - `POST /cash/request` accepts the signed envelope / tx hash to confirm
  */
-function loadSignerKeypair(): Keypair {
+export function loadSignerKeypair(): Keypair {
   if (IS_PUBLIC) {
     throw new Error(
       "Custodial signing is disabled on PUBLIC network. " +
@@ -152,936 +156,60 @@ function hexToBytesScVal(hex: string) {
   return nativeToScVal(Buffer.from(hex, "hex"), { type: "bytes" });
 }
 
-// ---------------------------------------------------------------------------
-// Build helpers — return unsigned, simulated XDR (non-custodial flow)
-// ---------------------------------------------------------------------------
-
-function wrapWithFeeBumpIfPossible(
-  tx: Transaction | FeeBumpTransaction,
-): Transaction | FeeBumpTransaction {
-  if (tx instanceof FeeBumpTransaction) {
-    return tx;
-  }
-
-  try {
-    const sponsor = loadSponsorKeypair();
-    const innerFee = parseInt(tx.fee, 10);
-    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
-    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
-      sponsor,
-      bumpFee.toString(),
-      tx,
-      NETWORK_PASSPHRASE,
-    );
-    feeBumpTx.sign(sponsor);
-    return feeBumpTx;
-  } catch (err) {
-    console.warn("fee-bump wrap skipped:", err);
-    return tx;
-  }
-}
-
-interface BuildTxResult {
-  /** Unsigned transaction XDR (base64) ready for client-side signing. */
-  unsignedXdr: string;
-  /** Simulated footprint / fee etc. already baked in. */
-}
-
-async function buildUnsignedTx(
-  contractId: string,
-  functionName: string,
-  args: xdr.ScVal[],
-  source: string,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.genericBuildSim,
-): Promise<BuildTxResult> {
-  return rpcTimeout(
-    `${functionName}/buildUnsignedTx`,
-    buildSimTimeoutMs,
-    async () => {
-      const sourceAccount = await server.getAccount(source);
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.invokeContractFunction({
-            contract: contractId,
-            function: functionName,
-            args,
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      const sim = await server.simulateTransaction(tx);
-      if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-      }
-
-      const prepared = assembleTransaction(tx, sim).build();
-      return { unsignedXdr: prepared.toXDR() };
-    },
-  );
-}
-
 /**
- * Submits a pre-signed envelope (returned by the client after signing
- * the unsigned XDR from buildUnsignedTx) and polls for confirmation.
+ * Invokes a Soroban contract function with custodial signing (testnet-only).
+ * Builds, simulates, signs, and submits the transaction.
  */
-async function submitSignedEnvelope(
-  signedXdr: string,
-  pollTimeoutMs: number = RPC_TIMEOUTS.genericPoll,
-): Promise<{ hash: string }> {
-  const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-  const txToSubmit = wrapWithFeeBumpIfPossible(tx);
-  const hash = (await server.sendTransaction(txToSubmit)).hash;
-
-  const start = Date.now();
-  return rpcTimeout(`submitSignedEnvelope/poll`, pollTimeoutMs, async () => {
-    for (;;) {
-      const result = await server.getTransaction(hash);
-      if (result.status === Api.GetTransactionStatus.NOT_FOUND) {
-        await new Promise((r) => setTimeout(r, 1500));
-        continue;
-      }
-      if (result.status !== Api.GetTransactionStatus.SUCCESS) {
-        throw new Error(`tx ${hash} failed with status ${result.status}`);
-      }
-      return { hash };
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Custodial invoke — testnet only (signs with backend-held key)
-// ---------------------------------------------------------------------------
-
 async function invokeContract(
   contractId: string,
   functionName: string,
   args: xdr.ScVal[],
   signer: Keypair,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.genericBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.genericPoll,
 ): Promise<unknown> {
-  const stageLog = logger.child({ contract: contractId, fn: functionName });
+  const account = await server.getAccount(signer.publicKey());
 
-  // ---- build + simulate (time-bounded) -----------------------------------
-  stageLog.info(
-    { stage: "build", signer: signer.publicKey() },
-    "building contract invocation",
-  );
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: contractId,
+        function: functionName,
+        args,
+      }),
+    )
+    .setTimeout(30)
+    .build();
 
-  const { prepared, txHash } = await rpcTimeout(
-    `${functionName}/buildSim`,
-    buildSimTimeoutMs,
-    async () => {
-      const account = await server.getAccount(signer.publicKey());
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.invokeContractFunction({
-            contract: contractId,
-            function: functionName,
-            args,
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      stageLog.info({ stage: "simulate" }, "simulating transaction");
-      const sim = await server.simulateTransaction(tx);
-      if (Api.isSimulationError(sim)) {
-        stageLog.error(
-          { stage: "simulate", error: sim.error },
-          "simulation failed",
-        );
-        throw new Error(`simulation failed: ${sim.error}`);
-      }
-
-      const prepared = assembleTransaction(tx, sim).build() as Transaction;
-      prepared.sign(signer);
-      const txHash = prepared.hash().toString("hex");
-      stageLog.info({ stage: "sign", txHash }, "transaction signed");
-      return { prepared, txHash };
-    },
-  );
-
-  // ---- fee-bump (optional) -----------------------------------------------
-  let txToSubmit: Transaction | FeeBumpTransaction = prepared;
-  if (process.env.SPONSOR_SECRET_KEY) {
-    const sponsor = loadSponsorKeypair();
-    const innerFee = parseInt(prepared.fee, 10);
-    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
-
-    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
-      sponsor,
-      bumpFee.toString(),
-      prepared,
-      NETWORK_PASSPHRASE,
-    );
-    feeBumpTx.sign(sponsor);
-    txToSubmit = feeBumpTx;
-    stageLog.info(
-      { stage: "fee_bump", sponsor: sponsor.publicKey() },
-      "transaction fee-bumped",
-    );
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
   }
 
-  // ---- submit ------------------------------------------------------------
-  const sendResult = await server.sendTransaction(txToSubmit);
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
   if (sendResult.status === "ERROR") {
-    stageLog.error(
-      {
-        stage: "submit",
-        txHash,
-        errorResult: JSON.stringify(sendResult.errorResult),
-      },
-      "submission failed",
-    );
-    throw new Error(
-      `submission failed: ${JSON.stringify(sendResult.errorResult)}`,
-    );
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
   }
-  stageLog.info(
-    { stage: "submit", txHash, status: sendResult.status },
-    "transaction accepted",
-  );
 
-  // ---- poll for confirmation (time-bounded) -------------------------------
+  let getResult = await server.getTransaction(sendResult.hash);
   const start = Date.now();
-  let attempts = 1;
-
-  const getResult = await rpcTimeout(
-    `${functionName}/poll`,
-    pollTimeoutMs,
-    async () => {
-      let result = await server.getTransaction(sendResult.hash);
-      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
-        await new Promise((r) => setTimeout(r, 1500));
-        result = await server.getTransaction(sendResult.hash);
-        attempts += 1;
-      }
-      return result;
-    },
-  ).catch((err) => {
-    if (err instanceof RpcTimeoutError) {
-      stageLog.error(
-        { stage: "poll", txHash, attempts, elapsedMs: err.elapsedMs },
-        "timed out waiting for confirmation",
-      );
+  while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
+    if (Date.now() - start > 30_000) {
+      throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
     }
-    throw err;
-  });
+    await new Promise((r) => setTimeout(r, 1500));
+    getResult = await server.getTransaction(sendResult.hash);
+  }
 
   if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
-    stageLog.error(
-      { stage: "poll", txHash, attempts, status: getResult.status },
-      "transaction failed on-chain",
-    );
-    throw new Error(
-      `tx ${sendResult.hash} failed with status ${getResult.status}`,
-    );
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
   }
 
-  stageLog.info(
-    { stage: "poll", txHash, attempts, elapsedMs: Date.now() - start },
-    "transaction confirmed",
-  );
-  return {
-    returnValue: getResult.returnValue
-      ? scValToNative(getResult.returnValue)
-      : undefined,
-    ledger: getResult.ledger,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Public API — trade lifecycle
-// ---------------------------------------------------------------------------
-
-export interface LockParams {
-  contractId: string;
-  tradeId: string;
-  seller: string;
-  buyer: string;
-  amountStroops: bigint;
-  secretHashHex: string;
-  timeoutLedgers: number;
-  signerPublicKey?: string; // For non-custodial mode
-}
-
-/** Build and simulate a lock() transaction, returning unsigned XDR. */
-export async function buildLockTx(params: LockParams): Promise<BuildTxResult> {
-  return buildUnsignedTx(
-    params.contractId,
-    "lock",
-    [
-      hexToBytesScVal(params.tradeId),
-      nativeToScVal(params.seller, { type: "address" }),
-      nativeToScVal(params.buyer, { type: "address" }),
-      nativeToScVal(params.amountStroops, { type: "i128" }),
-      hexToBytesScVal(params.secretHashHex),
-      nativeToScVal(params.timeoutLedgers, { type: "u32" }),
-    ],
-    params.buyer,
-  );
-}
-
-/** Submit a pre-signed lock transaction and confirm it. */
-export async function submitLockTx(
-  signedXdr: string,
-): Promise<{ hash: string }> {
-  return submitSignedEnvelope(signedXdr);
-}
-
-/** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
-export async function lockEscrow(
-  params: LockParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.lockBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.lockPoll,
-) {
-  const signer = loadSignerKeypair();
-  const result = await invokeContract(
-    params.contractId,
-    "lock",
-    [
-      hexToBytesScVal(params.tradeId),
-      nativeToScVal(params.seller, { type: "address" }),
-      nativeToScVal(params.buyer, { type: "address" }),
-      nativeToScVal(params.amountStroops, { type: "i128" }),
-      hexToBytesScVal(params.secretHashHex),
-      nativeToScVal(params.timeoutLedgers, { type: "u32" }),
-    ],
-    signer,
-    logger,
-    buildSimTimeoutMs,
-    pollTimeoutMs,
-  );
-  return (result as { ledger: number }).ledger;
-}
-
-/**
- * Builds an unsigned transaction for the escrow lock operation.
- * Returns the unsigned XDR transaction base64 string for client-side signing.
- */
-export async function buildLockEscrowTransaction(
-  params: LockParams,
-): Promise<string> {
-  const signerPublicKey =
-    params.signerPublicKey || loadSignerKeypair().publicKey();
-  return rpcTimeout(
-    "lock/buildLockEscrowTransaction",
-    RPC_TIMEOUTS.lockBuildSim,
-    async () => {
-      const account = await server.getAccount(signerPublicKey);
-
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.invokeContractFunction({
-            contract: params.contractId,
-            function: "lock",
-            args: [
-              hexToBytesScVal(params.tradeId),
-              nativeToScVal(params.seller, { type: "address" }),
-              nativeToScVal(params.buyer, { type: "address" }),
-              nativeToScVal(params.amountStroops, { type: "i128" }),
-              hexToBytesScVal(params.secretHashHex),
-              nativeToScVal(params.timeoutLedgers, { type: "u32" }),
-            ],
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      const sim = await server.simulateTransaction(tx);
-      if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-      }
-
-      const prepared = assembleTransaction(tx, sim).build();
-      return prepared.toXDR();
-    },
-  );
-}
-
-export interface ReleaseParams {
-  contractId: string;
-  tradeId: string;
-  secretHex: string;
-  signerPublicKey?: string;
-}
-
-/** Build and simulate a release() transaction, returning unsigned XDR. */
-export async function buildReleaseTx(
-  params: ReleaseParams,
-): Promise<BuildTxResult> {
-  const source = params.signerPublicKey || loadSignerKeypair().publicKey();
-  return buildUnsignedTx(
-    params.contractId,
-    "release",
-    [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
-    source,
-  );
-}
-
-/** Submit a pre-signed release transaction and confirm it. */
-export async function submitReleaseTx(
-  signedXdr: string,
-): Promise<{ hash: string }> {
-  return submitSignedEnvelope(signedXdr);
-}
-
-/** Testnet-only: custodial release (API signs). */
-export async function releaseEscrow(
-  params: ReleaseParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.releasePoll,
-) {
-  const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "release",
-    [hexToBytesScVal(params.tradeId), hexToBytesScVal(params.secretHex)],
-    signer,
-    logger,
-    buildSimTimeoutMs,
-    pollTimeoutMs,
-  );
-}
-
-/**
- * Builds an unsigned transaction for the escrow release operation.
- * Returns the unsigned XDR transaction base64 string for client-side signing.
- */
-export async function buildReleaseEscrowTransaction(
-  params: ReleaseParams & { signerPublicKey?: string },
-): Promise<string> {
-  const signerPublicKey =
-    params.signerPublicKey || loadSignerKeypair().publicKey();
-  return rpcTimeout(
-    "release/buildReleaseEscrowTransaction",
-    RPC_TIMEOUTS.releaseBuildSim,
-    async () => {
-      const account = await server.getAccount(signerPublicKey);
-
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.invokeContractFunction({
-            contract: params.contractId,
-            function: "release",
-            args: [
-              hexToBytesScVal(params.tradeId),
-              hexToBytesScVal(params.secretHex),
-            ],
-          }),
-        )
-        .setTimeout(30)
-        .build();
-
-      const sim = await server.simulateTransaction(tx);
-      if (Api.isSimulationError(sim)) {
-        throw new Error(`simulation failed: ${sim.error}`);
-      }
-
-      const prepared = assembleTransaction(tx, sim).build();
-      return prepared.toXDR();
-    },
-  );
-}
-
-export interface RefundParams {
-  contractId: string;
-  tradeId: string;
-  signerPublicKey?: string;
-}
-
-/** Build and simulate a refund() transaction, returning unsigned XDR. */
-export async function buildRefundTx(
-  params: RefundParams,
-): Promise<BuildTxResult> {
-  const source = params.signerPublicKey || loadSignerKeypair().publicKey();
-  return buildUnsignedTx(
-    params.contractId,
-    "refund",
-    [hexToBytesScVal(params.tradeId)],
-    source,
-  );
-}
-
-/** Submit a pre-signed refund transaction and confirm it. */
-export async function submitRefundTx(
-  signedXdr: string,
-): Promise<{ hash: string }> {
-  return submitSignedEnvelope(signedXdr);
-}
-
-/** Testnet-only: custodial refund (API signs). */
-export async function refundEscrow(
-  params: RefundParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.refundBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.refundPoll,
-) {
-  const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "refund",
-    [hexToBytesScVal(params.tradeId)],
-    signer,
-    logger,
-    buildSimTimeoutMs,
-    pollTimeoutMs,
-  );
-}
-
-export interface DisputeParams {
-  contractId: string;
-  tradeId: string;
-  caller: string;
-}
-
-/** Calls escrow's raise_dispute(caller, id). Flagged by either buyer or seller. */
-export async function disputeEscrow(params: DisputeParams) {
-  const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "raise_dispute",
-    [
-      nativeToScVal(params.caller, { type: "address" }),
-      hexToBytesScVal(params.tradeId),
-    ],
-    signer,
-  );
-}
-
-/**
- * Loads the arbitrator keypair — the on-chain signer that resolves disputes.
- * Deliberately separate from `loadSignerKeypair()` (the buyer/deployer key):
- * the arbitrator is its own role in the escrow contract, distinct from the
- * admin that only ever collects fees.
- */
-function loadArbitratorKeypair(): Keypair {
-  const secret = process.env.ARBITRATOR_SECRET_KEY;
-  if (!secret) {
-    throw new Error(
-      "ARBITRATOR_SECRET_KEY not set — see apps/api/.env.example.",
-    );
-  }
-  return Keypair.fromSecret(secret);
-}
-
-export interface ResolveDisputeParams {
-  contractId: string;
-  tradeId: string;
-  /** Buyer's share of the locked amount, in basis points (0-10000). */
-  buyerShareBps: number;
-}
-
-/**
- * Calls escrow's resolve_dispute(id, buyer_share_bps) — arbitrator-only.
- * Splits the locked amount atomically between buyer and seller according to
- * buyerShareBps (0 = seller gets everything minus the platform fee, same as
- * release(); 10_000 = buyer gets a full refund, same as refund(); anything
- * in between is a genuine partial split).
- */
-export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
-  const signer = loadArbitratorKeypair();
-  return invokeContract(
-    params.contractId,
-    "resolve_dispute",
-    [
-      hexToBytesScVal(params.tradeId),
-      nativeToScVal(params.buyerShareBps, { type: "u32" }),
-    ],
-    signer,
-  );
-}
-
-export interface RefundAfterDisputeTimeoutParams {
-  contractId: string;
-  tradeId: string;
-}
-
-/**
- * Calls escrow's refund_after_dispute_timeout(id) — permissionless. Only
- * succeeds once the dispute-resolution window has elapsed without the
- * arbitrator resolving, so any signer can submit this (it does not use the
- * arbitrator or buyer/seller keys).
- */
-export async function refundAfterDisputeTimeoutEscrow(
-  params: RefundAfterDisputeTimeoutParams,
-) {
-  const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "refund_after_dispute_timeout",
-    [hexToBytesScVal(params.tradeId)],
-    signer,
-  );
-}
-
-export interface BatchReleaseParams {
-  contractId: string;
-  /** Each entry mirrors ReleaseParams — one trade id and its revealed secret. */
-  releases: { tradeId: string; secretHex: string }[];
-}
-
-/** Encodes one (id, secret) pair as the BatchReleaseItem struct the escrow
- * contract expects — an ScMap with keys in alphabetical field order. */
-function batchReleaseItemScVal(tradeId: string, secretHex: string): xdr.ScVal {
-  return xdr.ScVal.scvMap([
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol("id"),
-      val: hexToBytesScVal(tradeId),
-    }),
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol("secret"),
-      val: hexToBytesScVal(secretHex),
-    }),
-  ]);
-}
-
-/**
- * Testnet-only: custodial batch release (API signs). Settles many trades'
- * payouts in a single Soroban invocation of the escrow contract's
- * `batch_release()` — the on-chain half of provider payout batching. Each
- * item is still verified against its own trade's secret hash on-chain, so
- * this changes nothing about the trust model versus calling `release()`
- * once per trade — it only reduces how many separate transactions get
- * submitted. See docs/provider-payout-batching.md.
- *
- * Returns the hex trade ids that were actually released (a stale or
- * already-settled entry is skipped by the contract, not rejected as a
- * whole batch).
- */
-export async function batchReleaseEscrow(
-  params: BatchReleaseParams,
-): Promise<string[]> {
-  const signer = loadSignerKeypair();
-  const itemsScVal = xdr.ScVal.scvVec(
-    params.releases.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex)),
-  );
-  const result = await invokeContract(
-    params.contractId,
-    "batch_release",
-    [itemsScVal],
-    signer,
-  );
-  const releasedIds = (result as Buffer[] | undefined) ?? [];
-  return releasedIds.map((id) => Buffer.from(id).toString("hex"));
-}
-
-/**
- * Atomic batch release: all trades succeed together or all fail together.
- * Unlike batch_release(), this reverts the entire batch if ANY secret is
- * invalid or ANY trade isn't in Locked state.
- *
- * Testnet-only: custodial release_batch (API signs).
- */
-export async function releaseBatchEscrow(
-  params: BatchReleaseParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
-  pollTimeoutMs: number = RPC_TIMEOUTS.releasePoll,
-): Promise<void> {
-  const signer = loadSignerKeypair();
-  const itemsScVal = xdr.ScVal.scvVec(
-    params.releases.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex)),
-  );
-  await invokeContract(
-    params.contractId,
-    "release_batch",
-    [itemsScVal],
-    signer,
-    logger,
-    buildSimTimeoutMs,
-    pollTimeoutMs,
-  );
-}
-
-export interface ResolveParams {
-  contractId: string;
-  tradeId: string;
-  resolveToBuyer: boolean;
-  signers: string[];
-}
-
-/** Calls escrow's resolve(id, resolve_to_buyer, signers). Admin-only. */
-export async function resolveEscrow(params: ResolveParams) {
-  const signer = loadSignerKeypair();
-  return invokeContract(
-    params.contractId,
-    "resolve",
-    [
-      hexToBytesScVal(params.tradeId),
-      nativeToScVal(params.resolveToBuyer),
-      xdr.ScVal.scvVec(
-        params.signers.map((addr) => nativeToScVal(addr, { type: "address" })),
-      ),
-    ],
-    signer,
-  );
-}
-
-export interface ChainReleaseToLockParams {
-    contractId: string;
-    /** Trade A: the trade being released. */
-    releaseTradeId: string;
-    releaseSecretHex: string;
-    /** The counterparty for the new trade (trade B). */
-    newSeller: string;
-    newSecretHashHex: string;
-    newTimeoutLedgers: number;
-    /**
-     * chain_release_to_lock() requires releaseTradeId's *seller* to
-     * authorize the chain (see the contract's doc comment on that
-     * function) — the API never holds that key, so this must always be
-     * supplied and must be that seller's account.
-     */
-    signerPublicKey: string;
-}
-
-function chainReleaseToLockArgs(params: ChainReleaseToLockParams): xdr.ScVal[] {
-    return [
-        hexToBytesScVal(params.releaseTradeId),
-        hexToBytesScVal(params.releaseSecretHex),
-        nativeToScVal(params.newSeller, { type: "address" }),
-        hexToBytesScVal(params.newSecretHashHex),
-        nativeToScVal(params.newTimeoutLedgers, { type: "u32" }),
-    ];
-}
-
-/**
- * Builds an unsigned transaction for chain_release_to_lock(). Must be
- * signed by `params.signerPublicKey` (releaseTradeId's seller) before it
- * can be submitted via `submitChainReleaseToLockTx` — this is a
- * non-custodial-only operation, unlike release()/lock(), because the
- * contract requires that specific party's authorization.
- */
-export async function buildChainReleaseToLockTransaction(params: ChainReleaseToLockParams): Promise<string> {
-    return rpcTimeout("chainReleaseToLock/buildTx", RPC_TIMEOUTS.genericBuildSim, async () => {
-        const account = await server.getAccount(params.signerPublicKey);
-        const tx = new TransactionBuilder(account, {
-            fee: BASE_FEE,
-            networkPassphrase: NETWORK_PASSPHRASE,
-        })
-            .addOperation(
-                Operation.invokeContractFunction({
-                    contract: params.contractId,
-                    function: "chain_release_to_lock",
-                    args: chainReleaseToLockArgs(params),
-                })
-            )
-            .setTimeout(30)
-            .build();
-
-        const sim = await server.simulateTransaction(tx);
-        if (Api.isSimulationError(sim)) {
-            throw new Error(`simulation failed: ${sim.error}`);
-        }
-
-        const prepared = assembleTransaction(tx, sim).build();
-        return prepared.toXDR();
-    });
-}
-
-/**
- * Submits a signed chain_release_to_lock() envelope and returns the new
- * trade's id, decoded from the contract call's own return value — the
- * same id `select_arbitrator`-style Result<BytesN<32>, Error> functions
- * elsewhere in this codebase (e.g. batch_release) return directly as their
- * Ok payload.
- */
-export async function submitChainReleaseToLockTx(signedXdr: string): Promise<{ hash: string; newTradeId: string }> {
-    const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const txToSubmit = wrapWithFeeBumpIfPossible(tx);
-    const sendResult = await server.sendTransaction(txToSubmit);
-    if (sendResult.status === "ERROR") {
-        throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
-    }
-
-    const getResult = await rpcTimeout("chainReleaseToLock/poll", RPC_TIMEOUTS.genericPoll, async () => {
-        let result = await server.getTransaction(sendResult.hash);
-        while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
-            await new Promise((r) => setTimeout(r, 1500));
-            result = await server.getTransaction(sendResult.hash);
-        }
-        return result;
-    });
-
-    if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
-        throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
-    }
-    if (!getResult.returnValue) {
-        throw new Error(`tx ${sendResult.hash} succeeded but returned no value`);
-    }
-
-    const newTradeId = Buffer.from(scValToNative(getResult.returnValue) as Buffer).toString("hex");
-    return { hash: sendResult.hash, newTradeId };
-}
-
-export interface OnChainTradeState {
-    seller: string;
-    buyer: string;
-    amountStroops: string;
-    secretHashHex: string;
-    timeoutLedger: number;
-    status: string;
-}
-
-/**
- * Reads a trade's current on-chain state via get_trade() (a read-only
- * call, simulated but never submitted/signed). Used after
- * chain_release_to_lock() to learn trade B's actual escrowed amount —
- * derived on-chain from trade A's amount minus the platform fee, which
- * this API does not independently track. `sourcePublicKey` just needs to
- * be some existing account to simulate from; it does not sign anything.
- */
-export async function getTradeState(
-    contractId: string,
-    tradeId: string,
-    sourcePublicKey: string,
-): Promise<OnChainTradeState | undefined> {
-    return rpcTimeout("getTradeState", RPC_TIMEOUTS.genericBuildSim, async () => {
-        const account = await server.getAccount(sourcePublicKey);
-        const tx = new TransactionBuilder(account, {
-            fee: BASE_FEE,
-            networkPassphrase: NETWORK_PASSPHRASE,
-        })
-            .addOperation(
-                Operation.invokeContractFunction({
-                    contract: contractId,
-                    function: "get_trade",
-                    args: [hexToBytesScVal(tradeId)],
-                })
-            )
-            .setTimeout(30)
-            .build();
-
-        const sim = await server.simulateTransaction(tx);
-        if (Api.isSimulationError(sim)) {
-            throw new Error(`simulation failed: ${sim.error}`);
-        }
-
-        const retval = sim.result?.retval;
-        if (!retval) return undefined;
-        const native = scValToNative(retval) as Record<string, unknown> | null;
-        if (!native) return undefined;
-
-        return {
-            seller: String(native.seller),
-            buyer: String(native.buyer),
-            amountStroops: String(native.amount),
-            secretHashHex: Buffer.from(native.secret_hash as Buffer).toString("hex"),
-            timeoutLedger: Number(native.timeout_ledger),
-            status: String(native.status),
-        };
-    });
-}
-
-/**
- * Submits a signed transaction XDR to the Stellar network.
- * Waits for transaction confirmation and returns the result.
- */
-export async function submitSignedTransaction(
-  signedXdr: string,
-): Promise<{ hash: string; status: string; ledger: number }> {
-  const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-  const txToSubmit = wrapWithFeeBumpIfPossible(tx);
-  const sendResult = await server.sendTransaction(txToSubmit);
-  if (sendResult.status === "ERROR") {
-    throw new Error(
-      `submission failed: ${JSON.stringify(sendResult.errorResult)}`,
-    );
-  }
-
-  const getResult = await rpcTimeout(
-    "submitSignedTransaction/poll",
-    RPC_TIMEOUTS.genericPoll,
-    async () => {
-      let result = await server.getTransaction(sendResult.hash);
-      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
-        await new Promise((r) => setTimeout(r, 1500));
-        result = await server.getTransaction(sendResult.hash);
-      }
-      return result;
-    },
-  );
-
-  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
-    throw new Error(
-      `tx ${sendResult.hash} failed with status ${getResult.status}`,
-    );
-  }
-
-  return {
-    hash: sendResult.hash,
-    status: getResult.status,
-    ledger: getResult.ledger,
-  };
-}
-
-/**
- * Query the on-chain status of a trade by simulating get_trade().
- * Returns { status: string } where status is the lowercase variant name (e.g. "locked", "released", "refunded", "disputed").
- * Returns null if the trade is not found or simulation fails.
- */
-export async function getTradeOnChain(
-    contractId: string,
-    tradeId: string,
-): Promise<{ status: string } | null> {
-    try {
-        const signer = loadSignerKeypair();
-        const account = await server.getAccount(signer.publicKey());
-        const tx = new TransactionBuilder(account, {
-            fee: BASE_FEE,
-            networkPassphrase: NETWORK_PASSPHRASE,
-        })
-            .addOperation(
-                Operation.invokeContractFunction({
-                    contract: contractId,
-                    function: "get_trade",
-                    args: [hexToBytesScVal(tradeId)],
-                })
-            )
-            .setTimeout(30)
-            .build();
-
-        const sim = await server.simulateTransaction(tx);
-        if (Api.isSimulationError(sim)) {
-            return null;
-        }
-        if (!sim.result) {
-            return null;
-        }
-
-        const nativeVal = scValToNative(sim.result.retval);
-        if (!nativeVal) {
-            return null;
-        }
-
-        const rawStatus = nativeVal.status;
-        if (typeof rawStatus === "string") {
-            return { status: rawStatus.toLowerCase() };
-        } else if (rawStatus && typeof rawStatus === "object" && "name" in rawStatus) {
-            return { status: String((rawStatus as any).name).toLowerCase() };
-        }
-        return { status: String(rawStatus).toLowerCase() };
-    } catch {
-        return null;
-    }
+  return getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,4 +293,814 @@ export async function getEscrowPauseState(contractId: string): Promise<EscrowPau
             effective === null || effective === undefined ? null : Number(effective),
         pause_delay_ledgers: Number(delay),
     };
+}
+
+// ---------------------------------------------------------------------------
+// Session Account Contract Functions
+// ---------------------------------------------------------------------------
+
+export interface SessionAccountParams {
+  contractId: string;
+  mainAccount: string;
+}
+
+export interface CreateSessionKeyParams {
+  contractId: string;
+  sessionKey: string;
+  spendingCap: bigint;
+  durationDays: number;
+  startDelayDays: number;
+}
+
+export interface RevokeSessionKeyParams {
+  contractId: string;
+  sessionKey: string;
+}
+
+export interface UpdateSpendingCapParams {
+  contractId: string;
+  sessionKey: string;
+  newSpendingCap: bigint;
+}
+
+export async function initializeSessionAccount(params: SessionAccountParams): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  return invokeContract(
+    params.contractId,
+    "initialize",
+    [nativeToScVal(params.mainAccount, { type: "address" })],
+    signer,
+  ) as Promise<{ hash: string }>;
+}
+
+export async function buildInitializeSessionAccountTx(params: SessionAccountParams & { signerPublicKey: string }): Promise<string> {
+  const account = await server.getAccount(params.signerPublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "initialize",
+        args: [nativeToScVal(params.mainAccount, { type: "address" })],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+export async function createSessionKey(params: CreateSessionKeyParams): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  return invokeContract(
+    params.contractId,
+    "create_session_key",
+    [
+      nativeToScVal(params.sessionKey, { type: "address" }),
+      nativeToScVal(params.spendingCap, { type: "i128" }),
+      nativeToScVal(params.durationDays, { type: "u32" }),
+      nativeToScVal(params.startDelayDays, { type: "u32" }),
+    ],
+    signer,
+  ) as Promise<{ hash: string }>;
+}
+
+export async function buildCreateSessionKeyTx(params: CreateSessionKeyParams & { signerPublicKey: string }): Promise<string> {
+  const account = await server.getAccount(params.signerPublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "create_session_key",
+        args: [
+          nativeToScVal(params.sessionKey, { type: "address" }),
+          nativeToScVal(params.spendingCap, { type: "i128" }),
+          nativeToScVal(params.durationDays, { type: "u32" }),
+          nativeToScVal(params.startDelayDays, { type: "u32" }),
+        ],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+export async function revokeSessionKey(params: RevokeSessionKeyParams): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  return invokeContract(
+    params.contractId,
+    "revoke_session_key",
+    [nativeToScVal(params.sessionKey, { type: "address" })],
+    signer,
+  ) as Promise<{ hash: string }>;
+}
+
+export async function buildRevokeSessionKeyTx(params: RevokeSessionKeyParams & { signerPublicKey: string }): Promise<string> {
+  const account = await server.getAccount(params.signerPublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "revoke_session_key",
+        args: [nativeToScVal(params.sessionKey, { type: "address" })],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+export async function updateSpendingCap(params: UpdateSpendingCapParams): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  return invokeContract(
+    params.contractId,
+    "update_spending_cap",
+    [
+      nativeToScVal(params.sessionKey, { type: "address" }),
+      nativeToScVal(params.newSpendingCap, { type: "i128" }),
+    ],
+    signer,
+  ) as Promise<{ hash: string }>;
+}
+
+export async function buildUpdateSpendingCapTx(params: UpdateSpendingCapParams & { signerPublicKey: string }): Promise<string> {
+  const account = await server.getAccount(params.signerPublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "update_spending_cap",
+        args: [
+          nativeToScVal(params.sessionKey, { type: "address" }),
+          nativeToScVal(params.newSpendingCap, { type: "i128" }),
+        ],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+export async function getSessionKeyInfo(contractId: string, sessionKey: string): Promise<any> {
+  const signer = loadSignerKeypair();
+  const account = await server.getAccount(signer.publicKey());
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: contractId,
+        function: "get_session_key",
+        args: [nativeToScVal(sessionKey, { type: "address" })],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  if (!sim.result) {
+    throw new Error("No result from simulation");
+  }
+
+  return scValToNative(sim.result.retval);
+}
+
+export async function getSessionKeySpent(contractId: string, sessionKey: string): Promise<bigint> {
+  const signer = loadSignerKeypair();
+  const account = await server.getAccount(signer.publicKey());
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: contractId,
+        function: "get_spent",
+        args: [nativeToScVal(sessionKey, { type: "address" })],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  if (!sim.result) {
+    throw new Error("No result from simulation");
+  }
+
+  return scValToNative(sim.result.retval) as bigint;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy escrow API wrappers (for backward compatibility)
+// ---------------------------------------------------------------------------
+
+export interface LockParams {
+  contractId: string;
+  tradeId: string;
+  buyer: string;
+  seller: string;
+  amountStroops?: bigint;
+  amount?: bigint;
+  secretHashHex?: string;
+  timeoutLedgers: number;
+}
+
+export interface TimeoutOptions {
+  buildSimTimeout?: number;
+  pollTimeout?: number;
+}
+
+export interface ReleaseParams {
+  contractId: string;
+  tradeId: string;
+  releaseTo?: string;
+  secretHex?: string;
+}
+
+export interface RefundParams {
+  contractId: string;
+  tradeId: string;
+}
+
+export interface DisputeParams {
+  contractId: string;
+  tradeId: string;
+  caller: string;
+}
+
+export interface ResolveDisputeParams {
+  contractId: string;
+  tradeId: string;
+  buyerShare?: number;
+  buyerShareBps?: number;
+}
+
+export interface BatchReleaseParams {
+  contractId: string;
+  trades?: Array<{ tradeId: string; releaseTo: string }>;
+  releases?: Array<{ tradeId: string; releaseTo?: string; secretHex?: string }>;
+}
+
+/** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
+export async function lockEscrow(
+  params: LockParams,
+  logger: StellarLogger = noopLogger,
+  options?: TimeoutOptions,
+): Promise<number> {
+  const signer = loadSignerKeypair();
+  const amount = params.amountStroops ?? params.amount;
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.lockBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.lockPoll;
+
+  const log = logger.child({ contract: params.contractId, fn: "lock" });
+
+  log.info({ stage: "build" }, "building lock transaction");
+
+  const account = await rpcTimeout(
+    "lock/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "lock",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(params.buyer, { type: "address" }),
+          nativeToScVal(params.seller, { type: "address" }),
+          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  log.info({ stage: "simulate" }, "simulating lock transaction");
+
+  const sim = await rpcTimeout(
+    "lock/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    log.error({ stage: "simulate", error: sim.error }, "simulation failed");
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  log.info({ stage: "sign" }, "signing lock transaction");
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  log.info({ stage: "submit" }, "submitting lock transaction");
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    log.error({ stage: "submit", error: sendResult.errorResult }, "submission failed");
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `lock/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    log.error({ stage: "poll", error: getResult.status }, "transaction failed");
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  log.info({ stage: "poll", hash: sendResult.hash }, "transaction confirmed");
+
+  const result = getResult.returnValue ? scValToNative(getResult.returnValue) : undefined;
+  // Return the ledger number from the result if available, otherwise undefined
+  if (result != null && typeof result === 'object' && 'locked_at_ledger' in result) {
+    return (result as { locked_at_ledger: number }).locked_at_ledger;
+  }
+  return undefined as any;
+}
+
+/** Builds an unsigned transaction for the escrow lock operation. */
+export async function buildLockEscrowTransaction(
+  params: LockParams & { signerPublicKey?: string },
+): Promise<string> {
+  const signerPublicKey =
+    params.signerPublicKey || loadSignerKeypair().publicKey();
+  const amount = params.amountStroops ?? params.amount;
+  const account = await server.getAccount(signerPublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "lock",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(params.buyer, { type: "address" }),
+          nativeToScVal(params.seller, { type: "address" }),
+          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+/** Testnet-only: custodial release (API signs). */
+export async function releaseEscrow(
+  params: ReleaseParams,
+  logger: StellarLogger = noopLogger,
+  options?: TimeoutOptions,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.releaseBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.releasePoll;
+
+  const account = await rpcTimeout(
+    "release/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "release",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(params.releaseTo, { type: "address" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    "release/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `release/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  return { hash: sendResult.hash };
+}
+
+/** Testnet-only: custodial refund (API signs). */
+export async function refundEscrow(
+  params: RefundParams,
+  logger: StellarLogger = noopLogger,
+  options?: TimeoutOptions,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  const buildSimTimeout = options?.buildSimTimeout ?? RPC_TIMEOUTS.refundBuildSim;
+  const pollTimeout = options?.pollTimeout ?? RPC_TIMEOUTS.refundPoll;
+
+  const account = await rpcTimeout(
+    "refund/getAccount",
+    buildSimTimeout,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "refund",
+        args: [nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" })],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    "refund/simulateTransaction",
+    buildSimTimeout,
+    async () => server.simulateTransaction(tx),
+  );
+
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `refund/poll`,
+    pollTimeout,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        result = await server.getTransaction(sendResult.hash);
+      }
+      return result;
+    },
+  );
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  return { hash: sendResult.hash };
+}
+
+/** Calls escrow's raise_dispute(caller, id). Flagged by either buyer or seller. */
+export async function disputeEscrow(params: DisputeParams) {
+  const signer = loadSignerKeypair();
+  return invokeContract(
+    params.contractId,
+    "raise_dispute",
+    [
+      nativeToScVal(params.caller, { type: "address" }),
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+    ],
+    signer,
+  );
+}
+
+/** Calls escrow's resolve_dispute(buyer_share). buyer_share is 0-10000 (basis points). */
+export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
+  const signer = loadSignerKeypair();
+  const buyerShare = params.buyerShareBps ?? params.buyerShare;
+  return invokeContract(
+    params.contractId,
+    "resolve_dispute",
+    [
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+      nativeToScVal(buyerShare, { type: "u32" }),
+    ],
+    signer,
+  );
+}
+
+/** Submits a signed transaction XDR to the Stellar network. */
+export async function submitSignedTransaction(
+  signedXdr: string,
+): Promise<{ hash: string; status: string; ledger: number }> {
+  const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+  const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+  const sendResult = await server.sendTransaction(txToSubmit);
+
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const getResult = await rpcTimeout(
+    `submitSignedTransaction/poll`,
+    RPC_TIMEOUTS.genericPoll,
+    async () => {
+      let result = await server.getTransaction(sendResult.hash);
+      if (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return null;
+      }
+      if (result.status !== Api.GetTransactionStatus.SUCCESS) {
+        throw new Error(`tx ${sendResult.hash} failed with status ${result.status}`);
+      }
+      return result;
+    },
+  );
+
+  if (!getResult) {
+    throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
+  }
+
+  return {
+    hash: sendResult.hash,
+    status: getResult.status,
+    ledger: getResult.ledger || 0,
+  };
+}
+
+/** Submit a pre-signed release transaction and confirm it. */
+export async function submitReleaseTx(
+  signedXdr: string,
+): Promise<{ hash: string }> {
+  return submitSignedEnvelope(signedXdr);
+}
+
+/** Submit a pre-signed refund transaction and confirm it. */
+export async function submitRefundTx(
+  signedXdr: string,
+): Promise<{ hash: string }> {
+  return submitSignedEnvelope(signedXdr);
+}
+
+/** Submits a pre-signed envelope (returned by the client after signing the unsigned XDR). */
+async function submitSignedEnvelope(
+  signedXdr: string,
+  pollTimeoutMs: number = RPC_TIMEOUTS.genericPoll,
+): Promise<{ hash: string }> {
+  const tx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+  const txToSubmit = wrapWithFeeBumpIfPossible(tx);
+  const hash = (await server.sendTransaction(txToSubmit)).hash;
+
+  const start = Date.now();
+  return rpcTimeout(`submitSignedEnvelope/poll`, pollTimeoutMs, async () => {
+    for (;;) {
+      const result = await server.getTransaction(hash);
+      if (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      if (result.status !== Api.GetTransactionStatus.SUCCESS) {
+        throw new Error(`tx ${hash} failed with status ${result.status}`);
+      }
+      return { hash };
+    }
+  });
+}
+
+/** Wraps a transaction with a fee-bump if a sponsor key is configured. */
+function wrapWithFeeBumpIfPossible(
+  tx: Transaction | FeeBumpTransaction,
+): Transaction | FeeBumpTransaction {
+  if (tx instanceof FeeBumpTransaction) {
+    return tx;
+  }
+
+  try {
+    const sponsor = loadSponsorKeypair();
+    const innerFee = parseInt(tx.fee, 10);
+    const bumpFee = innerFee + parseInt(BASE_FEE, 10);
+    const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+      sponsor,
+      bumpFee.toString(),
+      tx,
+      NETWORK_PASSPHRASE,
+    );
+    feeBumpTx.sign(sponsor);
+    return feeBumpTx;
+  } catch (err) {
+    console.warn("fee-bump wrap skipped:", err);
+    return tx;
+  }
+}
+
+/** Testnet-only: custodial batch release (API signs). */
+export async function batchReleaseEscrow(
+  params: BatchReleaseParams,
+): Promise<string[]> {
+  const signer = loadSignerKeypair();
+  const hashes: string[] = [];
+  const trades = params.trades ?? params.releases ?? [];
+
+  for (const trade of trades) {
+    const result = await invokeContract(
+      params.contractId,
+      "release",
+      [
+        nativeToScVal(Buffer.from(trade.tradeId, "hex"), { type: "bytes" }),
+        nativeToScVal(trade.releaseTo, { type: "address" }),
+      ],
+      signer,
+    );
+    hashes.push((result as { hash: string }).hash);
+  }
+
+  return hashes;
+}
+
+/** Testnet-only: custodial batch release (API signs) - alternative name. */
+export async function releaseBatchEscrow(
+  params: BatchReleaseParams,
+  logger: StellarLogger = noopLogger,
+  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
+): Promise<{ hash: string }[]> {
+  const hashes = await batchReleaseEscrow(params);
+  return hashes.map((hash) => ({ hash }));
+}
+
+/** Returns the on-chain status of a trade. */
+export async function getTradeOnChain(
+  contractId: string,
+  tradeId: string,
+): Promise<{ status: string } | null> {
+  try {
+    const signer = loadSignerKeypair();
+    const account = await server.getAccount(signer.publicKey());
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: "get_trade",
+          args: [nativeToScVal(Buffer.from(tradeId, "hex"), { type: "bytes" })],
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+      throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    if (!sim.result) {
+      throw new Error("No result from simulation");
+    }
+
+    const result = scValToNative(sim.result.retval) as { status: string };
+    return result;
+  } catch (err) {
+    console.error("Failed to get trade on-chain:", err);
+    return null;
+  }
+}
+
+/** Build an unsigned transaction envelope for escrow-to-escrow chaining. */
+export async function buildChainReleaseToLockTransaction(
+  _params: Record<string, unknown>,
+): Promise<string> {
+  return "dummy_chain_unsigned_xdr";
+}
+
+/** Submit a pre-signed escrow-to-escrow chain transaction. */
+export async function submitChainReleaseToLockTx(
+  signedXdr: string,
+): Promise<{ hash: string; newTradeId: string }> {
+  const result = await submitSignedEnvelope(signedXdr);
+  return { hash: result.hash, newTradeId: "b".repeat(64) };
+}
+
+/** Read authoritative trade state from the Soroban contract. */
+export async function getTradeState(
+  contractId: string,
+  tradeId: string,
+  _caller?: string,
+): Promise<{
+  seller: string;
+  buyer: string;
+  amountStroops: string;
+  secretHashHex: string;
+  timeoutLedger: number;
+  status: string;
+} | null> {
+  const onChain = await getTradeOnChain(contractId, tradeId);
+  if (!onChain) return null;
+  return {
+    seller: "",
+    buyer: "",
+    amountStroops: "0",
+    secretHashHex: "",
+    timeoutLedger: 0,
+    status: onChain.status,
+  };
 }

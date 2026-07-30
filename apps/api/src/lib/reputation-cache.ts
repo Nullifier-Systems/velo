@@ -10,10 +10,10 @@ type MemoryEntry = { value: CachedReputation; expiresAt: number };
 
 const memoryCache = new Map<string, MemoryEntry>();
 
-let redisClient: RedisClientType | null = null;
-let redisReady: Promise<RedisClientType | null> | null = null;
+let redisClient: any = null;
+let redisReady: Promise<any> | null = null;
 
-async function getRedis(): Promise<RedisClientType | null> {
+async function getRedis(): Promise<any> {
   const url = process.env.REDIS_URL;
   if (!url) return null;
 

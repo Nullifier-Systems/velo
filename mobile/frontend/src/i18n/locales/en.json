@@ -76,7 +76,8 @@
     "waitStill": "Still working. The transaction has been submitted; we're waiting for on-chain confirmation.",
     "waitCheckBack": "This is taking unusually long. You can safely close this page and check back in a few minutes — if the transaction landed, the status will update automatically.",
     "waitElapsed": "{{seconds}}s elapsed",
-    "trancheProgress": "{{released}} of {{total}} installments released"
+    "trancheProgress": "{{released}} of {{total}} installments released",
+    "trancheReleased": "released"
   },
   "chat": {
     "noTradeId": "No trade ID specified.",

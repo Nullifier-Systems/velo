@@ -76,6 +76,11 @@ pub struct CrossChainTxInfo {
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledger, sanity cap
 
+/// TTL extension (in ledgers) for persistent storage entries — ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key
+/// so the entry remains observable until settlement completes.
+const TTL_EXTEND: u32 = 100_000;
+
 /// Cross-chain reorg protection: finality depth per EVM chain
 /// These are chain_id -> k_confirmations mappings
 const ETHEREUM_MAINNET_FINALITY: u32 = 64; // ~15 minutes
@@ -233,6 +238,9 @@ impl AtomicSwapContract {
         state.timeout_ledger = old_timeout.saturating_add(MAX_REORG_WINDOW_LEDGERS);
 
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
         env.events().publish(
             (Symbol::new(&env, "timelock_extended"), trade_id),
             (old_timeout, state.timeout_ledger),
@@ -362,6 +370,9 @@ impl Htlc for AtomicSwapContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
@@ -396,6 +407,9 @@ impl Htlc for AtomicSwapContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
