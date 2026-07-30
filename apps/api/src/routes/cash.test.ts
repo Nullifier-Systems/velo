@@ -27,6 +27,7 @@ vi.mock("../lib/stellar.js", () => ({
     secretHashHex: "b".repeat(64),
     timeoutLedger: 1_100,
     status: "Locked",
+  }),
   getEscrowPauseState: vi.fn().mockResolvedValue({
     paused: false,
     pause_effective_ledger: null,
@@ -539,7 +540,6 @@ describe("cashRoutes", () => {
           new_secret_hash: "d".repeat(64),
         },
       });
-
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
         id: tradeId,
