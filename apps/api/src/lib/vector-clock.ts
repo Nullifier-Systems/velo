@@ -67,15 +67,21 @@ export function happensBefore(v1: VectorClock, v2: VectorClock): boolean {
 
 /**
  * Check if two clocks are concurrent (neither causally precedes the other).
+ * Identical clocks are NOT concurrent.
  */
 export function areConcurrent(v1: VectorClock, v2: VectorClock): boolean {
-  if (happensBefore(v1, v2) || happensBefore(v2, v1)) return false;
-  
-  // Check if identical
-  for (const p of new Set([...Object.keys(v1), ...Object.keys(v2)])) {
-    if ((v1[p] ?? 0) !== (v2[p] ?? 0)) return true; // Difference found, they are concurrent
+  // Check if identical first
+  const allParticipants = new Set([...Object.keys(v1), ...Object.keys(v2)]);
+  let isIdentical = true;
+  for (const participant of allParticipants) {
+    if (v1[participant] !== v2[participant]) {
+      isIdentical = false;
+      break;
+    }
   }
-  return false;
+  if (isIdentical) return false;
+  
+  return !happensBefore(v1, v2) && !happensBefore(v2, v1);
 }
 
 /**

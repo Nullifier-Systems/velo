@@ -18,6 +18,10 @@ use soroban_sdk::{
 const LEDGERS_PER_DAY: u32 = 17_280;
 const MAX_TRADES: u32 = 200;
 
+/// TTL extension (in ledgers) for persistent storage entries. ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key.
+const TTL_EXTEND: u32 = 100_000;
+
 // Pre-computed exp(-0.01 * n) * 1_000_000 for n = 0..365
 const DECAY_TABLE: [u32; 356] = [
     1_000_000, 990_049, 980_198, 970_445, 960_789, 951_229, 941_764, 932_393, 923_116, 913_931,
@@ -112,7 +116,13 @@ impl ReputationContract {
         env.storage().persistent().set(&RepDataKey::Admin, &admin);
         env.storage()
             .persistent()
+            .extend_ttl(&RepDataKey::Admin, TTL_EXTEND, TTL_EXTEND);
+        env.storage()
+            .persistent()
             .set(&RepDataKey::EscrowContract, &escrow_contract);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::EscrowContract, TTL_EXTEND, TTL_EXTEND);
     }
 
     /// Register a verified identity Merkle root (admin only).
@@ -129,7 +139,10 @@ impl ReputationContract {
 
         env.storage()
             .persistent()
-            .set(&RepDataKey::VerifiedRoot(root), &true);
+            .set(&RepDataKey::VerifiedRoot(root.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::VerifiedRoot(root), TTL_EXTEND, TTL_EXTEND);
         Ok(())
     }
 
@@ -182,6 +195,9 @@ impl ReputationContract {
         env.storage()
             .persistent()
             .set(&RepDataKey::SpentNullifier(nullifier_hash.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::SpentNullifier(nullifier_hash.clone()), TTL_EXTEND, TTL_EXTEND);
 
         // Emit verification event
         env.events().publish(
@@ -243,9 +259,12 @@ impl ReputationContract {
         let count = call_escrow_u32(&env, &escrow, "get_trade_count");
         let scan_max = core::cmp::min(count, MAX_TRADES);
         if scan_max == 0 {
-            env.storage()
-                .persistent()
-                .set(&RepDataKey::CachedScore(address), &0u32);
+        env.storage()
+            .persistent()
+            .set(&RepDataKey::CachedScore(address.clone()), &0u32);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
             return 0;
         }
 
@@ -303,7 +322,10 @@ impl ReputationContract {
 
         env.storage()
             .persistent()
-            .set(&RepDataKey::CachedScore(address), &score);
+            .set(&RepDataKey::CachedScore(address.clone()), &score);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
         score
     }
 

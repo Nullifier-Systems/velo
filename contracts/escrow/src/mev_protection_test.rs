@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::{testutils::Ledger, vec, Address, BytesN, Env};
+use soroban_sdk::{testutils::Ledger, token, vec, Address, BytesN, Env};
 
 /// Test fixture for commit-reveal protocol tests.
 struct CommitRevealFixture {
@@ -25,7 +25,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     let token = token::Client::new(&env, &token_addr);
 
     // Mint to buyer so they can pay collateral + amount
-    token.mint(&buyer, &100_000_000_000); // 1B stroops for testing
+    token::StellarAssetClient::new(&env, &token_addr).mint(&buyer, &100_000_000_000); // 1B stroops for testing
 
     let contract_id = env.register_contract(None, EscrowContract);
     let client = EscrowContractClient::new(&env, &contract_id);
@@ -40,7 +40,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     };
 
     // Initialize escrow
-    client.initialize(&admin, &token_addr, &100); // 1% fee
+    client.initialize(&admin, &token_addr, &100, &arb_set); // 1% fee
 
     CommitRevealFixture {
         env,

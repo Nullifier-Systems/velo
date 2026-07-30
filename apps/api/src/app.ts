@@ -16,11 +16,16 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
+import { sessionRoutes } from "./routes/session.js";
+import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
+import { Pool } from "pg";
+import { PostgresEventStore } from "./lib/stellar-event-store.js";
+import { graphqlRoutes } from "./routes/graphql.js";
 
 const usedPayments = new Set<string>();
 
@@ -56,6 +61,14 @@ export const app = Fastify({
     return randomUUID();
   },
 });
+
+export const pgPool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
+export const stellarEventStore = pgPool
+  ? new PostgresEventStore(pgPool)
+  : undefined;
+if (pgPool) app.decorate("pg", pgPool);
 
 // Echo the request ID back to the client so a failed call can be traced
 // in the logs — see docs/request-tracing.md.
@@ -247,7 +260,7 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
 
     const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
     const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
-    
+
     if (tx.memo.value?.toString() !== "velo:request") {
       throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
@@ -305,4 +318,6 @@ app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
+app.register(sessionRoutes, { prefix: "/api/v1" });
+app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });

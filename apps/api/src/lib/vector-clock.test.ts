@@ -213,7 +213,7 @@ describe("Vector Clock Operations", () => {
   describe("High-Concurrency Scenario", () => {
     it("recovers causal order from 100 interleaved messages", () => {
       // Simulate rapid concurrent sends
-      const clocks: Array<[string, typeof compareClocks]> = [];
+      const clocks: Array<[string, VectorClock]> = [];
       let buyerCount = 0;
       let sellerCount = 0;
 
@@ -222,8 +222,8 @@ describe("Vector Clock Operations", () => {
         if (sender === "buyer") buyerCount++;
         else sellerCount++;
 
-        const clock = { buyer: buyerCount, seller: sellerCount };
-        clocks.push([JSON.stringify(clock), compareClocks]);
+        const clock: VectorClock = { buyer: buyerCount, seller: sellerCount };
+        clocks.push([JSON.stringify(clock), clock]);
       }
 
       // Shuffle them
@@ -235,7 +235,7 @@ describe("Vector Clock Operations", () => {
       );
       const resorted = parsed.sort(compareClocks);
 
-      // Verify sender sequences are preserved
+      // Verify sender sequences are preserved (non-decreasing)
       const buyerSequence = resorted
         .filter((c) => c.buyer > 0)
         .map((c) => c.buyer);
@@ -243,18 +243,19 @@ describe("Vector Clock Operations", () => {
         .filter((c) => c.seller > 0)
         .map((c) => c.seller);
 
+      // Check that sequences are non-decreasing
       for (let i = 1; i < buyerSequence.length; i++) {
-        expect(
-          buyerSequence[i] === buyerSequence[i - 1] + 1 ||
-          buyerSequence[i] === buyerSequence[i - 1]
-        ).toBe(true);
+        expect(buyerSequence[i]).toBeGreaterThanOrEqual(buyerSequence[i - 1]);
       }
       for (let i = 1; i < sellerSequence.length; i++) {
-        expect(
-          sellerSequence[i] === sellerSequence[i - 1] + 1 ||
-          sellerSequence[i] === sellerSequence[i - 1]
-        ).toBe(true);
+        expect(sellerSequence[i]).toBeGreaterThanOrEqual(sellerSequence[i - 1]);
       }
+      
+      // Check that we have the expected number of unique values
+      const uniqueBuyerValues = new Set(buyerSequence);
+      const uniqueSellerValues = new Set(sellerSequence);
+      expect(uniqueBuyerValues.size).toBe(50); // 50 buyer messages
+      expect(uniqueSellerValues.size).toBe(50); // 50 seller messages
     });
   });
 });

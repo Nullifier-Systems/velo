@@ -169,7 +169,7 @@ describe("custodial operations respect their timeout budgets", () => {
     h.getAccount.mockReturnValue(new Promise(() => {}));
 
     await expect(
-      lockEscrow({ ...lockParams() }, undefined, 50 /* 50 ms buildSim */, 45_000),
+      lockEscrow({ ...lockParams() }, undefined, { buildSimTimeout: 50, pollTimeout: 45_000 }),
     ).rejects.toBeInstanceOf(RpcTimeoutError);
   });
 
@@ -180,7 +180,7 @@ describe("custodial operations respect their timeout budgets", () => {
     h.getTransaction.mockResolvedValue({ status: Api.GetTransactionStatus.NOT_FOUND });
 
     await expect(
-      lockEscrow({ ...lockParams() }, undefined, 15_000, 50 /* 50 ms poll */),
+      lockEscrow({ ...lockParams() }, undefined, { buildSimTimeout: 15_000, pollTimeout: 50 }),
     ).rejects.toBeInstanceOf(RpcTimeoutError);
   });
 
@@ -188,7 +188,7 @@ describe("custodial operations respect their timeout budgets", () => {
     h.getAccount.mockReturnValue(new Promise(() => {}));
 
     await expect(
-      releaseEscrow(releaseParams(), undefined, 50, 30_000),
+      releaseEscrow(releaseParams(), undefined, { buildSimTimeout: 50, pollTimeout: 30_000 }),
     ).rejects.toBeInstanceOf(RpcTimeoutError);
   });
 
@@ -198,7 +198,7 @@ describe("custodial operations respect their timeout budgets", () => {
     h.getTransaction.mockResolvedValue({ status: Api.GetTransactionStatus.NOT_FOUND });
 
     await expect(
-      refundEscrow(refundParams(), undefined, 10_000, 50),
+      refundEscrow(refundParams(), undefined, { buildSimTimeout: 10_000, pollTimeout: 50 }),
     ).rejects.toBeInstanceOf(RpcTimeoutError);
   });
 

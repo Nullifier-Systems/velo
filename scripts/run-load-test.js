@@ -8,11 +8,12 @@ const __dirname = path.dirname(__filename);
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const TIERS = [
-  { vus: 1, durationMs: 4000, name: '1 VU Baseline' },
-  { vus: 10, durationMs: 6000, name: '10 VUs Low Concurrency' },
-  { vus: 50, durationMs: 8000, name: '50 VUs Medium Concurrency' },
+  { vus: 1, durationMs: 4000, name: '1 VU Baseline Load' },
+  { vus: 10, durationMs: 6000, name: '10 VUs Ramp-Up (Low)' },
+  { vus: 50, durationMs: 8000, name: '50 VUs Ramp-Up (Medium)' },
+  { vus: 50, durationMs: 15000, name: '50 VUs Sustained Load (Soak Test)' },
   { vus: 100, durationMs: 10000, name: '100 VUs High Concurrency' },
-  { vus: 250, durationMs: 10000, name: '250 VUs Peak Concurrency' },
+  { vus: 250, durationMs: 10000, name: '250 VUs Peak Spike Test' },
 ];
 
 const ENDPOINTS = [
