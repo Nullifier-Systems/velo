@@ -14,7 +14,7 @@ export interface CashRequestRecord {
     secretHex: string; // TODO: don't store server-side long-term — see note below
     secretHashHex: string;
     qrPayload: string; // safe to persist — contains no secret, only request_id + contract
-    status: "locked" | "expired" | "released" | "refunded" | "disputed" | "pending_signature" | "pending_batch";
+    status: "locked" | "expired" | "released" | "refunded" | "disputed" | "resolved" | "pending_signature" | "pending_batch";
     createdAt: string;
     /** First ledger at which the on-chain escrow can be refunded. */
     timeoutLedger?: number;
@@ -24,6 +24,8 @@ export interface CashRequestRecord {
     resolvedAt?: string;
     resolvedBy?: string;
     resolution?: string;
+    /** Buyer's share of the disputed amount, in basis points, once resolved via resolve_dispute. */
+    buyerShareBps?: number;
     notificationType?: "email" | "sms" | "none";
     contactInfo?: string;
     // Set when the trade enters "pending_batch" — the secret revealed at
@@ -61,6 +63,9 @@ export interface ProviderRecord {
     payoutMode?: "immediate" | "batched";
 }
 
+import { globalH3SpatialIndex } from "./h3-spatial-index.js";
+import { globalOrderAllocator } from "./order-allocator.js";
+
 const store = new Map<string, CashRequestRecord>();
 const providersStore = new Map<string, ProviderRecord>();
 
@@ -68,8 +73,17 @@ export function saveCashRequest(record: CashRequestRecord) {
     store.set(record.id, record);
 }
 
+export function clearStore() {
+    store.clear();
+    providersStore.clear();
+    globalH3SpatialIndex.clear();
+    globalOrderAllocator.clear();
+}
+
 export function saveProvider(record: ProviderRecord) {
     providersStore.set(record.id, record);
+    globalH3SpatialIndex.indexProvider(record);
+    globalOrderAllocator.registerProviderCapacity(record.id);
 }
 
 export function getProviders(): ProviderRecord[] {
@@ -94,7 +108,10 @@ export function setProviderVerificationStatus(
     status: ProviderRecord["kycStatus"]
 ): ProviderRecord | undefined {
     const record = providersStore.get(id);
-    if (record) record.kycStatus = status;
+    if (record) {
+        record.kycStatus = status;
+        globalH3SpatialIndex.indexProvider(record);
+    }
     return record;
 }
 
@@ -144,6 +161,26 @@ export function getProviderTrades(sellerAddress: string): CashRequestRecord[] {
     return Array.from(store.values()).filter(
         record => record.seller === sellerAddress
     );
+}
+
+export interface ReputationMetrics {
+    total_trades: number;
+    successful_claims: number;
+    completion_rate: number;
+    trusted: boolean;
+}
+
+/**
+ * Aggregate trust signal for a Stellar address from local trade history.
+ * `trusted` requires at least 5 trades and a ≥90% release completion rate.
+ */
+export function getReputationMetrics(address: string): ReputationMetrics {
+    const trades = getProviderTrades(address);
+    const total_trades = trades.length;
+    const successful_claims = trades.filter((t) => t.status === "released").length;
+    const completion_rate = total_trades === 0 ? 0 : successful_claims / total_trades;
+    const trusted = total_trades >= 5 && completion_rate >= 0.9;
+    return { total_trades, successful_claims, completion_rate, trusted };
 }
 
 export function setProviderPayoutMode(

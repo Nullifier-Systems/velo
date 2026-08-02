@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
+
+vi.mock("../lib/stellar.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/stellar.js")>();
+  return {
+    ...actual,
+    server: {
+      getHealth: vi.fn().mockResolvedValue({ status: "healthy" as const, oldestLedger: 1000 }),
+      getLatestLedger: vi.fn().mockResolvedValue({ sequence: 5000 }),
+    },
+  };
+});
+
 import { statusRoutes } from "./status.js";
-import { saveCashRequest } from "../lib/store.js";
+import { saveCashRequest, clearStore } from "../lib/store.js";
+
 
 vi.mock("../lib/stellar.js", () => ({
   server: {
@@ -12,6 +25,11 @@ vi.mock("../lib/stellar.js", () => ({
 }));
 
 describe("GET /api/v1/status", () => {
+  beforeEach(() => {
+    clearStore();
+    vi.clearAllMocks();
+  });
+
   it("returns api/chain/recent_activity with no sensitive fields", async () => {
     saveCashRequest({
       id: "aaaabbbbccccddddeeeeffff00001111aaaabbbbccccddddeeeeffff00001111",
@@ -37,7 +55,9 @@ describe("GET /api/v1/status", () => {
     const body = res.json();
     expect(body.api.status).toBe("ok");
     expect(typeof body.api.uptime_seconds).toBe("number");
-    expect(["healthy", "unreachable"]).toContain(body.chain.status);
+    expect(body.chain.status).toBe("healthy");
+    expect(body.chain.network).toBe("TESTNET");
+    expect(body.chain.latest_ledger).toBe(5000);
     expect(Array.isArray(body.recent_activity)).toBe(true);
 
     const entry = body.recent_activity.find((a: any) => a.status === "locked");
@@ -47,7 +67,6 @@ describe("GET /api/v1/status", () => {
       status: "locked",
       createdAt: expect.any(String),
     });
-    // No seller/buyer/amount/secret material should ever leak through.
     expect(entry.seller).toBeUndefined();
     expect(entry.buyer).toBeUndefined();
     expect(entry.amountStroops).toBeUndefined();

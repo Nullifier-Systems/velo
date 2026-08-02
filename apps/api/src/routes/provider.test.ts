@@ -20,7 +20,12 @@ describe("providerRoutes", () => {
     });
 
     expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: "Unauthorized: Missing x-provider-address header" });
+    expect(response.json()).toEqual({
+      code: "MISSING_PROVIDER_ADDRESS",
+      error: "Unauthorized",
+      message: "Unauthorized: Missing x-provider-address header",
+      statusCode: 401,
+    });
     await app.close();
   });
 
@@ -131,7 +136,7 @@ describe("providerRoutes", () => {
     const app = Fastify();
     registerApp(app);
 
-    const validAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+    const validAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/provider/register",
@@ -187,7 +192,7 @@ describe("providerRoutes", () => {
       method: "POST",
       url: "/api/v1/provider/register",
       payload: {
-        stellar_address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH",
+         stellar_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         name: "Out of range rate shop",
         lat: 19.4326,
         lng: -99.1332,
@@ -301,7 +306,7 @@ describe("providerRoutes", () => {
     it("rejects an invalid payout_mode", async () => {
       const app = Fastify();
       registerApp(app);
-      const providerAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+      const providerAddress = "G89DhpGrErixM8KWnBMFtmksuYyUCdKATotri57YxZzkdVaRPaXvaQGN";
 
       const response = await app.inject({
         method: "POST",
@@ -321,7 +326,7 @@ describe("providerRoutes", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/v1/provider/payout-settings",
-        headers: { "x-provider-address": "G_UNKNOWN_PAYOUT_SETTINGS_ADDR" },
+        headers: { "x-provider-address": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
         payload: { payout_mode: "batched" },
       });
 
@@ -332,7 +337,7 @@ describe("providerRoutes", () => {
     it("opts a registered provider into batched payouts", async () => {
       const app = Fastify();
       registerApp(app);
-      const providerAddress = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFXYCZLYF3436GTYOWCDH";
+      const providerAddress = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 
       await app.inject({
         method: "POST",

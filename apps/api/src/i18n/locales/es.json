@@ -50,5 +50,8 @@
   },
   "privacy": {
     "note": "Las ubicaciones se generalizan a una celda geohash; las coordenadas exactas se revelan solo a una coincidencia confirmada."
+  },
+  "discovery": {
+    "noProvidersNearby": "Velo aún no está disponible en esta zona porque no hay proveedores de efectivo aprobados cerca. Vuelve a intentarlo más tarde."
   }
 }

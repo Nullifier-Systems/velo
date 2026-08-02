@@ -2,22 +2,31 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { randomUUID } from "crypto";
 import "dotenv/config";
+import { ApiError } from "./lib/errors.js";
 import { resolveLocale, t } from "./lib/i18n.js";
 import { cashRoutes } from "./routes/cash.js";
 import { chatRoutes } from "./routes/chat.js";
 import { openapiRoutes } from "./routes/openapi.js";
+import { openApiDocument } from "./openapi.js";
 import { reputationRoutes } from "./routes/reputation.js";
 import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
+import { sessionRoutes } from "./routes/session.js";
+import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { recoveryRoutes } from "./routes/recovery.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
+import { Pool } from "pg";
+import { PostgresEventStore } from "./lib/stellar-event-store.js";
+import { graphqlRoutes } from "./routes/graphql.js";
 
 const usedPayments = new Set<string>();
 
@@ -53,6 +62,14 @@ export const app = Fastify({
     return randomUUID();
   },
 });
+
+export const pgPool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
+export const stellarEventStore = pgPool
+  ? new PostgresEventStore(pgPool)
+  : undefined;
+if (pgPool) app.decorate("pg", pgPool);
 
 // Echo the request ID back to the client so a failed call can be traced
 // in the logs — see docs/request-tracing.md.
@@ -90,6 +107,7 @@ app.register(cors, {
  * Global rate limit:           100 req/min
  * ------------------------------+-----------------
  *   GET /health                 | 100 req/min     (infrastructure health check, free)
+ *   GET /documentation           | 100 req/min     (interactive Swagger UI, global default, free)
  *   GET /api/v1/openapi.json    |  60 req/min     (OpenAPI spec, free)
  *   GET /api/v1/services        |  60 req/min     (catalog endpoint, free)
  *   GET /api/v1/cash/agents     |  30 req/min     (paid — agent discovery)
@@ -107,6 +125,38 @@ app.register(cors, {
  * FASTIFY_TRUST_PROXY when deployed behind a reverse proxy).
  */
 app.register(websocket);
+
+/**
+ * Interactive API documentation (GET /documentation).
+ *
+ * `src/openapi.ts` is already the single hand-maintained source of truth
+ * for the spec (served raw at GET /api/v1/openapi.json and snapshotted to
+ * apps/api/openapi.json — see routes/openapi.ts and
+ * scripts/generate-openapi.ts). Rather than have @fastify/swagger try to
+ * derive a second, competing spec by introspecting per-route schemas
+ * (which this codebase doesn't attach route-by-route), it's registered in
+ * "static" mode pointed at that same document, so there is exactly one
+ * spec and the interactive UI can never drift from it.
+ */
+app.register(swagger, {
+  mode: "static",
+  specification: {
+    // openApiDocument is declared `as const` (see openapi.ts) so every
+    // literal/enum value in it is exactly typed within this codebase. That
+    // makes its arrays/tuples `readonly`, which structurally conflicts with
+    // @fastify/swagger's own OpenAPI type definitions (which want mutable
+    // arrays like ServerObject[]) even though the actual shape is a valid
+    // OpenAPI 3.1 document. The cast only affects what TypeScript sees at
+    // this registration call; the object handed to swagger-ui at runtime
+    // is unchanged.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    document: openApiDocument as any,
+  },
+});
+
+app.register(swaggerUi, {
+  routePrefix: "/documentation",
+});
 
 app.register(rateLimit, {
   global: true,
@@ -135,6 +185,51 @@ app.register(rateLimit, {
 });
 
 /**
+ * Centralized error handler (#242).
+ * Every ApiError thrown in a route handler is caught here and serialized
+ * to the standard { error, code, statusCode, retryable, requestId } shape.
+ */
+app.setErrorHandler((error: any, request, reply) => {
+  const requestId = request.id as string;
+  if (error instanceof ApiError) {
+    return reply.status(error.statusCode).send(error.toJSON(requestId));
+  }
+  // Rate limiting errors (429) from @fastify/rate-limit
+  if (error.statusCode === 429) {
+    return reply.status(429).send({
+      error: error.error || "Too Many Requests",
+      code: "RATE_LIMITED",
+      statusCode: 429,
+      retryable: true,
+      message: error.message,
+      retryAfter: error.retryAfter,
+      retryAfterSeconds: error.retryAfterSeconds,
+      requestId,
+    });
+  }
+  // Fastify validation errors (schema-driven)
+  if ("validation" in error && Array.isArray((error as any).validation)) {
+    return reply.status(400).send({
+      error: "Request validation failed",
+      code: "VALIDATION_ERROR",
+      statusCode: 400,
+      retryable: false,
+      detail: (error as any).validation.map((v: any) => v.message).join("; "),
+      requestId,
+    });
+  }
+  // Unknown errors — log and return generic 500
+  request.log.error(error, "Unhandled error");
+  return reply.status(500).send({
+    error: "An unexpected error occurred",
+    code: "INTERNAL_ERROR",
+    statusCode: 500,
+    retryable: false,
+    requestId,
+  });
+});
+
+/**
  * x402 gate — every paid route calls this. If no valid X-Payment header
  * is present, respond 402 with a challenge describing what to pay and
  * where. This is the entire "auth" system: payment IS authentication,
@@ -155,50 +250,41 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
   }
 
   if (usedPayments.has(payment)) {
-    reply.code(402).send({ error: "Payment already used" });
-    return false;
+    throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
   }
 
   try {
     const txResponse = await server.getTransaction(payment);
     if (txResponse.status !== "SUCCESS") {
-      reply.code(402).send({ error: "Payment transaction not successful" });
-      return false;
+      throw new ApiError(402, "PAYMENT_NOT_SUCCESSFUL", "Payment transaction not successful");
     }
 
     const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
     const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
-    
-    // Check memo
+
     if (tx.memo.value?.toString() !== "velo:request") {
-        reply.code(402).send({ error: "Invalid payment memo" });
-        return false;
+      throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
 
-    // Check operation
-    // For simplicity, assuming a standard native payment or path payment operation.
-    // In production, you would check the exact asset matches USDC, and destination matches merchantAddress.
     const hasPayment = tx.operations.some(op => {
-        if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
-            const dest = (op as any).destination;
-            const amt = (op as any).amount;
-            // A production app must also check (op as any).asset is USDC!
-            return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
-        }
-        return false;
+      if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
+        const dest = (op as any).destination;
+        const amt = (op as any).amount;
+        return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
+      }
+      return false;
     });
 
     if (!hasPayment) {
-        reply.code(402).send({ error: "Transaction does not contain a valid payment" });
-        return false;
+      throw new ApiError(402, "INVALID_PAYMENT_TX", "Transaction does not contain a valid payment");
     }
 
     usedPayments.add(payment);
     return true;
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     req.log.error(err, "payment verification failed");
-    reply.code(402).send({ error: "Invalid payment transaction" });
-    return false;
+    throw new ApiError(402, "INVALID_PAYMENT_TX", "Invalid payment transaction");
   }
 });
 
@@ -233,5 +319,7 @@ app.register(chatRoutes, { prefix: "/api/v1" });
 app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
+app.register(sessionRoutes, { prefix: "/api/v1" });
+app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
 app.register(recoveryRoutes, { prefix: "/api/v1" });

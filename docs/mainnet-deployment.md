@@ -10,7 +10,7 @@ Follow the checklist **in order** — each step depends on the previous one.
 ### 1. Smart Contract Audit & Verification
 
 - [ ] **Escrow contract** — verified build matches committed source at
-      `contracts/escrow/src/lib.rs` (run `cargo build --target wasm32-unknown-unknown --release`
+      `contracts/escrow/src/lib.rs` (run `cargo build --target wasm32v1-none --release`
       from `contracts/` and compare the WASM hash).
 - [ ] **Atomic-swap contract** — same verification for `contracts/atomic-swap/src/lib.rs`.
 - [ ] Third-party security audit completed for both escrow and atomic-swap.
@@ -76,11 +76,11 @@ EVM_HTLC_ADDRESS=0x...DEPLOYED_HTLC_CONTRACT
 cd contracts
 
 # 1. Build release WASM for both contracts
-cargo build --target wasm32-unknown-unknown --release
+cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
 
 # 2. Deploy escrow contract
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/escrow.wasm \
+  --wasm target/wasm32v1-none/release/escrow.wasm \
   --rpc-url https://soroban.stellar.org \
   --network-passphrase "Public Global Stellar Network ; September 2015" \
   --source <deployer-key>
@@ -100,7 +100,7 @@ soroban contract invoke \
 
 # 4. Deploy atomic-swap contract
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/atomic_swap.wasm \
+  --wasm target/wasm32v1-none/release/atomic_swap.wasm \
   --rpc-url https://soroban.stellar.org \
   --network-passphrase "Public Global Stellar Network ; September 2015" \
   --source <deployer-key>
@@ -262,7 +262,7 @@ requires:
 ```bash
 # Deploy escrow contract
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/escrow.wasm \
+  --wasm target/wasm32v1-none/release/escrow.wasm \
   --rpc-url https://soroban.stellar.org \
   --network-passphrase "Public Global Stellar Network ; September 2015" \
   --source <deployer-secret>

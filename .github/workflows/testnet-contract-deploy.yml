@@ -26,11 +26,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Build contract WASM
         working-directory: contracts
-        run: cargo build --workspace --target wasm32-unknown-unknown --release
+        run: cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@v27.0.0

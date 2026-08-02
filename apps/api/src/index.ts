@@ -1,30 +1,33 @@
-import { app } from "./app.js";
-import { cashRoutes } from "./routes/cash.js";
-import { adminRoutes } from "./routes/admin.js";
+import { app, stellarEventStore } from "./app.js";
 import { startPayoutBatchScheduler } from "./lib/payout-batcher.js";
 import { EscrowAnomalyMonitor } from "./lib/escrow-anomaly-monitor.js";
 import { CONTRACTS } from "@velo/shared";
 import { server } from "./lib/stellar.js";
+import { StellarEscrowIndexer } from "./lib/stellar-indexer.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
-// Initialize and register routes before starting the server
 async function startServer() {
   try {
-    // Register User Cash & Geolocation discovery routes (with /api/v1 prefix)
-    await app.register(cashRoutes, { prefix: "/api/v1" });
-
-    // Register Admin/Ops monitoring & intervention routes (with /api/v1 prefix)
-    await app.register(adminRoutes, { prefix: "/api/v1" });
-
-    // Start listening
     await app.listen({ port, host: "0.0.0.0" });
     app.log.info(`velo api listening on :${port}`);
 
-    // Background scheduler for opt-in provider payout batching — see
-    // docs/provider-payout-batching.md. Not started for the test app
-    // instance (app.test.ts imports ./app.js directly, not this entrypoint).
     startPayoutBatchScheduler();
+
+    if (stellarEventStore) {
+      const indexer = new StellarEscrowIndexer(server, stellarEventStore, app.log, {
+        contractId: process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow,
+        startLedger: process.env.STELLAR_INDEXER_START_LEDGER
+          ? Number(process.env.STELLAR_INDEXER_START_LEDGER)
+          : undefined,
+        pollIntervalMs: process.env.STELLAR_INDEXER_POLL_INTERVAL_MS
+          ? Number(process.env.STELLAR_INDEXER_POLL_INTERVAL_MS)
+          : undefined,
+      });
+      void indexer.run();
+    } else {
+      app.log.warn("DATABASE_URL is not configured; Stellar escrow indexer and GraphQL are disabled");
+    }
 
     // Poll the escrow's contract + failed diagnostic events through the same
     // Soroban RPC connection used by the API and route findings to the shared

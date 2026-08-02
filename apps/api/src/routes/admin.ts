@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { refundEscrow, resolveEscrow, submitRefundTx } from "../lib/stellar.js";
+import { ApiError } from "../lib/errors.js";
+import { refundEscrow, resolveDisputeEscrow, submitRefundTx } from "../lib/stellar.js";
 import { getCashRequest, updateStatus, getAllCashRequests, getStoreStats, getProviderById, getProviders, setProviderVerificationStatus } from "../lib/store.js";
 import { notifyTradeStatus } from "./chat.js";
 import {
@@ -9,6 +10,7 @@ import {
 import { getDisputeEvidence, getDisputeEvidenceForTrade } from "../lib/dispute-evidence-store.js";
 import { disputeEvidenceMetadata } from "./dispute-evidence.js";
 import { getProviderVerificationDocument, getProviderVerificationDocuments } from "../lib/provider-verification-store.js";
+import { issueGrantToken } from "../lib/crypto/grant-token.js";
 
 // Basic schema for body validation
 interface FlagRequestBody {
@@ -20,17 +22,6 @@ interface OverrideHeader {
   'x-admin-api-key': string;
 }
 
-
-
-// Basic schema for body validation
-interface FlagRequestBody {
-  suspicious: boolean;
-  notes?: string;
-}
-
-interface OverrideHeader {
-  'x-admin-api-key': string;
-}
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     const adminKey = req.headers["x-admin-api-key"];
@@ -87,14 +78,12 @@ export async function adminRoutes(app: FastifyInstance) {
           "SELECT file_name, content_type, data FROM provider_verification_documents WHERE id = $1 AND provider_id = $2",
           [req.params.documentId, req.params.providerId],
         );
-        if (!rows[0]) return reply.code(404).send({ error: "Verification document not found" });
-        const fileName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
+        if (!rows[0]) throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");const fileName = String(rows[0].file_name).replace(/[\"\r\n]/g, "_");
         return reply.type(rows[0].content_type).header("content-disposition", `inline; filename="${fileName}"`).send(rows[0].data);
       }
       const document = getProviderVerificationDocument(req.params.documentId);
       if (!document || document.providerId !== req.params.providerId) {
-        return reply.code(404).send({ error: "Verification document not found" });
-      }
+        throw new ApiError(404, "DOCUMENT_NOT_FOUND", "Verification document not found");}
       return reply.type(document.contentType).header("content-disposition", `inline; filename="${document.fileName.replace(/[\"\r\n]/g, "_")}"`).send(document.data);
     },
   );
@@ -104,8 +93,7 @@ export async function adminRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const status = req.body?.status;
       if (status !== "approved" && status !== "rejected") {
-        return reply.code(400).send({ error: "status must be 'approved' or 'rejected'" });
-      }
+        throw new ApiError(400, "INVALID_PARAMETER", "status must be 'approved' or 'rejected'");}
       const operator = String(req.headers["x-admin-operator-name"] ?? "System Admin");
       if ((app as any).pg) {
         if (status === "approved") {
@@ -113,20 +101,17 @@ export async function adminRoutes(app: FastifyInstance) {
             "SELECT 1 FROM provider_verification_documents WHERE provider_id = $1 LIMIT 1",
             [req.params.id],
           );
-          if (!documents.rows[0]) return reply.code(409).send({ error: "A submitted verification document is required before approval" });
-        }
+          if (!documents.rows[0]) throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
         const { rows } = await (app as any).pg.query(
           `UPDATE providers SET verification_status = $1, verification_reviewed_at = NOW(),
              verification_reviewed_by = $2, updated_at = NOW() WHERE id = $3
            RETURNING id, verification_status`,
           [status, operator, req.params.id],
         );
-        if (!rows[0]) return reply.code(404).send({ error: "Provider not found" });
-      } else {
-        if (!getProviderById(req.params.id)) return reply.code(404).send({ error: "Provider not found" });
-        if (status === "approved" && getProviderVerificationDocuments(req.params.id).length === 0) {
-          return reply.code(409).send({ error: "A submitted verification document is required before approval" });
-        }
+        if (!rows[0]) throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");
+} else {
+        if (!getProviderById(req.params.id)) throw new ApiError(404, "PROVIDER_NOT_FOUND", "Provider not found");if (status === "approved" && getProviderVerificationDocuments(req.params.id).length === 0) {
+          throw new ApiError(409, "DOCUMENT_REQUIRED", "A submitted verification document is required before approval");}
       }
       setProviderVerificationStatus(req.params.id, status);
       return reply.send({ provider_id: req.params.id, verification_status: status });
@@ -399,9 +384,9 @@ export async function adminRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Trade request not found." });
       }
 
-      if (record.status !== "locked") {
+      if (record.status !== "locked" && record.status !== "expired") {
         return reply.status(400).send({
-          error: `Cannot refund. Only locked trades can be refunded. Current status is '${record.status}'.`,
+          error: `Cannot refund. Only locked or expired trades can be refunded. Current status is '${record.status}'.`,
         });
       }
 
@@ -461,17 +446,24 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /**
    * POST /admin/trades/:id/resolve
-   * Acceptance Criteria: Resolve a disputed trade.
+   * Acceptance Criteria: Resolve a disputed trade, splitting the locked
+   * amount between buyer and seller via the escrow contract's
+   * resolve_dispute(). `buyer_share_bps` is the buyer's cut in basis points:
+   * 0 behaves like a plain release() (seller gets everything minus the fee),
+   * 10000 behaves like a plain refund() (buyer gets everything back), and
+   * anything in between is a genuine partial split. This calls the contract
+   * as the arbitrator, not the admin — resolving a dispute's outcome and
+   * collecting platform fees are deliberately separate roles on-chain.
    */
-  app.post<{ Params: { id: string }; Body: { resolve_to_buyer: boolean; notes?: string } }>(
+  app.post<{ Params: { id: string }; Body: { buyer_share_bps: number; notes?: string } }>(
     "/admin/trades/:id/resolve",
     async (req, reply) => {
       const { id } = req.params;
-      const { resolve_to_buyer, notes } = req.body ?? {};
+      const { buyer_share_bps, notes } = req.body ?? {};
       const operatorName = req.headers["x-admin-operator-name"] || "System Admin";
 
-      if (typeof resolve_to_buyer !== "boolean") {
-        return reply.status(400).send({ error: "Field 'resolve_to_buyer' (boolean) is required." });
+      if (typeof buyer_share_bps !== "number" || !Number.isInteger(buyer_share_bps) || buyer_share_bps < 0 || buyer_share_bps > 10_000) {
+        return reply.status(400).send({ error: "Field 'buyer_share_bps' (integer, 0-10000) is required." });
       }
 
       // 1. Check local state store for validity
@@ -486,53 +478,56 @@ export async function adminRoutes(app: FastifyInstance) {
         });
       }
 
-      // 2. Perform on-chain resolution via Soroban contract calling resolve
+      // 2. Perform on-chain resolution via the escrow contract's resolve_dispute
       try {
-        req.log.warn(`Admin resolution initiated on-chain for trade ID ${id} (resolve_to_buyer: ${resolve_to_buyer}) by ${operatorName}`);
-        
-        await resolveEscrow({
+        req.log.warn(`Admin resolution initiated on-chain for trade ID ${id} (buyer_share_bps: ${buyer_share_bps}) by ${operatorName}`);
+
+        await resolveDisputeEscrow({
           contractId: record.contractId,
           tradeId: record.id,
-          resolveToBuyer: resolve_to_buyer,
+          buyerShareBps: buyer_share_bps,
         });
 
       } catch (err) {
-        req.log.error(err, "resolveEscrow on-chain call failed");
+        req.log.error(err, "resolveDisputeEscrow on-chain call failed");
         return reply.status(502).send({
           error: "On-chain resolve execution failed",
           detail: String(err)
         });
       }
 
-      const newStatus = resolve_to_buyer ? "refunded" : "released";
+      const newStatus = "resolved" as const;
 
       // 3. Keep DB audit trail clean & up-to-date
       try {
         if ((app as any).pg) {
           const query = `
             UPDATE cash_requests
-            SET 
+            SET
               status = $1,
               resolved_at = NOW(),
               resolved_by = $2,
               resolution = $3,
+              buyer_share_bps = $4,
               updated_at = NOW()
-            WHERE id = $4;
+            WHERE id = $5;
           `;
-          await (app as any).pg.query(query, [newStatus, operatorName, notes || null, id]);
+          await (app as any).pg.query(query, [newStatus, operatorName, notes || null, buyer_share_bps, id]);
         }
-        
+
         // Keep memory/store helper synced
         updateStatus(id, newStatus);
         record.resolvedAt = new Date().toISOString();
         record.resolvedBy = String(operatorName);
         record.resolution = notes || "";
+        record.buyerShareBps = buyer_share_bps;
 
         return reply.status(200).send({
           status: "success",
           message: "Dispute resolved successfully.",
           trade_id: id,
-          new_status: newStatus
+          new_status: newStatus,
+          buyer_share_bps
         });
 
       } catch (dbErr) {
@@ -542,7 +537,8 @@ export async function adminRoutes(app: FastifyInstance) {
         record.resolvedAt = new Date().toISOString();
         record.resolvedBy = String(operatorName);
         record.resolution = notes || "";
-        
+        record.buyerShareBps = buyer_share_bps;
+
         return reply.status(500).send({
           error: "Resolution successful on-chain, but local database status sync failed. Manual sync needed.",
           trade_id: id,
@@ -560,4 +556,27 @@ export async function adminRoutes(app: FastifyInstance) {
       store: getStoreStats(),
     };
   });
+
+  // Issue a time-bounded grant token for evidence access (#307).
+  app.post<{ Params: { id: string }; Body: { grantee: string; purpose?: string } }>(
+    "/admin/trades/:id/grant-token",
+    async (req, reply) => {
+      const trade = getCashRequest(req.params.id);
+      if (!trade) throw new ApiError(404, "TRADE_NOT_FOUND", "Trade request not found.");
+      if (!trade.secretHex) throw new ApiError(400, "MISSING_FIELD", "Trade has no secret for key derivation.");
+
+      const { grantee, purpose } = req.body;
+      if (!grantee) throw new ApiError(400, "MISSING_FIELD", "grantee (Stellar address) is required.");
+
+      const token = issueGrantToken(
+        trade.secretHex,
+        trade.id,
+        grantee,
+        purpose === "upload" ? "upload" : "view",
+        trade.disputedAt ? Date.parse(trade.disputedAt) : Date.now(),
+      );
+
+      return { token };
+    },
+  );
 }

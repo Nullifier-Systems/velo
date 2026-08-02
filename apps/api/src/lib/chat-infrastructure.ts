@@ -23,6 +23,7 @@ export interface ChatInfrastructure {
   getKey(tradeId: string, participant: string): Promise<{ publicKey: string; updatedAt: string } | null>;
   publish(tradeId: string, event: ChatEvent): Promise<void>;
   subscribe(tradeId: string, listener: (event: ChatEvent) => void): Promise<() => Promise<void>>;
+  deleteTradeChat(tradeId: string): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -58,6 +59,18 @@ export class MemoryChatInfrastructure implements ChatInfrastructure {
   async subscribe(id: string, listener: (event: ChatEvent) => void) {
     const set = this.listeners.get(id) ?? new Set(); set.add(listener); this.listeners.set(id, set);
     return async () => { set.delete(listener); if (!set.size) this.listeners.delete(id); };
+  }
+  async deleteTradeChat(id: string): Promise<number> {
+    const list = this.messages.get(id) ?? [];
+    const count = list.length;
+    this.messages.delete(id);
+    this.trades.delete(id);
+    for (const key of Array.from(this.keys.keys())) {
+      if (key.startsWith(`${id}:`)) {
+        this.keys.delete(key);
+      }
+    }
+    return count;
   }
   async close() {}
 }
@@ -115,6 +128,23 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
     await this.subscriber.subscribe(this.channel(id), handler);
     return async () => { await this.subscriber.unsubscribe(this.channel(id), handler); };
   }
+  async deleteTradeChat(id: string): Promise<number> {
+    await this.ready;
+    const messages = await this.getMessages(id);
+    const count = messages.length;
+    const trade = await this.getTrade(id);
+    const keysToDelete = [this.tradeKey(id), this.messagesKey(id), this.sequenceKey(id)];
+    if (trade) {
+      keysToDelete.push(this.keyKey(id, trade.buyer));
+      keysToDelete.push(this.keyKey(id, trade.seller));
+    }
+    const matchingKeys = await this.publisher.keys(`velo:chat:key:${id}:*`);
+    if (matchingKeys.length > 0) {
+      keysToDelete.push(...matchingKeys);
+    }
+    await this.publisher.del(keysToDelete);
+    return count;
+  }
   async close() { await this.ready; await Promise.all([this.publisher.quit(), this.subscriber.quit()]); }
 }
 
@@ -126,6 +156,10 @@ export function getChatInfrastructure(): ChatInfrastructure {
     else shared = new MemoryChatInfrastructure();
   }
   return shared;
+}
+
+export function resetChatInfrastructure(): void {
+  shared = undefined;
 }
 
 export async function registerTradeForChat(record: CashRequestRecord): Promise<void> {

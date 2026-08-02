@@ -14,13 +14,20 @@ struct CeiPatternVisitor<'a> {
 }
 
 impl<'a> CeiPatternVisitor<'a> {
-    fn new(file_path: &'a Path) -> Self { Self { file_path, warnings: 0, errors: 0 } }
+    fn new(file_path: &'a Path) -> Self {
+        Self {
+            file_path,
+            warnings: 0,
+            errors: 0,
+        }
+    }
 
     fn emit_warning(&mut self, fn_name: &str) {
         println!(
             "  ⚠  {}: function `{}` appears to have a CEI pattern violation:\n\
              │  storage writes found after external token transfer calls",
-            self.file_path.display(), fn_name,
+            self.file_path.display(),
+            fn_name,
         );
         println!(
             "     │  The CEI pattern requires state updates BEFORE external\n\
@@ -33,14 +40,22 @@ impl<'a> CeiPatternVisitor<'a> {
 
 impl<'a> Visit<'_> for CeiPatternVisitor<'a> {
     fn visit_item_fn(&mut self, node: &ItemFn) {
-        if !matches!(node.vis, Visibility::Public(_)) { return; }
-        if node.attrs.iter().any(|a| is_test_attr(a)) { return; }
+        if !matches!(node.vis, Visibility::Public(_)) {
+            return;
+        }
+        if node.attrs.iter().any(|a| is_test_attr(a)) {
+            return;
+        }
         self.check_block_for_cei(&node.sig.ident.to_string(), &node.block);
     }
 
     fn visit_impl_item_fn(&mut self, node: &ImplItemFn) {
-        if !matches!(node.vis, Visibility::Public(_)) { return; }
-        if node.attrs.iter().any(|a| is_test_attr(a)) { return; }
+        if !matches!(node.vis, Visibility::Public(_)) {
+            return;
+        }
+        if node.attrs.iter().any(|a| is_test_attr(a)) {
+            return;
+        }
         self.check_block_for_cei(&node.sig.ident.to_string(), &node.block);
     }
 }
@@ -88,5 +103,7 @@ fn is_persistent_chain(expr: &Expr) -> bool {
 fn is_test_attr(attr: &Attribute) -> bool {
     if let Meta::Path(p) = &attr.meta {
         p.is_ident("test") || p.is_ident("should_panic")
-    } else { false }
+    } else {
+        false
+    }
 }
