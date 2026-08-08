@@ -115,9 +115,9 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
            FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
           [access.trade.id],
         );
-        return { data: rows };
+        return reply.send({ data: rows });
       }
-      return { data: getDisputeEvidenceForTrade(access.trade.id).map(metadata) };
+      return reply.send({ data: getDisputeEvidenceForTrade(access.trade.id).map(metadata) });
     },
   );
 

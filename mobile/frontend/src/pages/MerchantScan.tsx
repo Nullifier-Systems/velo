@@ -49,10 +49,12 @@ export default function MerchantScan() {
   };
 
   const processDecodedText = (decodedText: string) => {
+    setError(null);
+    setReleaseUncertain(false);
     try {
       let urlObj: URL;
       if (decodedText.startsWith("velo://")) {
-        urlObj = new URL(decodedText.replace("velo://", "https://"));
+        urlObj = new URL(decodedText.replace(/^velo:\/\//, "https://velo.local/"));
       } else if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
         urlObj = new URL(decodedText);
       } else {
@@ -79,6 +81,11 @@ export default function MerchantScan() {
       setScannedData({ id: requestId, secret });
       fetchDetails(requestId);
     } catch (err) {
+      if (scannerRef.current) {
+        scannerRef.current.destroy();
+        scannerRef.current = null;
+      }
+      setScanning(false);
       setError(err instanceof Error ? err.message : t("merchant.parseError"));
     }
   };

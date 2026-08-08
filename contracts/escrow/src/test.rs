@@ -131,7 +131,7 @@ fn get_trade_returns_none_for_unknown_id() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "11")]
+#[should_panic(expected = "15")]
 fn pause_blocks_lock() {
     let f = setup();
     f.client.pause(&f.no_sigs);
@@ -152,15 +152,23 @@ fn unpause_restores_lock() {
 }
 
 #[test]
-fn pause_does_not_affect_release_of_already_locked_trade() {
+#[should_panic(expected = "15")]
+fn pause_blocks_release() {
     let f = setup();
     lock_trade(&f);
 
     f.client.pause(&f.no_sigs);
     f.client.release(&f.id, &f.secret);
+}
 
-    let fee = (500 * 50) / 10_000;
-    assert_eq!(f.token.balance(&f.seller), 500 - fee);
+#[test]
+#[should_panic(expected = "15")]
+fn pause_blocks_dispute() {
+    let f = setup();
+    lock_trade(&f);
+
+    f.client.pause(&f.no_sigs);
+    f.client.dispute(&f.buyer, &f.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +283,7 @@ fn set_signers_updates_multisig_config() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "10")]
+#[should_panic(expected = "14")]
 fn unauthorized_signer_rejected() {
     let f = setup();
     let s1 = Address::generate(&f.env);
@@ -289,7 +297,7 @@ fn unauthorized_signer_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "10")]
+#[should_panic(expected = "14")]
 fn insufficient_signers_rejected() {
     let f = setup();
     let s1 = Address::generate(&f.env);

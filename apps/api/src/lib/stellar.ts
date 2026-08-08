@@ -639,7 +639,7 @@ export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<st
         params.releases.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex))
     );
     const result = await invokeContract(params.contractId, "batch_release", [itemsScVal], signer);
-    const releasedIds = (result as Buffer[] | undefined) ?? [];
+    const releasedIds = (result as (Uint8Array | Buffer)[] | undefined) ?? [];
     return releasedIds.map((id) => Buffer.from(id).toString("hex"));
 }
 

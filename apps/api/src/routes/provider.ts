@@ -232,10 +232,10 @@ export async function providerRoutes(app: FastifyInstance) {
     }
 
     const updated = setProviderPayoutMode(providerAddress, parsed.data.payout_mode);
-    return {
+    return reply.send({
       stellar_address: providerAddress,
       payout_mode: updated?.payoutMode ?? "immediate",
-    };
+    });
   });
 
   app.get("/provider/dashboard", async (req, reply) => {
@@ -262,7 +262,7 @@ export async function providerRoutes(app: FastifyInstance) {
     const totalVolume = Number(totalStroops) / 10000000;
     const feesEarned = totalVolume * 0.01;
 
-    return {
+    return reply.send({
       address: providerAddress,
       metrics: {
         total_trades: completedTrades.length,
@@ -277,7 +277,7 @@ export async function providerRoutes(app: FastifyInstance) {
         created_at: t.createdAt,
         chat_token: t.status === "locked" ? issueChatCapability(t.id, providerAddress) : undefined,
       })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    };
+    });
   });
 
   app.get("/provider/export", async (req, reply) => {

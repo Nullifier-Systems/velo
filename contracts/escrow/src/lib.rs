@@ -111,6 +111,7 @@ impl EscrowContract {
     /// Flag a trade as disputed before its timeout. Can be called by either
     /// the buyer or the seller. Blocks normal release and refund.
     pub fn dispute(env: Env, caller: Address, id: BytesN<32>) {
+        check_not_paused(&env);
         caller.require_auth();
 
         let key = DataKey::Trade(id.clone());
@@ -404,6 +405,7 @@ impl Htlc for EscrowContract {
     }
 
     fn release(env: Env, id: BytesN<32>, secret: BytesN<32>) {
+        check_not_paused(&env);
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = match env.storage().persistent().get(&key) {
             Some(s) => s,
@@ -996,5 +998,8 @@ mod test {
     }
 }
 
+#[cfg(test)]
+#[path = "test.rs"]
+mod test_suite;
 #[cfg(test)]
 mod property_test;
