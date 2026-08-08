@@ -67,10 +67,18 @@ fn setup_escrow_trades(env: &Env, escrow: &Address, trades: &[(Address, Address,
         let mut full = [0u8; 32];
         full[..16].copy_from_slice(&id_bytes);
 
+        let mut tranches = soroban_sdk::Vec::new(env);
+        tranches.push_back(htlc_core::Tranche {
+            amount: 100_000_000i128,
+            secret_hash: BytesN::from_array(env, &[idx as u8; 32]),
+            released: status == &TradeStatus::Released,
+        });
+
         let state = TradeState {
             seller: seller.clone(),
             buyer: buyer.clone(),
             amount: 100_000_000i128, // 10 USDC
+            tranches,
             secret_hash: BytesN::from_array(env, &[idx as u8; 32]),
             timeout_ledger: 1000,
             status: status.clone(),
