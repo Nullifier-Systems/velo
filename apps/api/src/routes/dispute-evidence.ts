@@ -167,7 +167,7 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence",
-    async (request) => {
+    async (request, reply) => {
       const access = participantForTrade(request);
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(

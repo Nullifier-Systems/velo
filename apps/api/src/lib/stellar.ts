@@ -1044,6 +1044,13 @@ export async function getTradeOnChain(
  * already-settled entry is skipped by the contract, not rejected as a
  * whole batch).
  */
+function batchReleaseItemScVal(tradeId: string, secretHex: string) {
+  return nativeToScVal({
+    id: Buffer.from(tradeId, "hex"),
+    secret: Buffer.from(secretHex, "hex"),
+  });
+}
+
 export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<string[]> {
     const signer = loadSignerKeypair();
     const itemsScVal = xdr.ScVal.scvVec(
@@ -1053,6 +1060,9 @@ export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<st
     const releasedIds = (result as (Uint8Array | Buffer)[] | undefined) ?? [];
     return releasedIds.map((id) => Buffer.from(id).toString("hex"));
 }
+
+export const releaseBatchEscrow = batchReleaseEscrow;
+
 
 export interface ResolveParams {
     contractId: string;
