@@ -14,7 +14,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, Tranche, TradeState, TradeStatus};
+use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, token, Address, Bytes,
@@ -724,9 +724,7 @@ impl EscrowContract {
         if !armed {
             return None;
         }
-        env.storage()
-            .instance()
-            .get(&DataKey::PauseEffectiveLedger)
+        env.storage().instance().get(&DataKey::PauseEffectiveLedger)
     }
 
     /// Fixed delay (in ledgers) between `pause()` and effective lock blocking.
@@ -791,9 +789,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Dispute(id.clone()), &info);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Dispute(id.clone()), TTL_EXTEND, TTL_EXTEND);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Dispute(id.clone()),
+            TTL_EXTEND,
+            TTL_EXTEND,
+        );
 
         // Snapshot arbitrator-pool eligibility now, before anyone can react
         // to this dispute existing. `resolve_dispute()` and
@@ -1383,7 +1383,7 @@ impl EscrowContract {
             .extend_ttl(&release_key, TTL_EXTEND, TTL_EXTEND);
 
         let new_timeout_ledger = env.ledger().sequence() + new_timeout_ledgers;
-        
+
         // Create a single-tranche trade for the chained lock
         let mut new_tranches = Vec::new(&env);
         new_tranches.push_back(Tranche {
@@ -1667,7 +1667,7 @@ impl EscrowContract {
         }
 
         let timeout_ledger = current_ledger + timeout_ledgers;
-        
+
         // Create a single-tranche trade for backward compatibility
         let mut tranches = Vec::new(&env);
         tranches.push_back(Tranche {
@@ -1765,7 +1765,8 @@ impl EscrowContract {
             }
             seen_keys.push_back(pub_key.clone());
 
-            env.crypto().ed25519_verify(&pub_key, &payload.clone().into(), &signature);
+            env.crypto()
+                .ed25519_verify(&pub_key, &payload.clone().into(), &signature);
             valid_count += 1;
         }
 
@@ -1779,8 +1780,12 @@ impl EscrowContract {
             .extend_ttl(&nonce_key, TTL_EXTEND, TTL_EXTEND);
 
         let key = DataKey::Trade(escrow_id.clone());
-        let mut state: TradeState = env.storage().persistent().get(&key).ok_or(Error::TradeNotFound)?;
-        
+        let mut state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::TradeNotFound)?;
+
         if state.status != TradeStatus::Locked {
             return Err(Error::TradeNotLocked);
         }
@@ -1788,9 +1793,21 @@ impl EscrowContract {
             return Err(Error::InvalidAmount);
         }
 
-        let fee_bps: u32 = env.storage().instance().get(&DataKey::PlatformFeeBps).unwrap_or(0);
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+        let fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(0);
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
 
         let fee = (state.amount * fee_bps as i128) / 10_000;
         let payout = state.amount - fee;
@@ -1808,7 +1825,8 @@ impl EscrowContract {
         }
 
         // Just using "released" to match the regular release
-        env.events().publish((symbol_short(&env, "released"), escrow_id), payout);
+        env.events()
+            .publish((symbol_short(&env, "released"), escrow_id), payout);
 
         Ok(())
     }
@@ -1991,11 +2009,7 @@ impl Htlc for EscrowContract {
 
         // Issue #280: an "unestablished" buyer posts a refundable bond.
         if need_bond {
-            client.transfer(
-                &buyer,
-                &env.current_contract_address(),
-                &params.bond_amount,
-            );
+            client.transfer(&buyer, &env.current_contract_address(), &params.bond_amount);
         }
 
         env.events()
@@ -2025,7 +2039,7 @@ impl Htlc for EscrowContract {
             if tranche.released {
                 return;
             }
-            
+
             let computed = env.crypto().sha256(&secret.into());
             if computed.to_bytes() != tranche.secret_hash {
                 panic_with_error(&env, Error::InvalidSecret);
@@ -2106,7 +2120,11 @@ impl Htlc for EscrowContract {
         if refund_amount > 0 {
             let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
             let client = token::Client::new(&env, &token_addr);
-            client.transfer(&env.current_contract_address(), &state.buyer, &refund_amount);
+            client.transfer(
+                &env.current_contract_address(),
+                &state.buyer,
+                &refund_amount,
+            );
         }
 
         env.events()
@@ -2216,11 +2234,7 @@ impl EscrowContract {
 
         // Issue #280: an "unestablished" buyer posts a refundable bond.
         if need_bond {
-            client.transfer(
-                &buyer,
-                &env.current_contract_address(),
-                &params.bond_amount,
-            );
+            client.transfer(&buyer, &env.current_contract_address(), &params.bond_amount);
         }
 
         env.events()
@@ -2800,7 +2814,10 @@ mod test {
         f.client.raise_dispute(&f.buyer, &f.id);
         f.client.resolve_dispute(&f.id, &5_000, &Vec::new(&f.env));
 
-        assert!(f.client.try_resolve_dispute(&f.id, &5_000, &Vec::new(&f.env)).is_err());
+        assert!(f
+            .client
+            .try_resolve_dispute(&f.id, &5_000, &Vec::new(&f.env))
+            .is_err());
     }
 
     #[test]
@@ -2864,7 +2881,10 @@ mod test {
             .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
         f.client.raise_dispute(&f.buyer, &f.id);
 
-        assert!(f.client.try_resolve_dispute(&f.id, &10_001, &Vec::new(&f.env)).is_err());
+        assert!(f
+            .client
+            .try_resolve_dispute(&f.id, &10_001, &Vec::new(&f.env))
+            .is_err());
     }
 
     #[test]
@@ -2891,7 +2911,10 @@ mod test {
         );
 
         // And it can never be resolved again after that.
-        assert!(f.client.try_resolve_dispute(&f.id, &5_000, &Vec::new(&f.env)).is_err());
+        assert!(f
+            .client
+            .try_resolve_dispute(&f.id, &5_000, &Vec::new(&f.env))
+            .is_err());
     }
 
     #[test]
@@ -3077,7 +3100,8 @@ mod test {
         // rejected here directly (see test_resolve_dispute_from_non_arbitrator_fails
         // for that), but the new arbitrator resolving successfully confirms
         // set_arbitrator actually took effect in storage.
-        m.f.client.resolve_dispute(&m.f.id, &10_000, &Vec::new(&m.f.env));
+        m.f.client
+            .resolve_dispute(&m.f.id, &10_000, &Vec::new(&m.f.env));
         assert_eq!(m.f.token.balance(&m.f.buyer), 1_000);
     }
 
@@ -3564,7 +3588,8 @@ mod test {
         let trade_b = f.client.get_trade(&new_id).unwrap();
         assert_eq!(trade_b.status, TradeStatus::Disputed);
 
-        f.client.resolve_dispute(&new_id, &10_000, &Vec::new(&f.env));
+        f.client
+            .resolve_dispute(&new_id, &10_000, &Vec::new(&f.env));
         assert_eq!(f.token.balance(&f.seller), 495);
         let trade_b = f.client.get_trade(&new_id).unwrap();
         assert_eq!(trade_b.status, TradeStatus::Resolved);
@@ -3589,7 +3614,9 @@ mod test {
         let winner = pool.f.client.select_arbitrator(&pool.f.id);
         assert!(winner == pool.a1 || winner == pool.a2 || winner == pool.a3);
 
-        pool.f.client.resolve_dispute(&pool.f.id, &10_000, &Vec::new(&pool.f.env));
+        pool.f
+            .client
+            .resolve_dispute(&pool.f.id, &10_000, &Vec::new(&pool.f.env));
         assert_eq!(pool.f.token.balance(&pool.f.buyer), 1_000);
         assert_eq!(
             pool.f.client.get_trade(&pool.f.id).unwrap().status,
@@ -4284,10 +4311,6 @@ mod test {
         }
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod property_test;

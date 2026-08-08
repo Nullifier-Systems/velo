@@ -1,5 +1,5 @@
 use crate::spec::{InvariantItem, InvariantSpec};
-use escrow::{EscrowContract, EscrowContractClient, Error as EscrowError};
+use escrow::{Error as EscrowError, EscrowContract, EscrowContractClient};
 use htlc_core::{TradeState, TradeStatus};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -61,7 +61,10 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        if client.try_initialize(&admin, &asset.address(), &fee_bps).is_err() {
+        if client
+            .try_initialize(&admin, &asset.address(), &fee_bps)
+            .is_err()
+        {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
@@ -77,7 +80,14 @@ impl InvariantChecker {
         let timeout_ledgers: u32 = 100;
 
         // Lock funds
-        client.lock(&trade_id, &seller, &buyer, &lock_amount, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &lock_amount,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         let buyer_bal = token_client.balance(&buyer);
         let seller_bal = token_client.balance(&seller);
@@ -236,7 +246,14 @@ impl InvariantChecker {
         let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
         let timeout_ledgers: u32 = 100;
 
-        client.lock(&trade_id, &seller, &buyer, &50_000, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &50_000,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         // Attempt refund before timeout (ledger sequence < timeout_ledger)
         let premature_refund = client.try_refund(&trade_id);
@@ -250,7 +267,8 @@ impl InvariantChecker {
         }
 
         // Advance ledger past timeout
-        env.ledger().with_mut(|li| li.sequence_number += timeout_ledgers + 1);
+        env.ledger()
+            .with_mut(|li| li.sequence_number += timeout_ledgers + 1);
 
         // Dispute after timeout must fail with TimeoutReached
         let late_dispute = client.try_dispute(&buyer, &trade_id);
@@ -321,7 +339,9 @@ impl InvariantChecker {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
                 passed: false,
-                error_message: Some("Trade status changed after failed secret release attempt".into()),
+                error_message: Some(
+                    "Trade status changed after failed secret release attempt".into(),
+                ),
             };
         }
 

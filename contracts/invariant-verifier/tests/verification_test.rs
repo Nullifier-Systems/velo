@@ -39,7 +39,7 @@ fn test_framework_passes_on_correct_contract() {
 fn test_framework_catches_deliberate_invariant_violations() {
     // Construct a synthetic spec with a broken invariant check assertion to simulate contract mutation failure
     let mut spec = load_test_spec();
-    
+
     // Replace expression with a failing specification expectation to test negative reporting
     spec.invariants.push(InvariantItem {
         id: "INV-MUTATED".into(),

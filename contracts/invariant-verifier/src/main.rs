@@ -36,7 +36,11 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Loading specification from: {}", spec_path.display());
 
     let spec = InvariantSpec::load_from_file(&spec_path).map_err(|e| {
-        anyhow::anyhow!("Failed to parse invariant spec file {}: {}", spec_path.display(), e)
+        anyhow::anyhow!(
+            "Failed to parse invariant spec file {}: {}",
+            spec_path.display(),
+            e
+        )
     })?;
 
     println!("Target Contract : {}", spec.contract_name);
@@ -65,7 +69,10 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     println!("-------------------------------------------------------");
-    println!("Verification Summary: {} Passed, {} Failed", passed_count, failed_count);
+    println!(
+        "Verification Summary: {} Passed, {} Failed",
+        passed_count, failed_count
+    );
     println!("=======================================================");
 
     if failed_count > 0 {
