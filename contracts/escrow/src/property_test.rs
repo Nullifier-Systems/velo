@@ -27,7 +27,7 @@ fn setup(initial_balance: i128, fee_bps: u32) -> Fixture {
     env.mock_all_auths();
     let admin = Address::generate(&env);
 
-    let keys: Vec<BytesN<32>> = Vec::new(&env);
+    let keys: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
     let arb_set = ArbitratorSet {
         keys,
         threshold_epoch1: 1,
@@ -121,7 +121,7 @@ proptest! {
             // whether the call succeeded, not the specific error shape (which
             // differs between panic-style calls like release()/raise_dispute()
             // and Result-returning calls like resolve_dispute()).
-            let empty_sigs: Vec<(u32, BytesN<64>)> = Vec::new(&f.env);
+            let empty_sigs: soroban_sdk::Vec<(u32, BytesN<64>)> = soroban_sdk::Vec::new(&f.env);
             let result: Result<(), ()> = match action {
                 0 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 1)).map(|_| ()).map_err(|_| ()),
                 1 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 129)).map(|_| ()).map_err(|_| ()),
@@ -130,7 +130,7 @@ proptest! {
                 4 => f.client.try_raise_dispute(&f.seller, trade_id).map(|_| ()).map_err(|_| ()),
                 5 => f.client.try_resolve_dispute(trade_id, &10_000, &empty_sigs).map(|_| ()).map_err(|_| ()),
                 6 => f.client.try_resolve_dispute(trade_id, &0, &empty_sigs).map(|_| ()).map_err(|_| ()),
-                _ => f.client.try_refund_after_dispute_timeout(trade_id).map(|_| ()).map_err(|_| ()),
+                _ => f.client.try_fallback_after_timeout(trade_id).map(|_| ()).map_err(|_| ()),
             };
             let after = f.client.get_trade(trade_id).unwrap();
 
@@ -249,7 +249,7 @@ proptest! {
             let trade_id = &ids[index];
             f.env.ledger().with_mut(|li| li.sequence_number = li.sequence_number.saturating_add(advance));
 
-            let empty_sigs: Vec<(u32, BytesN<64>)> = Vec::new(&f.env);
+            let empty_sigs: soroban_sdk::Vec<(u32, BytesN<64>)> = soroban_sdk::Vec::new(&f.env);
             let _: Result<(), ()> = match action {
                 0 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 1)).map(|_| ()).map_err(|_| ()),
                 1 => f.client.try_release(trade_id, &secret(&f.env, index as u8 + 129)).map(|_| ()).map_err(|_| ()),
@@ -258,7 +258,7 @@ proptest! {
                 4 => f.client.try_raise_dispute(&f.seller, trade_id).map(|_| ()).map_err(|_| ()),
                 5 => f.client.try_resolve_dispute(trade_id, &10_000, &empty_sigs).map(|_| ()).map_err(|_| ()),
                 6 => f.client.try_resolve_dispute(trade_id, &0, &empty_sigs).map(|_| ()).map_err(|_| ()),
-                _ => f.client.try_refund_after_dispute_timeout(trade_id).map(|_| ()).map_err(|_| ()),
+                _ => f.client.try_fallback_after_timeout(trade_id).map(|_| ()).map_err(|_| ()),
             };
 
             // SOLVENCY: contract balance must always >= sum of active amounts
@@ -350,11 +350,11 @@ proptest! {
 
             // Advancing the ledger must never change the trade's hashlock or timeout
             let trade = f.client.get_trade(&trade_id).unwrap();
-            prop_assert_eq!(trade.secret_hash, initial_trade.secret_hash);
+            prop_assert_eq!(trade.secret_hash, initial_trade.secret_hash.clone());
             prop_assert_eq!(trade.timeout_ledger, initial_trade.timeout_ledger);
             prop_assert_eq!(trade.amount, initial_trade.amount);
-            prop_assert_eq!(trade.buyer, initial_trade.buyer);
-            prop_assert_eq!(trade.seller, initial_trade.seller);
+            prop_assert_eq!(trade.buyer, initial_trade.buyer.clone());
+            prop_assert_eq!(trade.seller, initial_trade.seller.clone());
         }
     }
 

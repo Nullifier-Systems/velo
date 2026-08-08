@@ -314,8 +314,8 @@ fn salt_collision_produces_different_commitment_hashes() {
         .to_bytes();
 
     // Both commits should succeed (different salts → different hashes)
-    let result1 = f.client.try_commit_escrow(&commitment_hash1, &amount);
-    let result2 = f.client.try_commit_escrow(&commitment_hash2, &amount);
+    let result1 = f.client.try_commit_escrow(&f.buyer, &commitment_hash1, &amount);
+    let result2 = f.client.try_commit_escrow(&f.buyer, &commitment_hash2, &amount);
     assert!(result1.is_ok());
     assert!(result2.is_ok());
 
@@ -331,7 +331,7 @@ fn dynamic_fee_increases_with_locked_liquidity() {
     for i in 0..5 {
         let amount = 1_000_000;
         let commitment_hash = BytesN::from_array(&f.env, &[(i as u8); 32]);
-        let result = f.client.try_commit_escrow(&commitment_hash, &amount);
+        let result = f.client.try_commit_escrow(&f.buyer, &commitment_hash, &amount);
         assert!(result.is_ok());
 
         f.env.ledger().with_mut(|li| li.sequence_number += 200); // Expire each

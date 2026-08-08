@@ -27,7 +27,45 @@ import { Pool } from "pg";
 import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
 
-const usedPayments = new Set<string>();
+const PAYMENT_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_PAYMENTS_CACHE = 10000;
+const usedPayments = new Map<string, number>();
+
+function isPaymentUsed(payment: string): boolean {
+  const timestamp = usedPayments.get(payment);
+  if (!timestamp) return false;
+  if (Date.now() - timestamp > PAYMENT_TTL_MS) {
+    usedPayments.delete(payment);
+    return false;
+  }
+  return true;
+}
+
+function recordPaymentUsed(payment: string): void {
+  const now = Date.now();
+  if (usedPayments.size >= MAX_PAYMENTS_CACHE) {
+    for (const [key, timestamp] of usedPayments.entries()) {
+      if (now - timestamp > PAYMENT_TTL_MS) {
+        usedPayments.delete(key);
+      }
+    }
+    if (usedPayments.size >= MAX_PAYMENTS_CACHE) {
+      const oldestKey = usedPayments.keys().next().value;
+      if (oldestKey) usedPayments.delete(oldestKey);
+    }
+  }
+  usedPayments.set(payment, now);
+}
+
+function isUsdcAsset(asset: any): boolean {
+  if (!asset) return true;
+  if (typeof asset.isNative === "function" && asset.isNative()) return false;
+  if (asset.code && asset.code !== "USDC") return false;
+  if (process.env.USDC_ISSUER && asset.issuer && asset.issuer !== process.env.USDC_ISSUER) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Request ID correlation — every request gets a stable ID that Fastify
@@ -248,7 +286,7 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
     return false;
   }
 
-  if (usedPayments.has(payment)) {
+  if (isPaymentUsed(payment)) {
     throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
   }
 
@@ -265,20 +303,27 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
       throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
 
+    // Check operation
     const hasPayment = tx.operations.some(op => {
-      if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
-        const dest = (op as any).destination;
-        const amt = (op as any).amount;
-        return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
-      }
-      return false;
+        if (op.type === "payment") {
+            const dest = (op as any).destination;
+            const amt = (op as any).amount;
+            const asset = (op as any).asset;
+            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
+        } else if (op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
+            const dest = (op as any).destination;
+            const amt = (op as any).destAmount ?? (op as any).amount;
+            const asset = (op as any).destAsset ?? (op as any).asset;
+            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
+        }
+        return false;
     });
 
     if (!hasPayment) {
       throw new ApiError(402, "INVALID_PAYMENT_TX", "Transaction does not contain a valid payment");
     }
 
-    usedPayments.add(payment);
+    recordPaymentUsed(payment);
     return true;
   } catch (err) {
     if (err instanceof ApiError) throw err;

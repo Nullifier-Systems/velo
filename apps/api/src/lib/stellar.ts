@@ -992,40 +992,6 @@ function wrapWithFeeBumpIfPossible(
   }
 }
 
-/** Testnet-only: custodial batch release (API signs). */
-export async function batchReleaseEscrow(
-  params: BatchReleaseParams,
-): Promise<string[]> {
-  const signer = loadSignerKeypair();
-  const hashes: string[] = [];
-  const trades = params.trades ?? params.releases ?? [];
-
-  for (const trade of trades) {
-    const result = await invokeContract(
-      params.contractId,
-      "release",
-      [
-        nativeToScVal(Buffer.from(trade.tradeId, "hex"), { type: "bytes" }),
-        nativeToScVal(trade.releaseTo, { type: "address" }),
-      ],
-      signer,
-    );
-    hashes.push((result as { hash: string }).hash);
-  }
-
-  return hashes;
-}
-
-/** Testnet-only: custodial batch release (API signs) - alternative name. */
-export async function releaseBatchEscrow(
-  params: BatchReleaseParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
-): Promise<{ hash: string }[]> {
-  const hashes = await batchReleaseEscrow(params);
-  return hashes.map((hash) => ({ hash }));
-}
-
 /** Returns the on-chain status of a trade. */
 export async function getTradeOnChain(
   contractId: string,
@@ -1063,6 +1029,63 @@ export async function getTradeOnChain(
     console.error("Failed to get trade on-chain:", err);
     return null;
   }
+}
+
+/**
+ * Testnet-only: custodial batch release (API signs). Settles many trades'
+ * payouts in a single Soroban invocation of the escrow contract's
+ * `batch_release()` — the on-chain half of provider payout batching. Each
+ * item is still verified against its own trade's secret hash on-chain, so
+ * this changes nothing about the trust model versus calling `release()`
+ * once per trade — it only reduces how many separate transactions get
+ * submitted. See docs/provider-payout-batching.md.
+ *
+ * Returns the hex trade ids that were actually released (a stale or
+ * already-settled entry is skipped by the contract, not rejected as a
+ * whole batch).
+ */
+function batchReleaseItemScVal(tradeId: string, secretHex: string) {
+  return nativeToScVal({
+    id: Buffer.from(tradeId, "hex"),
+    secret: Buffer.from(secretHex, "hex"),
+  });
+}
+
+export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<string[]> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases?.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex ?? "")) ?? []
+    );
+    const result = await invokeContract(params.contractId, "batch_release", [itemsScVal], signer);
+    const releasedIds = (result as (Uint8Array | Buffer)[] | undefined) ?? [];
+    return releasedIds.map((id) => Buffer.from(id).toString("hex"));
+}
+
+export const releaseBatchEscrow = batchReleaseEscrow;
+
+
+export interface ResolveParams {
+    contractId: string;
+    tradeId: string;
+    resolveToBuyer: boolean;
+    signers: string[];
+}
+
+/** Calls escrow's resolve(id, resolve_to_buyer, signers). Admin-only. */
+export async function resolveEscrow(params: ResolveParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.resolveToBuyer),
+            xdr.ScVal.scvVec(
+                params.signers.map((addr) => nativeToScVal(addr, { type: "address" }))
+            ),
+        ],
+        signer
+    );
 }
 
 /** Build an unsigned transaction envelope for escrow-to-escrow chaining. */

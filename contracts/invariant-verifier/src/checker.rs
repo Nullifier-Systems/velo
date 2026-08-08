@@ -1,10 +1,20 @@
 use crate::spec::{InvariantItem, InvariantSpec};
-use escrow::{EscrowContract, EscrowContractClient, Error as EscrowError};
+use escrow::{Error as EscrowError, EscrowContract, EscrowContractClient};
 use htlc_core::{TradeState, TradeStatus};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, BytesN, Env, Vec as SorobanVec,
 };
+
+fn empty_arb_set(env: &Env) -> escrow::ArbitratorSet {
+    escrow::ArbitratorSet {
+        keys: soroban_sdk::Vec::new(env),
+        threshold_epoch1: 0,
+        threshold_epoch2: 0,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
@@ -61,7 +71,10 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        if client.try_initialize(&admin, &asset.address(), &fee_bps).is_err() {
+        if client
+            .try_initialize(&admin, &asset.address(), &fee_bps, &empty_arb_set(&env))
+            .is_err()
+        {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
@@ -77,7 +90,14 @@ impl InvariantChecker {
         let timeout_ledgers: u32 = 100;
 
         // Lock funds
-        client.lock(&trade_id, &seller, &buyer, &lock_amount, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &lock_amount,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         let buyer_bal = token_client.balance(&buyer);
         let seller_bal = token_client.balance(&seller);
@@ -162,7 +182,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[2u8; 32]);
         let secret = BytesN::from_array(&env, &[8u8; 32]);
@@ -229,14 +249,21 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[3u8; 32]);
         let secret = BytesN::from_array(&env, &[9u8; 32]);
         let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
         let timeout_ledgers: u32 = 100;
 
-        client.lock(&trade_id, &seller, &buyer, &50_000, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &50_000,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         // Attempt refund before timeout (ledger sequence < timeout_ledger)
         let premature_refund = client.try_refund(&trade_id);
@@ -250,7 +277,8 @@ impl InvariantChecker {
         }
 
         // Advance ledger past timeout
-        env.ledger().with_mut(|li| li.sequence_number += timeout_ledgers + 1);
+        env.ledger()
+            .with_mut(|li| li.sequence_number += timeout_ledgers + 1);
 
         // Dispute after timeout must fail with TimeoutReached
         let late_dispute = client.try_dispute(&buyer, &trade_id);
@@ -294,7 +322,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[4u8; 32]);
         let secret = BytesN::from_array(&env, &[10u8; 32]);
@@ -321,7 +349,9 @@ impl InvariantChecker {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
                 passed: false,
-                error_message: Some("Trade status changed after failed secret release attempt".into()),
+                error_message: Some(
+                    "Trade status changed after failed secret release attempt".into(),
+                ),
             };
         }
 
@@ -358,7 +388,8 @@ impl InvariantChecker {
         let client = EscrowContractClient::new(&env, &contract_id);
 
         // Fee BPS > 10,000 must be rejected
-        let invalid_init = client.try_initialize(&admin, &asset.address(), &10_001);
+        let invalid_init =
+            client.try_initialize(&admin, &asset.address(), &10_001, &empty_arb_set(&env));
         if invalid_init.is_ok() {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
@@ -369,7 +400,7 @@ impl InvariantChecker {
         }
 
         // Valid fee initialization (500 bps = 5%)
-        client.initialize(&admin, &asset.address(), &500);
+        client.initialize(&admin, &asset.address(), &500, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[5u8; 32]);
         let secret = BytesN::from_array(&env, &[11u8; 32]);
@@ -428,7 +459,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[6u8; 32]);
         let secret = BytesN::from_array(&env, &[12u8; 32]);
@@ -450,9 +481,12 @@ impl InvariantChecker {
         // Valid dispute by buyer
         client.dispute(&buyer, &trade_id);
 
-        // Resolve call with non-admin signer in multisig when single admin expected or empty signers
-        let empty_signers = SorobanVec::new(&env);
-        let valid_resolve = client.try_resolve(&trade_id, &true, &empty_signers);
+        // Set arbitrator so single-arbitrator fallback works on resolution
+        let no_signatures: SorobanVec<(u32, BytesN<64>)> = SorobanVec::new(&env);
+        client.set_arbitrator(&admin, &SorobanVec::new(&env));
+
+        // Resolve call with single arbitrator
+        let valid_resolve = client.try_resolve_dispute(&trade_id, &5000u32, &no_signatures);
         if valid_resolve.is_err() {
             return VerificationResult {
                 invariant_id: inv.id.clone(),

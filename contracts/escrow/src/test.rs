@@ -202,6 +202,21 @@ fn pause_does_not_affect_release_of_already_locked_trade() {
 }
 
 #[test]
+#[should_panic(expected = "15")]
+fn pause_blocks_dispute() {
+    let f = setup();
+    lock_trade(&f);
+
+    f.client.pause(&f.no_sigs);
+    f.env
+        .ledger()
+        .with_mut(|li| li.sequence_number += PAUSE_DELAY_LEDGERS);
+    assert!(f.client.is_paused());
+
+    f.client.raise_dispute(&f.buyer, &f.id);
+}
+
+#[test]
 fn pause_does_not_affect_refund_of_already_locked_trade() {
     let f = setup();
     lock_trade(&f);
@@ -380,7 +395,7 @@ fn set_signers_updates_multisig_config() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "10")]
+#[should_panic(expected = "14")]
 fn unauthorized_signer_rejected() {
     let f = setup();
     let s1 = Address::generate(&f.env);
@@ -394,7 +409,7 @@ fn unauthorized_signer_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "10")]
+#[should_panic(expected = "14")]
 fn insufficient_signers_rejected() {
     let f = setup();
     let s1 = Address::generate(&f.env);
@@ -430,22 +445,22 @@ fn sign_payload(env: &Env, signing_key: &SigningKey, payload: &BytesN<32>) -> By
 #[test]
 fn test_release_escrow_threshold_success() {
     let f = setup();
-    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
     let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
     let (seller_sk, seller_pk) = generate_keypair(&f.env);
     let (arb_sk, arb_pk) = generate_keypair(&f.env);
 
     let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
-    
+
     let nonce = 1u64;
-    let payload_input = (
-        f.id.clone(),
-        500i128,
-        f.seller.clone(),
-        nonce,
-    );
-    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+    let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
+    let payload = f
+        .env
+        .crypto()
+        .sha256(&payload_input.to_xdr(&f.env))
+        .to_bytes();
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
     let sig2 = sign_payload(&f.env, &arb_sk, &payload);
@@ -466,7 +481,7 @@ fn test_release_escrow_threshold_success() {
     assert_eq!(f.token.balance(&f.seller), payout);
     assert_eq!(f.token.balance(&f.admin), fee);
     assert_eq!(f.token.balance(&f.contract_id), 0);
-    
+
     let trade = f.client.get_trade(&f.id).unwrap();
     assert_eq!(trade.status, TradeStatus::Released);
 }
@@ -475,20 +490,25 @@ fn test_release_escrow_threshold_success() {
 #[should_panic]
 fn test_release_escrow_invalid_signature_rejection() {
     let f = setup();
-    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
     let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
     let (_, seller_pk) = generate_keypair(&f.env);
     let (_, arb_pk) = generate_keypair(&f.env);
 
     let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
-    
+
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
-    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+    let payload = f
+        .env
+        .crypto()
+        .sha256(&payload_input.to_xdr(&f.env))
+        .to_bytes();
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
-    
+
     // create an invalid signature
     let invalid_sig = BytesN::from_array(&f.env, &[0u8; 64]);
 
@@ -508,22 +528,31 @@ fn test_release_escrow_invalid_signature_rejection() {
 #[should_panic(expected = "42")]
 fn test_release_escrow_replay_rejection() {
     let f = setup();
-    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
     let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
     let (seller_sk, seller_pk) = generate_keypair(&f.env);
     let (_, arb_pk) = generate_keypair(&f.env);
 
     let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
-    
+
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
-    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+    let payload = f
+        .env
+        .crypto()
+        .sha256(&payload_input.to_xdr(&f.env))
+        .to_bytes();
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
     let sig2 = sign_payload(&f.env, &seller_sk, &payload);
 
-    let signatures = vec![&f.env, (buyer_pk.clone(), sig1.clone()), (seller_pk.clone(), sig2.clone())];
+    let signatures = vec![
+        &f.env,
+        (buyer_pk.clone(), sig1.clone()),
+        (seller_pk.clone(), sig2.clone()),
+    ];
 
     f.client.release_escrow(
         &f.id,
@@ -549,20 +578,25 @@ fn test_release_escrow_replay_rejection() {
 #[should_panic(expected = "41")]
 fn test_release_escrow_insufficient_signatures() {
     let f = setup();
-    f.client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
     let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
     let (_, seller_pk) = generate_keypair(&f.env);
     let (_, arb_pk) = generate_keypair(&f.env);
 
     let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
-    
+
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
-    let payload = f.env.crypto().sha256(&payload_input.to_xdr(&f.env));
+    let payload = f
+        .env
+        .crypto()
+        .sha256(&payload_input.to_xdr(&f.env))
+        .to_bytes();
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
-    
+
     // Provide only 1 valid signature
     let signatures = vec![&f.env, (buyer_pk, sig1)];
 
@@ -593,13 +627,20 @@ struct MockPriceOracle;
 #[contractimpl]
 impl MockPriceOracle {
     pub fn init(env: Env, decimals: u32) {
-        env.storage().instance().set(&MockOracleKey::Decimals, &decimals);
+        env.storage()
+            .instance()
+            .set(&MockOracleKey::Decimals, &decimals);
     }
     pub fn set_price(env: Env, token: Address, price: i128) {
-        env.storage().instance().set(&MockOracleKey::Price(token), &price);
+        env.storage()
+            .instance()
+            .set(&MockOracleKey::Price(token), &price);
     }
     pub fn decimals(env: Env) -> u32 {
-        env.storage().instance().get(&MockOracleKey::Decimals).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&MockOracleKey::Decimals)
+            .unwrap_or(0)
     }
     pub fn lastprice(env: Env, asset: OracleAsset) -> Option<PriceData> {
         let token = match asset {
@@ -607,7 +648,10 @@ impl MockPriceOracle {
             OracleAsset::Other(_) => return None,
         };
         let price: i128 = env.storage().instance().get(&MockOracleKey::Price(token))?;
-        Some(PriceData { price, timestamp: env.ledger().timestamp() })
+        Some(PriceData {
+            price,
+            timestamp: env.ledger().timestamp(),
+        })
     }
 }
 

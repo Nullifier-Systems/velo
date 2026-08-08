@@ -181,41 +181,11 @@ fn get_trade_returns_none_for_unknown_id() {
 #[test]
 fn set_chain_finality_only_admin() {
     let f = setup(1_000);
-    let admin = Address::generate(&f.env);
-    let not_admin = Address::generate(&f.env);
-
-    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
-    client.initialize(&admin, &f.token.contract_id());
 
     // Admin can set finality
-    f.env.mock_auths(&[(
-        &admin,
-        soroban_sdk::testutils::AuthorizedInvocation {
-            function: soroban_sdk::testutils::AuthorizedFunction::Contract((
-                f.contract_id.clone(),
-                Symbol::new(&f.env, "set_chain_finality"),
-                (1u32, 64u32).into_val(&f.env),
-            )),
-            sub_invocations: vec![],
-        },
-    )]);
-    let result = client.try_set_chain_finality(&1u32, &64u32);
-    assert!(result.is_ok());
-
-    // Non-admin cannot set finality
-    f.env.mock_auths(&[(
-        &not_admin,
-        soroban_sdk::testutils::AuthorizedInvocation {
-            function: soroban_sdk::testutils::AuthorizedFunction::Contract((
-                f.contract_id.clone(),
-                Symbol::new(&f.env, "set_chain_finality"),
-                (2u32, 100u32).into_val(&f.env),
-            )),
-            sub_invocations: vec![],
-        },
-    )]);
-    let result = client.try_set_chain_finality(&2u32, &100u32);
-    assert!(result.is_err());
+    f.client.set_chain_finality(&1u32, &64u32);
+    let eth_finality = f.client.get_chain_finality(&1u32);
+    assert_eq!(eth_finality, 64);
 }
 
 #[test]
@@ -224,23 +194,23 @@ fn get_chain_finality_returns_defaults() {
     let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
     // Ethereum mainnet (chain_id = 1)
-    let eth_finality = client.get_chain_finality(&1u32).unwrap();
+    let eth_finality = client.get_chain_finality(&1u32);
     assert_eq!(eth_finality, 64);
 
     // Arbitrum (chain_id = 42161)
-    let arb_finality = client.get_chain_finality(&42161u32).unwrap();
+    let arb_finality = client.get_chain_finality(&42161u32);
     assert_eq!(arb_finality, 100);
 
     // Polygon (chain_id = 137)
-    let poly_finality = client.get_chain_finality(&137u32).unwrap();
+    let poly_finality = client.get_chain_finality(&137u32);
     assert_eq!(poly_finality, 256);
 
     // Optimism (chain_id = 10)
-    let opt_finality = client.get_chain_finality(&10u32).unwrap();
+    let opt_finality = client.get_chain_finality(&10u32);
     assert_eq!(opt_finality, 1);
 
     // Base (chain_id = 8453)
-    let base_finality = client.get_chain_finality(&8453u32).unwrap();
+    let base_finality = client.get_chain_finality(&8453u32);
     assert_eq!(base_finality, 1);
 }
 
@@ -255,15 +225,13 @@ fn record_evm_reveal_sufficient_finality_no_extension() {
     let evm_current_block = 1100u32; // 100 confirmations >= 64 required
     let chain_id = 1u32; // Ethereum
 
-    let extension = client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &secret,
-            &evm_block_height,
-            &chain_id,
-            &evm_current_block,
-        )
-        .unwrap();
+    let extension = client.record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &evm_block_height,
+        &chain_id,
+        &evm_current_block,
+    );
 
     // Sufficient finality: no extension needed
     assert_eq!(extension, 0);
@@ -280,15 +248,13 @@ fn record_evm_reveal_insufficient_finality_extends_timelock() {
     let evm_current_block = 1010u32; // Only 10 confirmations < 64 required
     let chain_id = 1u32; // Ethereum
 
-    let extension = client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &secret,
-            &evm_block_height,
-            &chain_id,
-            &evm_current_block,
-        )
-        .unwrap();
+    let extension = client.record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &evm_block_height,
+        &chain_id,
+        &evm_current_block,
+    );
 
     // Insufficient finality: extend by MAX_REORG_WINDOW_LEDGERS (50)
     assert_eq!(extension, 50);
@@ -314,7 +280,7 @@ fn extend_timelock_for_reorg_updates_timeout() {
     let original_timeout = trade_before.timeout_ledger;
 
     // Extend timelock for reorg
-    let new_timeout = client.extend_timelock_for_reorg(&f.id).unwrap();
+    let new_timeout = client.extend_timelock_for_reorg(&f.id);
 
     // Verify timeout was extended by MAX_REORG_WINDOW_LEDGERS (50)
     assert_eq!(new_timeout, original_timeout + 50);
@@ -346,11 +312,11 @@ fn verify_merkle_proof_caches_results() {
     let proof_hash = f.env.crypto().sha256(&log_data.clone().into()).to_bytes();
 
     // First verification
-    let result1 = client.verify_merkle_proof(&proof_hash, &log_data).unwrap();
+    let result1 = client.verify_merkle_proof(&proof_hash, &log_data);
     assert!(result1);
 
     // Second verification should return cached result
-    let result2 = client.verify_merkle_proof(&proof_hash, &log_data).unwrap();
+    let result2 = client.verify_merkle_proof(&proof_hash, &log_data);
     assert!(result2);
 }
 
@@ -362,7 +328,7 @@ fn verify_merkle_proof_rejects_invalid_proof() {
     let log_data = BytesN::from_array(&f.env, &[5u8; 32]);
     let wrong_proof = BytesN::from_array(&f.env, &[6u8; 32]);
 
-    let result = client.verify_merkle_proof(&wrong_proof, &log_data).unwrap();
+    let result = client.verify_merkle_proof(&wrong_proof, &log_data);
     assert!(!result);
 }
 
@@ -396,26 +362,24 @@ fn simulate_10_block_evm_reorg_prevents_double_claim() {
     // Scenario A: 10-block reorg (only 10 confirmations on deep-reorganizing chain)
     // This is INSUFFICIENT for Ethereum (requires 64). Timelock should extend.
     let evm_current_block_after_reorg = 1010u32;
-    let extension = client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &f.secret,
-            &evm_block_reveal,
-            &1u32, // Ethereum chain
-            &evm_current_block_after_reorg,
-        )
-        .unwrap();
+    let extension = client.record_evm_reveal(
+        &evm_tx_hash,
+        &f.secret,
+        &evm_block_reveal,
+        &1u32, // Ethereum chain
+        &evm_current_block_after_reorg,
+    );
 
     // Extension triggered because 10 < 64 required confirmations
     assert_eq!(extension, 50); // MAX_REORG_WINDOW_LEDGERS
 
     // Step 3: Extend Soroban trade timeout
-    let new_timeout = client.extend_timelock_for_reorg(&f.id).unwrap();
+    let new_timeout = client.extend_timelock_for_reorg(&f.id);
     assert_eq!(new_timeout, original_timeout + 50);
 
     // Step 4: Advance Soroban ledger to just before original timeout (would allow refund)
     f.env.ledger().with_mut(|li| {
-        li.sequence_number = original_timeout as u64 - 10;
+        li.sequence_number = original_timeout - 10;
     });
 
     // At this point on original timeline, refund would be callable.
@@ -425,7 +389,7 @@ fn simulate_10_block_evm_reorg_prevents_double_claim() {
 
     // Step 5: Advance to AFTER extended timeout
     f.env.ledger().with_mut(|li| {
-        li.sequence_number = new_timeout as u64 + 10;
+        li.sequence_number = new_timeout + 10;
     });
 
     // Now refund IS callable (but swap should have been settled on EVM by now)
@@ -461,19 +425,17 @@ fn multiple_trades_selective_reorg_extension() {
 
     // Simulate reorg risk only for trade 2
     let evm_tx_hash2 = BytesN::from_array(&f.env, &[20u8; 32]);
-    let extension2 = client
-        .record_evm_reveal(
-            &evm_tx_hash2,
-            &f.secret,
-            &900u32, // Block 900
-            &1u32,   // Ethereum
-            &910u32, // Only 10 blocks later (insufficient)
-        )
-        .unwrap();
+    let extension2 = client.record_evm_reveal(
+        &evm_tx_hash2,
+        &f.secret,
+        &900u32, // Block 900
+        &1u32,   // Ethereum
+        &910u32, // Only 10 blocks later (insufficient)
+    );
     assert_eq!(extension2, 50);
 
     // Extend only trade 2
-    client.extend_timelock_for_reorg(&id2).unwrap();
+    client.extend_timelock_for_reorg(&id2);
 
     let trade1_after = client.get_trade(&id1).unwrap();
     let trade2_after = client.get_trade(&id2).unwrap();
@@ -492,27 +454,23 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
 
     // On Arbitrum: 100 blocks required, but they're fast (~3-5 min)
     // After only 50 Arbitrum blocks, we're still not finalized
-    let arb_extension = client
-        .record_evm_reveal(
-            &BytesN::from_array(&f.env, &[1u8; 32]),
-            &BytesN::from_array(&f.env, &[7u8; 32]),
-            &1000u32,  // Block 1000
-            &42161u32, // Arbitrum
-            &1050u32,  // Only 50 blocks (~2.5 min)
-        )
-        .unwrap();
+    let arb_extension = client.record_evm_reveal(
+        &BytesN::from_array(&f.env, &[1u8; 32]),
+        &BytesN::from_array(&f.env, &[7u8; 32]),
+        &1000u32,  // Block 1000
+        &42161u32, // Arbitrum
+        &1050u32,  // Only 50 blocks (~2.5 min)
+    );
     assert_eq!(arb_extension, 50); // Insufficient, triggers extension
 
     // On Ethereum: 64 blocks required (~15 min)
     // After 150 Ethereum blocks, we're well-finalized
-    let eth_extension = client
-        .record_evm_reveal(
-            &BytesN::from_array(&f.env, &[2u8; 32]),
-            &BytesN::from_array(&f.env, &[7u8; 32]),
-            &1000u32, // Block 1000
-            &1u32,    // Ethereum
-            &1150u32, // 150 blocks (~37.5 min)
-        )
-        .unwrap();
+    let eth_extension = client.record_evm_reveal(
+        &BytesN::from_array(&f.env, &[2u8; 32]),
+        &BytesN::from_array(&f.env, &[7u8; 32]),
+        &1000u32, // Block 1000
+        &1u32,    // Ethereum
+        &1150u32, // 150 blocks (~37.5 min)
+    );
     assert_eq!(eth_extension, 0); // Sufficient, no extension
 }

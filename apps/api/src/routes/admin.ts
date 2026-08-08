@@ -127,9 +127,9 @@ export async function adminRoutes(app: FastifyInstance) {
          FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
         [req.params.id],
       );
-      return { data: rows };
+      return reply.send({ data: rows });
     }
-    return { data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) };
+    return reply.send({ data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) });
   });
 
   app.get<{ Params: { id: string; evidenceId: string } }>(

@@ -21,7 +21,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus};
+use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
 };
@@ -325,10 +325,18 @@ impl Htlc for AtomicSwapContract {
 
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
+        let mut tranches = soroban_sdk::Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer,
             amount,
+            tranches,
             secret_hash,
             timeout_ledger,
             status: TradeStatus::Locked,
