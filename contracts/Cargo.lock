@@ -668,8 +668,10 @@ checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
 name = "escrow"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "htlc-core",
  "proptest",
+ "rand 0.8.7",
  "soroban-sdk",
 ]
 
@@ -913,6 +915,20 @@ name = "indexmap-nostd"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e04e2fd2b8188ea827b32ef11de88377086d690286ab35747ef7f9bf3ccb590"
+
+[[package]]
+name = "invariant-verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atomic-swap",
+ "escrow",
+ "htlc-core",
+ "proptest",
+ "serde",
+ "serde_json",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "itertools"

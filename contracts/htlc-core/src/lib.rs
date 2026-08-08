@@ -5,7 +5,7 @@
 //! this so the on-chain state machine stays consistent across products.
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, BytesN, Env};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Vec};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
@@ -14,6 +14,21 @@ pub enum TradeStatus {
     Released,
     Refunded,
     Disputed,
+    /// A disputed trade whose funds were split (or fully allocated) by an
+    /// arbitrator via `resolve_dispute`. Distinct from `Released`/`Refunded`
+    /// so a resolved dispute is never confused with the ordinary HTLC
+    /// release/refund paths.
+    Resolved,
+}
+
+/// A single tranche within a trade: an amount with its own secret hash.
+/// Multiple tranches allow partial, incremental releases.
+#[derive(Clone)]
+#[contracttype]
+pub struct Tranche {
+    pub amount: i128,
+    pub secret_hash: BytesN<32>,
+    pub released: bool,
 }
 
 #[derive(Clone)]
@@ -21,10 +36,17 @@ pub enum TradeStatus {
 pub struct TradeState {
     pub seller: Address,
     pub buyer: Address,
+    /// Total locked amount across all tranches. Immutable after lock().
     pub amount: i128,
-    pub secret_hash: BytesN<32>,
+    /// List of tranches, each with its own amount and secret hash.
+    /// The sum of tranche amounts must equal `amount` at lock() time.
+    pub tranches: Vec<Tranche>,
     pub timeout_ledger: u32,
     pub status: TradeStatus,
+    /// For backward compatibility: single secret_hash field.
+    /// When tranches are used, this field is ignored.
+    /// For single-tranche trades, this can still be used.
+    pub secret_hash: BytesN<32>,
 }
 
 /// Every HTLC-based contract in this workspace implements this trait so

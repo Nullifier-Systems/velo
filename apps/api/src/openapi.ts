@@ -317,6 +317,39 @@ export const openApiDocument = {
         },
       },
     },
+    "/api/v1/cash/pause": {
+      get: {
+        operationId: "getEscrowPause",
+        tags: ["cash"],
+        summary: "Escrow emergency pause / circuit breaker state",
+        description:
+          "Reads whether the escrow contract is currently rejecting new locks. " +
+          "When paused is true, POST /cash/request and /cash/request/prepare return 503. " +
+          "Existing locked trades can still be released or refunded.",
+        "x-rate-limit": { max: 60, timeWindow: "1 minute" },
+        responses: {
+          "200": {
+            description: "Current on-chain pause state.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["paused", "pause_effective_ledger", "pause_delay_ledgers"],
+                  properties: {
+                    paused: { type: "boolean" },
+                    pause_effective_ledger: { type: ["integer", "null"] },
+                    pause_delay_ledgers: { type: "integer" },
+                    message: { type: ["string", "null"] },
+                  },
+                },
+              },
+            },
+          },
+          "502": { description: "Failed to read pause state from chain." },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
     "/api/v1/cash/request/prepare": {
       post: {
         operationId: "prepareCashRequest",
@@ -595,12 +628,18 @@ export const openApiDocument = {
         responses: {
           "200": {
             description:
-              "Reputation summary. Fields are null until the on-chain " +
-              "reputation source is wired up.",
+              "Reputation summary derived from trade history for the address. " +
+              "Results are cached for 60 seconds.",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/Reputation" },
               },
+            },
+          },
+          "400": {
+            description: "Invalid Stellar G-address.",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Error" } },
             },
           },
           "402": { $ref: "#/components/responses/PaymentRequired" },
@@ -717,6 +756,31 @@ export const openApiDocument = {
           qrPayload: { type: "string", description: "Persisted QR payload from creation; contains request_id and contract only, no secret." },
           status: { type: "string", enum: ["locked", "expired", "released", "refunded", "disputed"] },
           createdAt: { type: "string", format: "date-time" },
+          timeoutLedger: {
+            type: "integer",
+            description:
+              "First Stellar ledger at which permissionless refund() succeeds.",
+          },
+          latestLedger: {
+            type: "integer",
+            description:
+              "Chain tip used to compute the refund countdown (locked/expired only).",
+          },
+          ledgersUntilRefund: {
+            type: "integer",
+            description:
+              "Ledgers remaining before refund becomes available; 0 when available.",
+          },
+          refundAvailable: {
+            type: "boolean",
+            description:
+              "True once latestLedger >= timeoutLedger. Funds still require a refund call.",
+          },
+          estimatedSecondsUntilRefund: {
+            type: "integer",
+            description:
+              "Wall-clock estimate only (ledgers × ~6s). Not an on-chain gate.",
+          },
           disputedAt: { type: "string", format: "date-time" },
           disputedBy: { type: "string" },
           disputeReason: { type: "string" },
@@ -727,12 +791,27 @@ export const openApiDocument = {
       },
       Reputation: {
         type: "object",
-        required: ["address", "completion_rate", "trades", "trusted"],
+        required: [
+          "address",
+          "total_trades",
+          "successful_claims",
+          "completion_rate",
+          "trusted",
+          "cached",
+        ],
         properties: {
           address: { type: "string" },
-          completion_rate: { type: ["number", "null"] },
-          trades: { type: ["integer", "null"] },
-          trusted: { type: ["boolean", "null"] },
+          total_trades: { type: "integer" },
+          successful_claims: { type: "integer" },
+          completion_rate: { type: "number" },
+          trusted: {
+            type: "boolean",
+            description: "True when total_trades >= 5 and completion_rate >= 0.90.",
+          },
+          cached: {
+            type: "boolean",
+            description: "True when the response was served from the 60s cache.",
+          },
         },
       },
     },

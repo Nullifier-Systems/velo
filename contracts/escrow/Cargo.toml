@@ -14,3 +14,5 @@ htlc-core = { path = "../htlc-core" }
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"

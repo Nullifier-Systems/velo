@@ -1,0 +1,55 @@
+{
+  "contract_name": "escrow",
+  "version": "1.0.0",
+  "description": "Formal invariant specification for Velo HTLC Escrow smart contract state machine and accounting.",
+  "invariants": [
+    {
+      "id": "INV-01",
+      "name": "Conservation of Value",
+      "category": "Accounting",
+      "description": "Total balance across buyer, seller, admin, and escrow contract must remain strictly conserved. Deposited funds must equal held funds plus net payouts.",
+      "expression": "balance(buyer) + balance(seller) + balance(admin) + balance(contract) == total_minted_initial",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "INV-02",
+      "name": "State Machine Exclusivity & Monotonicity",
+      "category": "State Machine",
+      "description": "Terminal states (Released, Refunded) cannot transition to any other state. Valid transitions are strictly Locked -> {Disputed, Released, Refunded} and Disputed -> {Released, Refunded}.",
+      "expression": "terminal(Released) && terminal(Refunded) && valid_transitions(Locked -> [Disputed, Released, Refunded], Disputed -> [Released, Refunded])",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "INV-03",
+      "name": "Timeout Monotonicity",
+      "category": "Temporal",
+      "description": "Refund operations must fail with TimeoutNotReached when current_ledger < timeout_ledger. Dispute operations must fail with TimeoutReached when current_ledger >= timeout_ledger.",
+      "expression": "ledger < timeout_ledger => refund() == Err(TimeoutNotReached) && ledger >= timeout_ledger => dispute() == Err(TimeoutReached)",
+      "severity": "HIGH"
+    },
+    {
+      "id": "INV-04",
+      "name": "Secret Hash Correctness",
+      "category": "Cryptographic",
+      "description": "Release operations must succeed if and only if sha256(secret) == secret_hash. Invalid preimages must be rejected with InvalidSecret.",
+      "expression": "sha256(secret) == secret_hash <=> release(secret) == Ok(())",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "INV-05",
+      "name": "Fee Math Conservation & Bounds",
+      "category": "Arithmetic",
+      "description": "Platform fee basis points must be within [0, 10000]. Payout fee calculations must satisfy fee = (amount * fee_bps) / 10000 and fee + payout == amount with no overflow or lost dust.",
+      "expression": "0 <= fee_bps <= 10000 && fee + payout == amount",
+      "severity": "HIGH"
+    },
+    {
+      "id": "INV-06",
+      "name": "Authorization & Governance Integrity",
+      "category": "Access Control",
+      "description": "Privileged admin operations (resolve, pause, set_platform_fee) require valid admin auth or N-of-M multisig threshold. Unauthorized calls must fail.",
+      "expression": "unauthorized_caller => privileged_op() == Err(Unauthorized | NotAuthorized)",
+      "severity": "CRITICAL"
+    }
+  ]
+}

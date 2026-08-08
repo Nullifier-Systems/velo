@@ -9,7 +9,7 @@ import {
 
 vi.mock("../lib/stellar.js", () => ({
   refundEscrow: vi.fn(),
-  resolveEscrow: vi.fn(),
+  resolveDisputeEscrow: vi.fn(),
   submitRefundTx: vi.fn(),
 }));
 
