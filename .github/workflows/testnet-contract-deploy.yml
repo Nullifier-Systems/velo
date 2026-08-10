@@ -30,7 +30,7 @@ jobs:
 
       - name: Build contract WASM
         working-directory: contracts
-        run: cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
+        run: cargo build --workspace --exclude soroban-lint --exclude invariant-verifier --target wasm32v1-none --release
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@v27.0.0
