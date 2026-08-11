@@ -41,6 +41,10 @@ export interface CashRequestRecord {
     // Set on trade B when it was created by chaining trade A's release
     // into it, rather than by an ordinary lock().
     chainedFromId?: string;
+    // Tranche-based releases support
+    tranches?: Array<{ amountStroops: string; secretHashHex: string; released: boolean }>;
+    releasedTranchesCount?: number;
+    releasedAmountStroops?: string;
 }
 
 export interface ProviderRecord {

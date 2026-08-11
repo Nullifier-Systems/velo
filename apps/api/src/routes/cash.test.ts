@@ -10,7 +10,9 @@ import { getCashRequest, saveProvider } from "../lib/store.js";
 // Mock the Stellar functions to avoid real ledger/simulation calls
 vi.mock("../lib/stellar.js", () => ({
   lockEscrow: vi.fn().mockResolvedValue(1_000),
+  lockEscrowWithTranches: vi.fn().mockResolvedValue(1_000),
   releaseEscrow: vi.fn().mockResolvedValue(undefined),
+  releaseTrancheEscrow: vi.fn().mockResolvedValue({ hash: "dummy_hash" }),
   refundEscrow: vi.fn().mockResolvedValue(undefined),
   disputeEscrow: vi.fn().mockResolvedValue(undefined),
   resolveDisputeEscrow: vi.fn().mockResolvedValue(undefined),
@@ -1372,6 +1374,90 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
 
     const record = getCashRequest(tradeId);
     expect(record?.status).toBe("refunded");
-});
+  });
+
+  describe("tranche-based releases", () => {
+    it("rejects prepare request if sum of tranches does not equal amount_stroops", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request/prepare",
+        headers: { "x-payment": "valid" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "a".repeat(64),
+          tranches: [
+            { amount_stroops: "5000000", secret_hash: "b".repeat(64) },
+            { amount_stroops: "4000000", secret_hash: "c".repeat(64) },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({
+        code: "TRANCHE_SUM_MISMATCH",
+      });
+    });
+
+    it("prepares custodial lock with tranches and releases tranches incrementally", async () => {
+      const prepRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/cash/request/prepare",
+        headers: { "x-payment": "valid" },
+        payload: {
+          seller: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          buyer: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          amount_stroops: "10000000",
+          secret_hash: "a".repeat(64),
+          tranches: [
+            { amount_stroops: "6000000", secret_hash: "b".repeat(64) },
+            { amount_stroops: "4000000", secret_hash: "c".repeat(64) },
+          ],
+        },
+      });
+
+      expect(prepRes.statusCode).toBe(201);
+      const tradeId = prepRes.json().claim_url.split("/").pop();
+
+      // Release first tranche
+      const rel1Res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/release-tranche`,
+        payload: {
+          tranche_index: 0,
+          secret: "secret_1",
+        },
+      });
+
+      expect(rel1Res.statusCode).toBe(200);
+      expect(rel1Res.json()).toMatchObject({
+        id: tradeId,
+        status: "locked",
+        releasedTranchesCount: 1,
+        totalTranchesCount: 2,
+        releasedAmountStroops: "6000000",
+      });
+
+      // Release second tranche (completes trade)
+      const rel2Res = await app.inject({
+        method: "POST",
+        url: `/api/v1/cash/request/${tradeId}/release-tranche`,
+        payload: {
+          tranche_index: 1,
+          secret: "secret_2",
+        },
+      });
+
+      expect(rel2Res.statusCode).toBe(200);
+      expect(rel2Res.json()).toMatchObject({
+        id: tradeId,
+        status: "released",
+        releasedTranchesCount: 2,
+        totalTranchesCount: 2,
+        releasedAmountStroops: "10000000",
+      });
+    });
+  });
 });
 });

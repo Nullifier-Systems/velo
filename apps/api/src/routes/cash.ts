@@ -3,7 +3,9 @@ import { z } from "zod";
 import { CONTRACTS } from "@velo/shared";
 import {
   lockEscrow,
+  lockEscrowWithTranches,
   releaseEscrow,
+  releaseTrancheEscrow,
   refundEscrow,
   disputeEscrow,
   buildLockEscrowTransaction,
@@ -455,6 +457,11 @@ export async function cashRoutes(app: FastifyInstance) {
       .regex(/^[0-9a-fA-F]+$/),
   });
 
+  const trancheSchema = z.object({
+    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+  });
+
   const prepareLockSchema = z.object({
     seller: z
       .string()
@@ -472,6 +479,7 @@ export async function cashRoutes(app: FastifyInstance) {
       .trim()
       .length(64)
       .regex(/^[0-9a-fA-F]+$/),
+    tranches: z.array(trancheSchema).optional(),
     // Validated manually below (rather than via z.enum) so we can return the
     // specific "mode must be either..." error message callers depend on.
     mode: z.string().trim().optional(),
@@ -500,10 +508,27 @@ export async function cashRoutes(app: FastifyInstance) {
         buyer,
         amount_stroops,
         secret_hash,
+        tranches: rawTranches,
         mode: rawMode,
         notification_type,
         contact_info,
       } = body;
+
+      if (rawTranches && rawTranches.length > 0) {
+        const sum = rawTranches.reduce(
+          (acc, t) => acc + BigInt(t.amount_stroops),
+          0n,
+        );
+        if (sum !== BigInt(amount_stroops)) {
+          throw new ApiError(
+            400,
+            "TRANCHE_SUM_MISMATCH",
+            "Sum of tranche amounts must equal total amount_stroops",
+          );
+          return;
+        }
+      }
+
       const mode = rawMode ?? "custodial";
       if (mode !== "custodial" && mode !== "non_custodial") {
         throw new ApiError(
@@ -554,15 +579,30 @@ export async function cashRoutes(app: FastifyInstance) {
       if (mode === "custodial") {
         let lockedAtLedger: number;
         try {
-          lockedAtLedger = await lockEscrow({
-            contractId: ESCROW_CONTRACT_ID,
-            tradeId,
-            seller,
-            buyer,
-            amountStroops: BigInt(amount_stroops),
-            secretHashHex: secret_hash,
-            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-          });
+          if (rawTranches && rawTranches.length > 0) {
+            lockedAtLedger = await lockEscrowWithTranches({
+              contractId: ESCROW_CONTRACT_ID,
+              tradeId,
+              seller,
+              buyer,
+              amountStroops: BigInt(amount_stroops),
+              tranches: rawTranches.map((t) => ({
+                amountStroops: BigInt(t.amount_stroops),
+                secretHashHex: t.secret_hash,
+              })),
+              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+            });
+          } else {
+            lockedAtLedger = await lockEscrow({
+              contractId: ESCROW_CONTRACT_ID,
+              tradeId,
+              seller,
+              buyer,
+              amountStroops: BigInt(amount_stroops),
+              secretHashHex: secret_hash,
+              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+            });
+          }
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
           if (err instanceof RpcTimeoutError) {
@@ -575,6 +615,14 @@ export async function cashRoutes(app: FastifyInstance) {
             detail: String(err),
           });
         }
+
+        const tranchesRecord = rawTranches
+          ? rawTranches.map((t) => ({
+              amountStroops: t.amount_stroops,
+              secretHashHex: t.secret_hash,
+              released: false,
+            }))
+          : undefined;
 
         saveCashRequest({
           id: tradeId,
@@ -590,6 +638,9 @@ export async function cashRoutes(app: FastifyInstance) {
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
+          tranches: tranchesRecord,
+          releasedTranchesCount: tranchesRecord ? 0 : undefined,
+          releasedAmountStroops: tranchesRecord ? "0" : undefined,
         });
         await registerTradeForChat(getCashRequest(tradeId)!);
 
@@ -1068,6 +1119,101 @@ export async function cashRoutes(app: FastifyInstance) {
       await notifyTradeStatus(record.id, "released");
       await sendNotification(record, "released", (req as any).locale ?? "en");
       return { id: record.id, status: "released" };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/cash/request/:id/release-tranche",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");
+        return;
+      }
+      if (record.status !== "locked") {
+        reply.code(409).send({ error: `request is already ${record.status}` });
+        return;
+      }
+      if (!record.tranches || record.tranches.length === 0) {
+        throw new ApiError(400, "NO_TRANCHES", "This request was not created with tranches");
+        return;
+      }
+
+      const releaseBody = parseBody(
+        z.object({
+          tranche_index: z.number().int().min(0),
+          secret: z.string().trim().min(1),
+        }),
+        req.body,
+        reply,
+      );
+      if (!releaseBody) return;
+
+      const { tranche_index, secret } = releaseBody;
+      if (tranche_index >= record.tranches.length) {
+        throw new ApiError(400, "INVALID_TRANCHE_INDEX", "tranche_index out of bounds");
+        return;
+      }
+
+      const tranche = record.tranches[tranche_index];
+      if (tranche.released) {
+        reply.code(409).send({ error: "tranche already released" });
+        return;
+      }
+
+      try {
+        await releaseTrancheEscrow({
+          contractId: record.contractId,
+          tradeId: record.id,
+          trancheIndex: tranche_index,
+          secretHex: secret,
+        });
+      } catch (err) {
+        req.log.error(err, "releaseTrancheEscrow failed");
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply
+            .code(502)
+            .send({ error: "tranche release failed", detail: String(err) });
+        }
+        return;
+      }
+
+      tranche.released = true;
+      const releasedCount = record.tranches.filter((t) => t.released).length;
+      record.releasedTranchesCount = releasedCount;
+      const releasedAmountStroops = record.tranches
+        .filter((t) => t.released)
+        .reduce((acc, t) => acc + BigInt(t.amountStroops), 0n)
+        .toString();
+      record.releasedAmountStroops = releasedAmountStroops;
+
+      if (releasedCount === record.tranches.length) {
+        updateStatus(record.id, "released");
+        await notifyTradeStatus(record.id, "released");
+        await sendNotification(record, "released", (req as any).locale ?? "en");
+      } else {
+        await notifyTradeStatus(record.id, "locked");
+      }
+
+      return {
+        id: record.id,
+        status: record.status,
+        releasedTranchesCount: releasedCount,
+        totalTranchesCount: record.tranches.length,
+        releasedAmountStroops,
+      };
     },
   );
 

@@ -103,14 +103,6 @@ impl ZkCredentialContract {
             return Err(Error::TreeFull);
         }
 
-        // Collect payment if price > 0
-        let price: i128 = env.storage().instance().get(&DataKey::Price).unwrap();
-        if price > 0 {
-            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-            let client = token::Client::new(&env, &token_addr);
-            client.transfer(&buyer, &env.current_contract_address(), &price);
-        }
-
         // Store leaf commitment
         env.storage()
             .persistent()
@@ -134,6 +126,14 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::KnownRoots(new_root), TTL_EXTEND, TTL_EXTEND);
+
+        // Collect payment if price > 0 (Interactions executed after state updates)
+        let price: i128 = env.storage().instance().get(&DataKey::Price).unwrap();
+        if price > 0 {
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&buyer, &env.current_contract_address(), &price);
+        }
 
         // Emit buy event
         env.events().publish(

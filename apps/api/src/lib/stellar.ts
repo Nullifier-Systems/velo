@@ -599,6 +599,28 @@ export interface BatchReleaseParams {
   releases?: Array<{ tradeId: string; releaseTo?: string; secretHex?: string }>;
 }
 
+export interface TrancheParam {
+  amountStroops: bigint;
+  secretHashHex: string;
+}
+
+export interface LockWithTranchesParams {
+  contractId: string;
+  tradeId: string;
+  buyer: string;
+  seller: string;
+  amountStroops: bigint;
+  tranches: TrancheParam[];
+  timeoutLedgers: number;
+}
+
+export interface ReleaseTrancheParams {
+  contractId: string;
+  tradeId: string;
+  trancheIndex: number;
+  secretHex: string;
+}
+
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
 export async function lockEscrow(
   params: LockParams,
@@ -805,6 +827,54 @@ export async function releaseEscrow(
   }
 
   return { hash: sendResult.hash };
+}
+
+function trancheItemScVal(amountStroops: bigint, secretHashHex: string) {
+  return nativeToScVal({
+    amount: amountStroops,
+    secret_hash: Buffer.from(secretHashHex, "hex"),
+    released: false,
+  });
+}
+
+export async function lockEscrowWithTranches(
+  params: LockWithTranchesParams,
+): Promise<number> {
+  const signer = loadSignerKeypair();
+  const tranchesScVal = xdr.ScVal.scvVec(
+    params.tranches.map((t) => trancheItemScVal(t.amountStroops, t.secretHashHex)),
+  );
+  await invokeContract(
+    params.contractId,
+    "lock_with_tranches",
+    [
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+      nativeToScVal(params.seller, { type: "address" }),
+      nativeToScVal(params.buyer, { type: "address" }),
+      nativeToScVal(params.amountStroops, { type: "i128" }),
+      tranchesScVal,
+      nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+    ],
+    signer,
+  );
+  return getLatestLedgerSequence();
+}
+
+export async function releaseTrancheEscrow(
+  params: ReleaseTrancheParams,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  await invokeContract(
+    params.contractId,
+    "release_tranche",
+    [
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+      nativeToScVal(params.trancheIndex, { type: "u32" }),
+      nativeToScVal(Buffer.from(params.secretHex, "hex"), { type: "bytes" }),
+    ],
+    signer,
+  );
+  return { hash: "ok" };
 }
 
 /** Testnet-only: custodial refund (API signs). */
