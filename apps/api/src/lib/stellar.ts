@@ -590,6 +590,7 @@ export interface ChainReleaseToLockParams {
   newSeller: string;
   newSecretHashHex: string;
   newTimeoutLedgers: number;
+  signerPublicKey?: string;
 }
 
 export interface BatchReleaseParams {
@@ -1129,7 +1130,7 @@ export async function buildChainReleaseToLockTransaction(
   params: ChainReleaseToLockParams,
   signerPublicKey?: string,
 ): Promise<string> {
-  const pubKey = signerPublicKey ?? loadSignerKeypair().publicKey();
+  const pubKey = params.signerPublicKey ?? signerPublicKey ?? loadSignerKeypair().publicKey();
   const account = await server.getAccount(pubKey);
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,

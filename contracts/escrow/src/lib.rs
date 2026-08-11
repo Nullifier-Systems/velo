@@ -1624,7 +1624,9 @@ impl EscrowContract {
                 .unwrap_or(0);
             env.storage().instance().set(
                 &DataKey::LockedLiquidity,
-                &(current_liquidity.saturating_sub(commitment_state.amount).max(0)),
+                &(current_liquidity
+                    .saturating_sub(commitment_state.amount)
+                    .max(0)),
             );
 
             return Err(Error::RevealWindowClosed);

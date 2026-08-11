@@ -38,7 +38,12 @@ jobs:
       - name: Deploy contracts and update registry
         env:
           STELLAR_TESTNET_DEPLOYER_SECRET: ${{ secrets.STELLAR_TESTNET_DEPLOYER_SECRET }}
-        run: bash scripts/deploy-testnet-contracts.sh
+        run: |
+          if [ -z "$STELLAR_TESTNET_DEPLOYER_SECRET" ]; then
+            echo "STELLAR_TESTNET_DEPLOYER_SECRET is not set in repository secrets. Skipping deployment step."
+            exit 0
+          fi
+          bash scripts/deploy-testnet-contracts.sh
 
       - name: Validate recorded addresses
         run: node scripts/update-testnet-contract-addresses.mjs --check
