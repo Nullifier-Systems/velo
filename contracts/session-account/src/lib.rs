@@ -305,18 +305,27 @@ impl SessionAccount {
             return Err(soroban_sdk::Error::from_contract_error(Error::SessionKeyExpired as u32));
         }
 
+        if amount <= 0 {
+            return Err(soroban_sdk::Error::from_contract_error(Error::InvalidSpendingCap as u32));
+        }
+
         // Check spending cap
         let spent_key = DataKey::Spent(signer.clone());
         let current_spent: i128 = env.storage().instance().get(&spent_key).unwrap_or(0);
         
-        if current_spent + amount > session_info.spending_cap {
+        let new_spent = match current_spent.checked_add(amount) {
+            Some(val) => val,
+            None => return Err(soroban_sdk::Error::from_contract_error(Error::SpendingCapExceeded as u32)),
+        };
+
+        if new_spent > session_info.spending_cap {
             return Err(soroban_sdk::Error::from_contract_error(Error::SpendingCapExceeded as u32));
         }
 
         // Update the spent amount
         env.storage()
             .instance()
-            .set(&spent_key, &(current_spent + amount));
+            .set(&spent_key, &new_spent);
 
         Ok(())
     }

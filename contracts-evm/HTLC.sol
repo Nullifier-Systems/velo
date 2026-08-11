@@ -26,6 +26,7 @@ contract HTLC {
 
     address public owner;
     mapping(address => bool) public isRelayer;
+    address[] public relayerList;
     uint256 public relayerCount;
     uint256 public threshold; // M-of-N threshold required to accept a claim
 
@@ -74,11 +75,18 @@ contract HTLC {
 
     function _setRelayers(address[] memory _relayers, uint256 _threshold) internal {
         require(_threshold <= _relayers.length, "threshold exceeds relayer count");
+        // Clear previous relayers
+        for (uint256 i = 0; i < relayerList.length; i++) {
+            isRelayer[relayerList[i]] = false;
+        }
+        delete relayerList;
+
         threshold = _threshold;
         relayerCount = _relayers.length;
         for (uint256 i = 0; i < _relayers.length; i++) {
             require(_relayers[i] != address(0), "invalid relayer address");
             isRelayer[_relayers[i]] = true;
+            relayerList.push(_relayers[i]);
         }
         emit RelayersUpdated(threshold, relayerCount);
     }
@@ -130,12 +138,14 @@ contract HTLC {
             if (attestationCount[hashlock] >= threshold) {
                 s.withdrawn = true;
                 emit Withdrawn(hashlock, secret);
-                s.recipient.transfer(s.amount);
+                (bool success, ) = s.recipient.call{value: s.amount}("");
+                require(success, "ETH transfer failed");
             }
         } else {
             s.withdrawn = true;
             emit Withdrawn(hashlock, secret);
-            s.recipient.transfer(s.amount);
+            (bool success, ) = s.recipient.call{value: s.amount}("");
+            require(success, "ETH transfer failed");
         }
     }
 
@@ -155,7 +165,8 @@ contract HTLC {
 
         s.refunded = true;
         emit Refunded(hashlock);
-        s.sender.transfer(s.amount);
+        (bool success, ) = s.sender.call{value: s.amount}("");
+        require(success, "ETH transfer failed");
     }
 
     /// @notice Convenience view mirroring the on-chain hashlock derivation.

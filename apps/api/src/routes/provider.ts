@@ -294,8 +294,8 @@ export async function providerRoutes(app: FastifyInstance) {
       totalStroops += BigInt(trade.amountStroops);
     }
     
-    // For MVP, assume a fixed 1% fee earned by the provider
-    const totalVolume = Number(totalStroops) / 10000000;
+    // Calculate volume in base units safely using BigInt arithmetic before decimal formatting
+    const totalVolume = Number(totalStroops / 100000n) / 100;
     const feesEarned = totalVolume * 0.01;
 
     return reply.send({

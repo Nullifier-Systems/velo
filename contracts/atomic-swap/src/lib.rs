@@ -37,6 +37,8 @@ enum DataKey {
     ProofCache(BytesN<32>), // proof_hash -> true/false
     /// Cross-chain state: EVM tx hash -> (secret, block_height, revealed_at_ledger)
     CrossChainState(BytesN<32>), // evm_tx_hash -> CrossChainTxInfo
+    /// Track if timelock was extended for a trade
+    TimelockExtended(BytesN<32>),
 }
 
 #[contracterror]
@@ -219,6 +221,7 @@ impl AtomicSwapContract {
 
     /// Cross-chain: Extend a trade's timelock to account for EVM reorg risk.
     /// Only called if record_evm_reveal() detected insufficient finality.
+    /// Prevents double-extension for the same trade to protect against DoS attacks.
     pub fn extend_timelock_for_reorg(env: Env, trade_id: BytesN<32>) -> Result<u32, Error> {
         let key = DataKey::Trade(trade_id.clone());
         let mut state: TradeState = env
@@ -231,6 +234,11 @@ impl AtomicSwapContract {
             return Err(Error::TradeNotFound);
         }
 
+        let ext_key = DataKey::TimelockExtended(trade_id.clone());
+        if env.storage().persistent().has(&ext_key) {
+            return Err(Error::TimelockAlreadyExtended);
+        }
+
         let _current_ledger = env.ledger().sequence();
         let old_timeout = state.timeout_ledger;
 
@@ -241,6 +249,12 @@ impl AtomicSwapContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+
+        env.storage().persistent().set(&ext_key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&ext_key, TTL_EXTEND, TTL_EXTEND);
+
         env.events().publish(
             (Symbol::new(&env, "timelock_extended"), trade_id),
             (old_timeout, state.timeout_ledger),
