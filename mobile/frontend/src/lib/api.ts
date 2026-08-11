@@ -76,13 +76,14 @@ export async function refundCashRequest(id: string): Promise<void> {
 }
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
+  const idempotencyKey = createIdempotencyKey();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-idempotency-key": createIdempotencyKey(),
+        "x-idempotency-key": idempotencyKey,
       },
       body: JSON.stringify({ secret }),
     });
@@ -94,7 +95,7 @@ export async function releaseCashRequest(id: string, secret: string): Promise<vo
         endpoint: `/api/v1/cash/request/${id}/release`,
         method: "POST",
         body: { secret },
-        idempotencyKey: createIdempotencyKey(),
+        idempotencyKey,
       });
     } catch {
       // Silently handle queue failure — will retry on next sync

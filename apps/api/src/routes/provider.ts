@@ -294,8 +294,8 @@ export async function providerRoutes(app: FastifyInstance) {
       totalStroops += BigInt(trade.amountStroops);
     }
     
-    // Calculate volume in base units safely using BigInt arithmetic before decimal formatting
-    const totalVolume = Number(totalStroops / 100000n) / 100;
+    // Calculate volume in base units (7 decimal places) without integer truncation
+    const totalVolume = Number(totalStroops) / 10_000_000;
     const feesEarned = totalVolume * 0.01;
 
     return reply.send({

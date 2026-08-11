@@ -1,7 +1,14 @@
 import "dotenv/config";
+import { timingSafeEqual } from "node:crypto";
 import { ApiError } from "./errors.js";
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
+
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 export function requireAdminAuth(request: any, _reply: any): boolean {
   if (!ADMIN_API_KEY) {
@@ -18,7 +25,7 @@ export function requireAdminAuth(request: any, _reply: any): boolean {
     throw new ApiError(401, "UNAUTHORIZED", "Authorization header must be: Bearer <admin-api-key>");
   }
 
-  if (token !== ADMIN_API_KEY) {
+  if (!safeCompare(token, ADMIN_API_KEY)) {
     throw new ApiError(403, "INVALID_API_KEY", "Invalid admin API key");
   }
 

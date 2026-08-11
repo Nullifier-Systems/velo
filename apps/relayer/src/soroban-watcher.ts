@@ -99,8 +99,16 @@ export class SorobanWatcher {
     }
 
     // Advance the cursor past the newest ledger we have seen so the next poll
-    // does not re-deliver the same events.
-    if (res.latestLedger) this.cursorLedger = res.latestLedger + 1;
+    // does not re-deliver the same events or skip unread ledgers.
+    const maxEventLedger = (res.events ?? []).reduce(
+      (max, ev) => Math.max(max, (ev as any).ledger ?? 0),
+      0,
+    );
+    if (maxEventLedger > 0 && maxEventLedger >= startLedger) {
+      this.cursorLedger = maxEventLedger + 1;
+    } else if (res.latestLedger) {
+      this.cursorLedger = res.latestLedger + 1;
+    }
     return decoded;
   }
 

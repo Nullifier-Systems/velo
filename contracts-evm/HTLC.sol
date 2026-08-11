@@ -85,6 +85,7 @@ contract HTLC {
         relayerCount = _relayers.length;
         for (uint256 i = 0; i < _relayers.length; i++) {
             require(_relayers[i] != address(0), "invalid relayer address");
+            require(!isRelayer[_relayers[i]], "duplicate relayer address");
             isRelayer[_relayers[i]] = true;
             relayerList.push(_relayers[i]);
         }

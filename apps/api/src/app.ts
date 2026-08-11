@@ -27,32 +27,18 @@ import { Pool } from "pg";
 import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
 
-const PAYMENT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
 
 function isPaymentUsed(payment: string): boolean {
-  const timestamp = usedPayments.get(payment);
-  if (!timestamp) return false;
-  if (Date.now() - timestamp > PAYMENT_TTL_MS) {
-    usedPayments.delete(payment);
-    return false;
-  }
-  return true;
+  return usedPayments.has(payment);
 }
 
 function recordPaymentUsed(payment: string): void {
   const now = Date.now();
   if (usedPayments.size >= MAX_PAYMENTS_CACHE) {
-    for (const [key, timestamp] of usedPayments.entries()) {
-      if (now - timestamp > PAYMENT_TTL_MS) {
-        usedPayments.delete(key);
-      }
-    }
-    if (usedPayments.size >= MAX_PAYMENTS_CACHE) {
-      const oldestKey = usedPayments.keys().next().value;
-      if (oldestKey) usedPayments.delete(oldestKey);
-    }
+    const oldestKey = usedPayments.keys().next().value;
+    if (oldestKey) usedPayments.delete(oldestKey);
   }
   usedPayments.set(payment, now);
 }
