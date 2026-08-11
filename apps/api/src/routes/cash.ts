@@ -378,7 +378,16 @@ export async function cashRoutes(app: FastifyInstance) {
     }
 
     const searchRadiusKm = radius && radius > 0 ? radius : 5.0;
-    const amount = BigInt(amount_stroops ?? "100000000"); // Default 10 USDC
+    let amount: bigint;
+    if (amount_stroops !== undefined && amount_stroops !== null && amount_stroops !== "") {
+      const rawStr = String(amount_stroops).trim();
+      if (!/^\d+$/.test(rawStr)) {
+        throw new ApiError(400, "INVALID_AMOUNT", "amount_stroops must be a positive integer string");
+      }
+      amount = BigInt(rawStr);
+    } else {
+      amount = BigInt("100000000"); // Default 10 USDC
+    }
 
     // 1. Uber H3 Hierarchical Spatial Indexing O(1) query with boundary hex crossings
     const h3Candidates = globalH3SpatialIndex.findProvidersInRadius(

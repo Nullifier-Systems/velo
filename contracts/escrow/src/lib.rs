@@ -176,6 +176,8 @@ pub enum Error {
     InvalidTrancheIndex = 48,
     /// Tranches array is empty — at least one tranche is required.
     NoTranches = 49,
+    /// Multi-tranche trade detected — use release_tranche() instead of release().
+    MultiTrancheUseReleaseTranche = 50,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -1050,20 +1052,6 @@ impl EscrowContract {
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
 
-        // Slashing: Admin seizes all stakes from arbitrators since they failed to resolve.
-        // For simplicity, we zero out all stakes in `arb_set.keys` and send to admin.
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let client = token::Client::new(&env, &token_addr);
-
-        for pub_key in arb_set.keys.iter() {
-            // Note: Since `arb_set.keys` are BytesN<32> ed25519 public keys, we can't easily map them
-            // directly to an `Address` unless we store the mapping.
-            // For this implementation, we will skip slashing or assume arbitrators register their Address.
-            // But wait, stake_arbitrator uses Address! We need a mapping from Address to BytesN<32> or vice versa.
-            // For now, we will just do the refund. The prompt says "Support slashing", so we need the mapping.
-        }
-
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
@@ -1636,7 +1624,7 @@ impl EscrowContract {
                 .unwrap_or(0);
             env.storage().instance().set(
                 &DataKey::LockedLiquidity,
-                &(current_liquidity - commitment_state.amount),
+                &(current_liquidity.saturating_sub(commitment_state.amount).max(0)),
             );
 
             return Err(Error::RevealWindowClosed);
@@ -1853,8 +1841,9 @@ impl EscrowContract {
             .unwrap_or(0);
 
         // Calculate L / Ltarget (fixed-point: 10000 = 1.0)
+        let safe_liquidity = current_liquidity.max(0) as u128;
         let liquidity_ratio_fp = if fee_config.target_liquidity > 0 {
-            ((current_liquidity as u128 * 10_000) / (fee_config.target_liquidity as u128)) as u32
+            ((safe_liquidity * 10_000) / (fee_config.target_liquidity as u128)) as u32
         } else {
             10_000 // Default to 1.0 if target is zero
         };
@@ -2077,8 +2066,8 @@ impl Htlc for EscrowContract {
             if computed.to_bytes() != state.secret_hash {
                 panic_with_error(&env, Error::InvalidSecret);
             }
-            // If secret matches, this is an error - use release_tranche instead
-            panic_with_error(&env, Error::InvalidSecret);
+            // If secret matches, return specific error directing user to release_tranche instead
+            panic_with_error(&env, Error::MultiTrancheUseReleaseTranche);
         }
     }
 
@@ -2301,11 +2290,12 @@ impl EscrowContract {
             }
         }
 
+        // Complete with bond refund on successful tranche release (proves trade is legitimate, not spam)
+        Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
+
         // If all tranches are released, mark the entire trade as Released
         if all_released {
             state.status = TradeStatus::Released;
-            // Complete with bond refund only when fully released
-            Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
         }
 
         // CEI pattern: update state before external calls

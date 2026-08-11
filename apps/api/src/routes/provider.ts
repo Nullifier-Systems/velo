@@ -250,22 +250,22 @@ export async function providerRoutes(app: FastifyInstance) {
   app.post("/provider/payout-settings", async (req, reply) => {
     const providerAddress = req.headers["x-provider-address"];
     if (!providerAddress || typeof providerAddress !== "string") {
-      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");
     }
 
     if (!providerAddress.match(/^G[1-9A-HJ-NP-Za-km-z]{55}$/)) {
-      throw new ApiError(400, "INVALID_PARAMETER", "Invalid x-provider-address format");return;
+      throw new ApiError(400, "INVALID_PARAMETER", "Invalid x-provider-address format");
     }
 
     const bodySchema = z.object({ payout_mode: z.enum(["immediate", "batched"]) });
     const parsed = bodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      throw new ApiError(400, "INVALID_PAYOUT_MODE", "payout_mode must be 'immediate' or 'batched'");return;
+      throw new ApiError(400, "INVALID_PAYOUT_MODE", "payout_mode must be 'immediate' or 'batched'");
     }
 
     const provider = getProviderByAddress(providerAddress);
     if (!provider) {
-      throw new ApiError(404, "PROVIDER_NOT_FOUND", "no registered provider for this address");return;
+      throw new ApiError(404, "PROVIDER_NOT_FOUND", "no registered provider for this address");
     }
 
     const updated = setProviderPayoutMode(providerAddress, parsed.data.payout_mode);
@@ -281,7 +281,7 @@ export async function providerRoutes(app: FastifyInstance) {
     const providerAddress = req.headers["x-provider-address"];
     
     if (!providerAddress || typeof providerAddress !== "string") {
-      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");
     }
 
     const allTrades = getProviderTrades(providerAddress);
@@ -320,7 +320,7 @@ export async function providerRoutes(app: FastifyInstance) {
     const providerAddress = req.headers["x-provider-address"];
     
     if (!providerAddress || typeof providerAddress !== "string") {
-      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");return;
+      throw new ApiError(401, "MISSING_PROVIDER_ADDRESS", "Unauthorized: Missing x-provider-address header");
     }
 
     const allTrades = getProviderTrades(providerAddress);

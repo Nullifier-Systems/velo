@@ -580,6 +580,16 @@ export interface ResolveDisputeParams {
   tradeId: string;
   buyerShare?: number;
   buyerShareBps?: number;
+  signatures?: Array<{ index: number; signatureHex: string }>;
+}
+
+export interface ChainReleaseToLockParams {
+  contractId: string;
+  releaseTradeId: string;
+  releaseSecretHex: string;
+  newSeller: string;
+  newSecretHashHex: string;
+  newTimeoutLedgers: number;
 }
 
 export interface BatchReleaseParams {
@@ -621,7 +631,7 @@ export async function lockEscrow(
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
           nativeToScVal(params.buyer, { type: "address" }),
           nativeToScVal(params.seller, { type: "address" }),
-          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(amount, { type: "i128" }),
           nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
       }),
@@ -703,7 +713,7 @@ export async function buildLockEscrowTransaction(
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
           nativeToScVal(params.buyer, { type: "address" }),
           nativeToScVal(params.seller, { type: "address" }),
-          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(amount, { type: "i128" }),
           nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
       }),
@@ -736,6 +746,11 @@ export async function releaseEscrow(
     async () => server.getAccount(signer.publicKey()),
   );
 
+  const secretHex = params.secretHex ?? params.releaseTo;
+  if (!secretHex) {
+    throw new Error("releaseEscrow requires secretHex or releaseTo parameter");
+  }
+
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -746,7 +761,7 @@ export async function releaseEscrow(
         function: "release",
         args: [
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
-          nativeToScVal(params.releaseTo, { type: "address" }),
+          nativeToScVal(Buffer.from(secretHex, "hex"), { type: "bytes" }),
         ],
       }),
     )
@@ -873,16 +888,25 @@ export async function disputeEscrow(params: DisputeParams) {
   );
 }
 
-/** Calls escrow's resolve_dispute(buyer_share). buyer_share is 0-10000 (basis points). */
+/** Calls escrow's resolve_dispute(id, buyer_share_bps, signatures). buyer_share is 0-10000 (basis points). */
 export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
   const signer = loadSignerKeypair();
   const buyerShare = params.buyerShareBps ?? params.buyerShare;
+  const sigsScVal = xdr.ScVal.scvVec(
+    (params.signatures ?? []).map((s) =>
+      xdr.ScVal.scvVec([
+        nativeToScVal(s.index, { type: "u32" }),
+        nativeToScVal(Buffer.from(s.signatureHex, "hex"), { type: "bytes" }),
+      ])
+    )
+  );
   return invokeContract(
     params.contractId,
     "resolve_dispute",
     [
       nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
       nativeToScVal(buyerShare, { type: "u32" }),
+      sigsScVal,
     ],
     signer,
   );
@@ -992,11 +1016,23 @@ function wrapWithFeeBumpIfPossible(
   }
 }
 
-/** Returns the on-chain status of a trade. */
+export interface OnChainTradeState {
+  seller?: string;
+  buyer?: string;
+  amount?: bigint | string | number;
+  amountStroops?: string;
+  secret_hash?: Buffer | string;
+  secretHashHex?: string;
+  timeout_ledger?: number;
+  timeoutLedger?: number;
+  status: string;
+}
+
+/** Returns the on-chain status and state of a trade. */
 export async function getTradeOnChain(
   contractId: string,
   tradeId: string,
-): Promise<{ status: string } | null> {
+): Promise<OnChainTradeState | null> {
   try {
     const signer = loadSignerKeypair();
     const account = await server.getAccount(signer.publicKey());
@@ -1023,7 +1059,7 @@ export async function getTradeOnChain(
       throw new Error("No result from simulation");
     }
 
-    const result = scValToNative(sim.result.retval) as { status: string };
+    const result = scValToNative(sim.result.retval) as OnChainTradeState;
     return result;
   } catch (err) {
     console.error("Failed to get trade on-chain:", err);
@@ -1090,9 +1126,38 @@ export async function resolveEscrow(params: ResolveParams) {
 
 /** Build an unsigned transaction envelope for escrow-to-escrow chaining. */
 export async function buildChainReleaseToLockTransaction(
-  _params: Record<string, unknown>,
+  params: ChainReleaseToLockParams,
+  signerPublicKey?: string,
 ): Promise<string> {
-  return "dummy_chain_unsigned_xdr";
+  const pubKey = signerPublicKey ?? loadSignerKeypair().publicKey();
+  const account = await server.getAccount(pubKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "chain_release_to_lock",
+        args: [
+          nativeToScVal(Buffer.from(params.releaseTradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(Buffer.from(params.releaseSecretHex, "hex"), { type: "bytes" }),
+          nativeToScVal(params.newSeller, { type: "address" }),
+          nativeToScVal(Buffer.from(params.newSecretHashHex, "hex"), { type: "bytes" }),
+          nativeToScVal(params.newTimeoutLedgers, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
 }
 
 /** Submit a pre-signed escrow-to-escrow chain transaction. */
@@ -1100,7 +1165,20 @@ export async function submitChainReleaseToLockTx(
   signedXdr: string,
 ): Promise<{ hash: string; newTradeId: string }> {
   const result = await submitSignedEnvelope(signedXdr);
-  return { hash: result.hash, newTradeId: "b".repeat(64) };
+  let newTradeId = "";
+  if ((result as any).returnValue) {
+    try {
+      const nativeVal = scValToNative((result as any).returnValue);
+      if (Buffer.isBuffer(nativeVal)) {
+        newTradeId = nativeVal.toString("hex");
+      } else if (typeof nativeVal === "string") {
+        newTradeId = nativeVal;
+      }
+    } catch (_) {
+      // fallback
+    }
+  }
+  return { hash: result.hash, newTradeId: newTradeId || result.hash };
 }
 
 /** Read authoritative trade state from the Soroban contract. */
@@ -1118,12 +1196,23 @@ export async function getTradeState(
 } | null> {
   const onChain = await getTradeOnChain(contractId, tradeId);
   if (!onChain) return null;
+  const rawStatus =
+    typeof onChain.status === "object" && onChain.status !== null
+      ? Object.keys(onChain.status)[0]
+      : String(onChain.status ?? "locked");
+  const secretHash = onChain.secret_hash ?? onChain.secretHashHex;
+  const secretHashHex = Buffer.isBuffer(secretHash)
+    ? secretHash.toString("hex")
+    : typeof secretHash === "string"
+    ? secretHash
+    : "";
+  const amount = onChain.amount ?? onChain.amountStroops ?? "0";
   return {
-    seller: "",
-    buyer: "",
-    amountStroops: "0",
-    secretHashHex: "",
-    timeoutLedger: 0,
-    status: onChain.status,
+    seller: String(onChain.seller ?? ""),
+    buyer: String(onChain.buyer ?? ""),
+    amountStroops: String(amount),
+    secretHashHex,
+    timeoutLedger: Number(onChain.timeout_ledger ?? onChain.timeoutLedger ?? 0),
+    status: rawStatus.toLowerCase(),
   };
 }

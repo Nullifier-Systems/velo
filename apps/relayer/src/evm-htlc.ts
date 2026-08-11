@@ -44,6 +44,8 @@ export class EthersEvmHtlcClient implements EvmHtlcClient {
   }
 
   async withdraw(secretHex: string): Promise<string> {
-    return this.submitAttestation(secretHex);
+    const tx = await this.contract.withdraw(secretHex);
+    const receipt = await tx.wait();
+    return receipt?.hash ?? tx.hash;
   }
 }
