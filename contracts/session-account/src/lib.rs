@@ -234,8 +234,10 @@ impl SessionAccount {
         session_info.spending_cap = new_spending_cap;
         env.storage().instance().set(&key, &session_info);
 
-        env.events()
-            .publish((Symbol::new(&env, "spending_cap_updated"),), (session_key, new_spending_cap));
+        env.events().publish(
+            (Symbol::new(&env, "spending_cap_updated"),),
+            (session_key, new_spending_cap),
+        );
 
         Ok(())
     }
@@ -292,10 +294,7 @@ impl SessionAccount {
             return Err(Error::InvalidTimeWindow);
         }
 
-        let expiry = env
-            .ledger()
-            .sequence()
-            .saturating_add(duration_ledgers);
+        let expiry = env.ledger().sequence().saturating_add(duration_ledgers);
         env.storage()
             .instance()
             .set(&DataKey::PauseGrant(escrow_contract.clone()), &expiry);
@@ -324,8 +323,10 @@ impl SessionAccount {
         }
         env.storage().instance().remove(&key);
 
-        env.events()
-            .publish((Symbol::new(&env, "emergency_pause_revoked"),), escrow_contract);
+        env.events().publish(
+            (Symbol::new(&env, "emergency_pause_revoked"),),
+            escrow_contract,
+        );
 
         Ok(())
     }
@@ -424,9 +425,7 @@ impl SessionAccount {
         }
 
         // Update the spent amount
-        env.storage()
-            .instance()
-            .set(&spent_key, &new_spent);
+        env.storage().instance().set(&spent_key, &new_spent);
 
         Ok(())
     }
@@ -463,15 +462,11 @@ impl CustomAccountInterface for SessionAccount {
         for ctx in auth_contexts.iter() {
             let (contract, fn_name) = match ctx {
                 Context::Contract(ContractContext {
-                    contract,
-                    fn_name,
-                    ..
+                    contract, fn_name, ..
                 }) => (contract, fn_name),
                 _ => continue,
             };
-            if fn_name == Symbol::new(&env, "pause")
-                || fn_name == Symbol::new(&env, "unpause")
-            {
+            if fn_name == Symbol::new(&env, "pause") || fn_name == Symbol::new(&env, "unpause") {
                 let expiry: u32 = env
                     .storage()
                     .instance()
@@ -516,7 +511,6 @@ impl CustomAccountInterface for SessionAccount {
         Err(Error::UnauthorizedSigner)
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -606,13 +600,8 @@ mod test {
         let spending_cap = 0; // Invalid
 
         env.as_contract(&contract_address, || {
-            let result = SessionAccount::create_session_key(
-                env.clone(),
-                session_key,
-                spending_cap,
-                7,
-                0,
-            );
+            let result =
+                SessionAccount::create_session_key(env.clone(), session_key, spending_cap, 7, 0);
             assert_eq!(result, Err(Error::InvalidSpendingCap));
         });
     }
@@ -629,7 +618,8 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
@@ -654,7 +644,8 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         let new_cap = 200_000_000;
@@ -682,7 +673,13 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Test duration > 30 days
-            let result = SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 31, 0);
+            let result = SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                100_000_000,
+                31,
+                0,
+            );
             assert_eq!(result, Err(Error::InvalidTimeWindow));
         });
     }
@@ -700,25 +697,38 @@ mod test {
         let spending_cap = 50_000_000; // 5 USDC in stroops
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), spending_cap, 7, 0).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                spending_cap,
+                7,
+                0,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // First authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+                .unwrap();
 
             // Check spent amount
             let spent = SessionAccount::get_spent(env.clone(), session_key.clone()).unwrap();
             assert_eq!(spent, 10_000_000);
 
             // Second authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 20_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 20_000_000)
+                .unwrap();
 
             let spent = SessionAccount::get_spent(env.clone(), session_key.clone()).unwrap();
             assert_eq!(spent, 30_000_000);
 
             // Third authorization should exceed cap and fail
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 30_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                30_000_000,
+            );
             assert!(result.is_err());
         });
     }
@@ -737,12 +747,23 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Create session key with 1 day delay
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), spending_cap, 7, 1).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                spending_cap,
+                7,
+                1,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should fail because key is not yet valid
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                10_000_000,
+            );
             assert!(result.is_err());
         });
 
@@ -750,12 +771,20 @@ mod test {
         let session_key2 = Address::generate(&env);
         env.as_contract(&contract_address, || {
             // Create session key with no delay
-            SessionAccount::create_session_key(env.clone(), session_key2.clone(), spending_cap, 7, 0).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key2.clone(),
+                spending_cap,
+                7,
+                0,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed because key is immediately valid
-            SessionAccount::check_auth_with_signer(env.clone(), session_key2.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key2.clone(), 10_000_000)
+                .unwrap();
         });
     }
 
@@ -771,12 +800,14 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed initially
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
@@ -786,7 +817,11 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should now fail
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                10_000_000,
+            );
             assert!(result.is_err());
         });
     }
@@ -802,7 +837,12 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Main account should always be able to authorize regardless of spending
-            SessionAccount::check_auth_with_signer(env.clone(), main_account.clone(), 1_000_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(
+                env.clone(),
+                main_account.clone(),
+                1_000_000_000,
+            )
+            .unwrap();
         });
     }
 
@@ -831,11 +871,14 @@ mod test {
 
         // Grant a 100-ledger emergency pause authorization on the escrow.
         env.as_contract(&contract_address, || {
-            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100).unwrap();
+            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
-            let expiry = SessionAccount::get_emergency_pause_grant(env.clone(), escrow_contract.clone()).unwrap();
+            let expiry =
+                SessionAccount::get_emergency_pause_grant(env.clone(), escrow_contract.clone())
+                    .unwrap();
             assert!(expiry > env.ledger().sequence());
         });
 
@@ -863,7 +906,8 @@ mod test {
         });
 
         env.as_contract(&contract_address, || {
-            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100).unwrap();
+            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100)
+                .unwrap();
         });
 
         let hash: Hash<32> = env

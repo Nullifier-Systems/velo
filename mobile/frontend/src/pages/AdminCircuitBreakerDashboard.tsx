@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import "./AdminCircuitBreakerDashboard.css";
 
 const apiBase = import.meta.env.VITE_API_URL ?? "";
@@ -49,6 +50,7 @@ export default function AdminCircuitBreakerDashboard({
 }: {
   stream?: CircuitBreakerStream;
 }) {
+  const { t } = useTranslation();
   const [keyInput, setKeyInput] = useState("");
   const [adminKey, setAdminKey] = useState<string | null>(null);
   const [contractId, setContractId] = useState("");
@@ -134,7 +136,7 @@ export default function AdminCircuitBreakerDashboard({
       return;
     }
     if (!validateContractId(value)) {
-      setContractError("Contract ID must be 56 characters.");
+      setContractError(t("circuitBreaker.contractIdInvalid"));
       setState(null);
       return;
     }
@@ -194,12 +196,12 @@ export default function AdminCircuitBreakerDashboard({
 
   if (!adminKey) {
     return (
-      <main className="admin-login" aria-label="Admin login">
+      <main className="admin-login" aria-label={t("circuitBreaker.adminLogin")}>
         <form className="admin-card admin-login-card" onSubmit={authenticate}>
-          <p className="admin-eyebrow">Velo operations</p>
-          <h1>Circuit breaker</h1>
-          <p>Enter the internal admin API key to continue.</p>
-          <label htmlFor="cb-admin-key">Admin API key</label>
+          <p className="admin-eyebrow">{t("circuitBreaker.eyebrow")}</p>
+          <h1>{t("circuitBreaker.title")}</h1>
+          <p>{t("circuitBreaker.loginPrompt")}</p>
+          <label htmlFor="cb-admin-key">{t("circuitBreaker.adminKey")}</label>
           <input
             id="cb-admin-key"
             type="password"
@@ -207,7 +209,7 @@ export default function AdminCircuitBreakerDashboard({
             value={keyInput}
             onChange={event => setKeyInput(event.target.value)}
           />
-          <button type="submit" disabled={loading}>{loading ? "Validating…" : "Continue"}</button>
+          <button type="submit" disabled={loading}>{loading ? t("circuitBreaker.validating") : t("circuitBreaker.continue")}</button>
           {error && <p role="alert">{error}</p>}
         </form>
       </main>
@@ -218,34 +220,34 @@ export default function AdminCircuitBreakerDashboard({
     <main className="cb-shell">
       <header className="cb-header">
         <div>
-          <p className="admin-eyebrow">Velo operations</p>
-          <h1>Circuit breaker</h1>
-          <p>Automated reserve-conservation monitoring and manual override.</p>
+          <p className="admin-eyebrow">{t("circuitBreaker.eyebrow")}</p>
+          <h1>{t("circuitBreaker.title")}</h1>
+          <p>{t("circuitBreaker.subtitle")}</p>
         </div>
-        <button className="admin-secondary" onClick={logout}>Sign out</button>
+        <button className="admin-secondary" onClick={logout}>{t("circuitBreaker.signOut")}</button>
       </header>
 
       {streamStatus === "disconnected" && (
         <section className="cb-banner cb-banner-stream" role="alert">
-          <p>Ledger stream is disconnected. Monitoring is paused.</p>
-          <button onClick={reconnectStream}>Reconnect Stream</button>
+          <p>{t("circuitBreaker.streamDisconnected")}</p>
+          <button onClick={reconnectStream}>{t("circuitBreaker.reconnectStream")}</button>
         </section>
       )}
 
       <section className="cb-contract">
-        <label htmlFor="cb-contract-id">Contract ID</label>
+        <label htmlFor="cb-contract-id">{t("circuitBreaker.contractId")}</label>
         <input
           id="cb-contract-id"
           value={contractId}
           onChange={event => setContractId(event.target.value)}
           onBlur={handleContractBlur}
-          placeholder="C…"
+          placeholder={t("circuitBreaker.contractIdPlaceholder")}
         />
         {contractError && <p className="cb-error" role="alert">{contractError}</p>}
       </section>
 
       {error && <p className="cb-error" role="alert">{error}</p>}
-      {lastTx && <p className="cb-success">Broadcast tx: <code>{lastTx}</code></p>}
+      {lastTx && <p className="cb-success">{t("circuitBreaker.broadcastTx")} <code>{lastTx}</code></p>}
 
       {state && (
         <>
@@ -255,31 +257,31 @@ export default function AdminCircuitBreakerDashboard({
               <strong>{state.contractId}</strong>
             </div>
             <dl className="cb-metrics">
-              <div><dt>Locked</dt><dd>{state.totalLockedStroops}</dd></div>
-              <div><dt>Allocated</dt><dd>{state.totalAllocatedStroops}</dd></div>
-              <div><dt>Fees</dt><dd>{state.feeAccumulatorStroops}</dd></div>
-              <div><dt>Last ledger</dt><dd>{state.lastProcessedLedger}</dd></div>
+              <div><dt>{t("circuitBreaker.locked")}</dt><dd>{state.totalLockedStroops}</dd></div>
+              <div><dt>{t("circuitBreaker.allocated")}</dt><dd>{state.totalAllocatedStroops}</dd></div>
+              <div><dt>{t("circuitBreaker.fees")}</dt><dd>{state.feeAccumulatorStroops}</dd></div>
+              <div><dt>{t("circuitBreaker.lastLedger")}</dt><dd>{state.lastProcessedLedger}</dd></div>
             </dl>
             <div className="cb-actions">
               <button
                 onClick={() => { setModal({ action: "FORCE_PAUSE" }); setReason(""); }}
                 disabled={state.status === "HALTED"}
               >
-                Force pause
+                {t("circuitBreaker.forcePause")}
               </button>
               <button
                 className="admin-secondary"
                 onClick={() => { setModal({ action: "UNPAUSE" }); setReason(""); }}
                 disabled={state.status !== "HALTED"}
               >
-                Unpause
+                {t("circuitBreaker.unpause")}
               </button>
             </div>
           </section>
 
           <section className="cb-incidents">
-            <h2>Incident log</h2>
-            <ol aria-label="Circuit-breaker incidents">
+            <h2>{t("circuitBreaker.incidentLog")}</h2>
+            <ol aria-label={t("circuitBreaker.incidentsLabel")}>
               {incidents.map(incident => (
                 <li key={incident.incidentId} data-testid="cb-incident">
                   <code>{incident.violatedInvariant}</code>
@@ -287,14 +289,14 @@ export default function AdminCircuitBreakerDashboard({
                   {incident.txPauseHash && <code>{incident.txPauseHash}</code>}
                 </li>
               ))}
-              {incidents.length === 0 && <li className="admin-empty">No incidents recorded.</li>}
+              {incidents.length === 0 && <li className="admin-empty">{t("circuitBreaker.noIncidents")}</li>}
             </ol>
           </section>
         </>
       )}
 
       {modal && (
-        <div className="cb-modal" role="dialog" aria-modal="true" aria-label="Confirm circuit-breaker override">
+        <div className="cb-modal" role="dialog" aria-modal="true" aria-label={t("circuitBreaker.confirmDialog")}>
           <form
             className="cb-modal-card"
             onSubmit={event => {
@@ -302,19 +304,28 @@ export default function AdminCircuitBreakerDashboard({
               if (reasonValid) void submitOverride(modal.action);
             }}
           >
-            <h2>Confirm {modal.action === "FORCE_PAUSE" ? "pause" : "unpause"}</h2>
-            <p>This broadcasts an emergency {modal.action} for <code>{contractId}</code> on-chain.</p>
-            <label htmlFor="cb-reason">Override reason</label>
+            <h2>{modal.action === "FORCE_PAUSE" ? t("circuitBreaker.confirmPause") : t("circuitBreaker.confirmUnpause")}</h2>
+            <p>
+              {t("circuitBreaker.broadcastWarning", {
+                action: modal.action === "FORCE_PAUSE"
+                  ? t("circuitBreaker.actionPause")
+                  : t("circuitBreaker.actionUnpause"),
+                contractId,
+              })}
+            </p>
+            <label htmlFor="cb-reason">{t("circuitBreaker.overrideReason")}</label>
             <textarea
               id="cb-reason"
               value={reason}
               onChange={event => setReason(event.target.value)}
-              placeholder="Minimum 10 characters…"
+              placeholder={t("circuitBreaker.reasonPlaceholder")}
             />
             <div className="cb-modal-actions">
-              <button type="button" className="admin-secondary" onClick={() => setModal(null)}>Cancel</button>
+              <button type="button" className="admin-secondary" onClick={() => setModal(null)}>{t("common.cancel")}</button>
               <button type="submit" disabled={!reasonValid || loading}>
-                {loading ? "Broadcasting…" : `Confirm ${modal.action === "FORCE_PAUSE" ? "pause" : "unpause"}`}
+                {loading
+                  ? t("circuitBreaker.broadcasting")
+                  : (modal.action === "FORCE_PAUSE" ? t("circuitBreaker.confirmPause") : t("circuitBreaker.confirmUnpause"))}
               </button>
             </div>
           </form>

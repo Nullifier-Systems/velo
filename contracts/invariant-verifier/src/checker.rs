@@ -651,16 +651,28 @@ impl InvariantChecker {
         // New lock while the circuit breaker is effectively paused must fail
         let blocked_trade = BytesN::from_array(&env, &[99u8; 32]);
         let blocked_secret = BytesN::from_array(&env, &[199u8; 32]);
-        let blocked_hash = env.crypto().sha256(&blocked_secret.clone().into()).to_bytes();
+        let blocked_hash = env
+            .crypto()
+            .sha256(&blocked_secret.clone().into())
+            .to_bytes();
         if client
-            .try_lock(&blocked_trade, &seller, &buyer, &10_000, &blocked_hash, &100)
+            .try_lock(
+                &blocked_trade,
+                &seller,
+                &buyer,
+                &10_000,
+                &blocked_hash,
+                &100,
+            )
             .is_ok()
         {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
                 passed: false,
-                error_message: Some("Lock succeeded while circuit breaker was effectively paused!".into()),
+                error_message: Some(
+                    "Lock succeeded while circuit breaker was effectively paused!".into(),
+                ),
             };
         }
 
@@ -691,7 +703,14 @@ impl InvariantChecker {
                 error_message: Some("Paused flag still set after unpause()!".into()),
             };
         }
-        client.lock(&blocked_trade, &seller, &buyer, &10_000, &blocked_hash, &100);
+        client.lock(
+            &blocked_trade,
+            &seller,
+            &buyer,
+            &10_000,
+            &blocked_hash,
+            &100,
+        );
 
         VerificationResult {
             invariant_id: inv.id.clone(),
