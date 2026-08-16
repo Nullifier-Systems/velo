@@ -73,12 +73,28 @@ export function decodeEscrowMonitorEvent(raw: {
 
 interface RpcEvents { events?: unknown[]; latestLedger?: number }
 
+export type AnomalyPattern = "unusual_volume_spike" | "repeated_failed_releases";
+
+export interface EscrowAnomalyFinding {
+  pattern: AnomalyPattern;
+  contractId: string;
+  ledger: number;
+  evidence: Record<string, string | number>;
+}
+
 export interface EscrowAnomalyMonitorOptions {
   contractId: string;
   startLedger?: number;
   pollIntervalMs?: number;
   thresholds?: Partial<AnomalyThresholds>;
   sendAlert?: (alert: WebhookAlert) => Promise<void>;
+  /**
+   * (#374) Circuit-breaker arbitration hook. Invoked whenever an anomaly
+   * pattern trips so the automation layer can record an incident and, for
+   * hard patterns, trigger an emergency pause. Defaults to no-op; wired in
+   * index.ts against the `circuit_breaker_incidents` store.
+   */
+  onAnomaly?: (finding: EscrowAnomalyFinding) => Promise<void>;
 }
 
 export class EscrowAnomalyMonitor {
@@ -86,6 +102,7 @@ export class EscrowAnomalyMonitor {
   private readonly pollIntervalMs: number;
   private readonly thresholds: AnomalyThresholds;
   private readonly sendAlert: (alert: WebhookAlert) => Promise<void>;
+  private readonly onAnomaly: (finding: EscrowAnomalyFinding) => Promise<void>;
   private locks: EscrowMonitorEvent[] = [];
   private failures = new Map<string, EscrowMonitorEvent[]>();
   private alertedVolumeWindow = false;
@@ -98,6 +115,7 @@ export class EscrowAnomalyMonitor {
     this.pollIntervalMs = options.pollIntervalMs ?? 5000;
     this.thresholds = { ...DEFAULT_ANOMALY_THRESHOLDS, ...options.thresholds };
     this.sendAlert = options.sendAlert ?? sendWebhookAlert;
+    this.onAnomaly = options.onAnomaly ?? (async () => undefined);
   }
 
   async process(event: EscrowMonitorEvent): Promise<void> {
@@ -113,11 +131,19 @@ export class EscrowAnomalyMonitor {
     if (!anomalous) { this.alertedVolumeWindow = false; return; }
     if (this.alertedVolumeWindow) return;
     this.alertedVolumeWindow = true;
+    const finding: EscrowAnomalyFinding = {
+      pattern: "unusual_volume_spike",
+      contractId: this.options.contractId,
+      ledger: event.ledger,
+      evidence: { lock_count: this.locks.length, total_stroops: total.toString(), window_ms: this.thresholds.volumeWindowMs },
+    };
     await this.sendAlert({
       title: "Escrow volume anomaly",
       text: `Escrow lock volume crossed its ${this.thresholds.volumeWindowMs / 60_000}-minute threshold.`,
       fields: { Pattern: "unusual_volume_spike", "Contract ID": this.options.contractId, "Lock count": String(this.locks.length), "Total stroops": total.toString(), Ledger: String(event.ledger) },
     });
+    // (#374) Route the finding into the circuit-breaker arbitration engine.
+    await this.onAnomaly(finding);
   }
 
   private async processFailedRelease(event: EscrowMonitorEvent): Promise<void> {
@@ -130,11 +156,19 @@ export class EscrowAnomalyMonitor {
     }
     if (this.alertedFailures.has(event.tradeId)) return;
     this.alertedFailures.add(event.tradeId);
+    const finding: EscrowAnomalyFinding = {
+      pattern: "repeated_failed_releases",
+      contractId: this.options.contractId,
+      ledger: event.ledger,
+      evidence: { trade_id: event.tradeId, failure_count: recent.length, window_ms: this.thresholds.failedReleaseWindowMs },
+    };
     await this.sendAlert({
       title: "Repeated failed escrow releases",
       text: `Trade \`${event.tradeId}\` had ${recent.length} failed release attempts.`,
       fields: { Pattern: "repeated_failed_releases", "Contract ID": this.options.contractId, "Trade ID": event.tradeId, "Failure count": String(recent.length), Ledger: String(event.ledger) },
     });
+    // (#374) Route the finding into the circuit-breaker arbitration engine.
+    await this.onAnomaly(finding);
   }
 
   async pollOnce(): Promise<void> {

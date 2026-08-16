@@ -25,7 +25,7 @@ fn test_framework_passes_on_correct_contract() {
     let checker = InvariantChecker::new(spec);
     let results = checker.verify_all();
 
-    assert_eq!(results.len(), 6, "Expected 6 invariants to be tested");
+    assert_eq!(results.len(), 7, "Expected 7 invariants to be tested");
     for res in &results {
         assert!(
             res.passed,

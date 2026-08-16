@@ -10,10 +10,17 @@
 //! - Instant revocation by the main account
 //! - Fallback to main account signature for any operation
 //! - On-chain enforcement of all bounds via __check_auth
+//! - Emergency circuit-breaker pause grants (#374): the main account can grant
+//!   this account the authority to authorize `pause`/`unpause` on a specific
+//!   escrow contract, letting the API's automated arbitration engine halt a
+//!   compromised escrow within its SLA without holding a per-escrow admin key.
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env, Symbol,
+    auth::{Context, ContractContext, CustomAccountInterface},
+    contract, contracterror, contractimpl, contracttype,
+    crypto::Hash,
+    Address, BytesN, Env, Symbol, Vec,
 };
 
 #[contracttype]
@@ -25,6 +32,9 @@ pub enum DataKey {
     SessionKey(Address),
     /// Total spent by a session key: Spent(Address) -> i128
     Spent(Address),
+    /// Emergency circuit-breaker pause grant (#374):
+    /// PauseGrant(escrow_contract) -> expiry ledger
+    PauseGrant(Address),
 }
 
 #[contracttype]
@@ -69,6 +79,10 @@ pub enum Error {
     SpendingCapExceeded = 11,
     /// Unauthorized signer
     UnauthorizedSigner = 12,
+    /// No emergency pause grant covers this escrow contract
+    PauseGrantNotFound = 13,
+    /// Emergency pause grant has expired
+    PauseGrantExpired = 14,
 }
 
 const DAY_IN_LEDGERS: u64 = 8640; // ~24 hours at 10s per ledger
@@ -220,8 +234,10 @@ impl SessionAccount {
         session_info.spending_cap = new_spending_cap;
         env.storage().instance().set(&key, &session_info);
 
-        env.events()
-            .publish((Symbol::new(&env, "spending_cap_updated"),), (session_key, new_spending_cap));
+        env.events().publish(
+            (Symbol::new(&env, "spending_cap_updated"),),
+            (session_key, new_spending_cap),
+        );
 
         Ok(())
     }
@@ -251,24 +267,88 @@ impl SessionAccount {
             .get(&DataKey::MainAccount)
             .ok_or(Error::NotInitialized)
     }
+
+    /// Grant this session account the authority to authorize emergency
+    /// `pause`/`unpause` on a specific escrow contract (#374).
+    ///
+    /// Only the main account can grant. The grant expires after
+    /// `duration_ledgers`, so a stolen or rotated session key cannot pause
+    /// escrows indefinitely. The API's automated circuit breaker calls this
+    /// once per escrow deployment (via a main-account signed transaction);
+    /// every subsequent `pause(env, [])` on that escrow is then authorized
+    /// by this account's `__check_auth` within the grant window.
+    pub fn grant_emergency_pause(
+        env: Env,
+        escrow_contract: Address,
+        duration_ledgers: u32,
+    ) -> Result<(), Error> {
+        let main_account: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MainAccount)
+            .ok_or(Error::NotInitialized)?;
+
+        main_account.require_auth();
+
+        if duration_ledgers == 0 {
+            return Err(Error::InvalidTimeWindow);
+        }
+
+        let expiry = env.ledger().sequence().saturating_add(duration_ledgers);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseGrant(escrow_contract.clone()), &expiry);
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_pause_granted"),),
+            (escrow_contract, expiry),
+        );
+
+        Ok(())
+    }
+
+    /// Revoke a pending emergency pause grant early.
+    pub fn revoke_emergency_pause(env: Env, escrow_contract: Address) -> Result<(), Error> {
+        let main_account: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MainAccount)
+            .ok_or(Error::NotInitialized)?;
+
+        main_account.require_auth();
+
+        let key = DataKey::PauseGrant(escrow_contract.clone());
+        if !env.storage().instance().has(&key) {
+            return Err(Error::PauseGrantNotFound);
+        }
+        env.storage().instance().remove(&key);
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_pause_revoked"),),
+            escrow_contract,
+        );
+
+        Ok(())
+    }
+
+    /// Remaining ledger count for the emergency pause grant on `escrow_contract`.
+    pub fn get_emergency_pause_grant(env: Env, escrow_contract: Address) -> Result<u32, Error> {
+        let expiry: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseGrant(escrow_contract))
+            .ok_or(Error::PauseGrantNotFound)?;
+        Ok(expiry)
+    }
 }
 
-// Implement the Soroban account interface with custom authorization
-// In Soroban SDK v21, custom account contracts implement __check_auth as a contract function
+/// Legacy helper that enforces session-key bounds against an explicit
+/// `(signer, amount)` pair — kept for backwards compatibility and used by the
+/// API before full auth-context plumbing was wired. Prefer the
+/// `CustomAccountInterface` implementation for new integrations.
 #[contractimpl]
 impl SessionAccount {
     /// Custom authorization hook that enforces session key bounds.
-    /// This is called by Soroban for every operation authorized by this contract.
-    /// 
-    /// Note: This is a simplified implementation for demonstration. In production,
-    /// you would need to:
-    /// 1. Parse the actual signature from the auth context
-    /// 2. Verify the Ed25519 signature against the message
-    /// 3. Extract the signer address from the signature
-    /// 4. Parse the Soroban invocation to determine token amounts
-    /// 
-    /// For this demo, we accept the signer address directly as a parameter
-    /// to avoid complex signature verification logic.
     pub fn check_auth_with_signer(
         env: Env,
         signer: Address,
@@ -276,9 +356,13 @@ impl SessionAccount {
     ) -> Result<(), soroban_sdk::Error> {
         let main_account: Address = match env.storage().instance().get(&DataKey::MainAccount) {
             Some(addr) => addr,
-            None => return Err(soroban_sdk::Error::from_contract_error(Error::NotInitialized as u32)),
+            None => {
+                return Err(soroban_sdk::Error::from_contract_error(
+                    Error::NotInitialized as u32,
+                ))
+            }
         };
-        
+
         // If the signer is the main account, always allow
         if signer == main_account {
             return Ok(());
@@ -288,54 +372,150 @@ impl SessionAccount {
         let key = DataKey::SessionKey(signer.clone());
         let session_info: SessionKeyInfo = match env.storage().instance().get(&key) {
             Some(info) => info,
-            None => return Err(soroban_sdk::Error::from_contract_error(Error::UnauthorizedSigner as u32)),
+            None => {
+                return Err(soroban_sdk::Error::from_contract_error(
+                    Error::UnauthorizedSigner as u32,
+                ))
+            }
         };
 
         // Check if session key is active
         if !session_info.active {
-            return Err(soroban_sdk::Error::from_contract_error(Error::SessionKeyInactive as u32));
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::SessionKeyInactive as u32,
+            ));
         }
 
         // Check time window
         let current_ledger = env.ledger().sequence();
         if u64::from(current_ledger) < session_info.valid_from_ledger {
-            return Err(soroban_sdk::Error::from_contract_error(Error::SessionKeyNotYetValid as u32));
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::SessionKeyNotYetValid as u32,
+            ));
         }
         if u64::from(current_ledger) > session_info.valid_until_ledger {
-            return Err(soroban_sdk::Error::from_contract_error(Error::SessionKeyExpired as u32));
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::SessionKeyExpired as u32,
+            ));
         }
 
         if amount <= 0 {
-            return Err(soroban_sdk::Error::from_contract_error(Error::InvalidSpendingCap as u32));
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::InvalidSpendingCap as u32,
+            ));
         }
 
         // Check spending cap
         let spent_key = DataKey::Spent(signer.clone());
         let current_spent: i128 = env.storage().instance().get(&spent_key).unwrap_or(0);
-        
+
         let new_spent = match current_spent.checked_add(amount) {
             Some(val) => val,
-            None => return Err(soroban_sdk::Error::from_contract_error(Error::SpendingCapExceeded as u32)),
+            None => {
+                return Err(soroban_sdk::Error::from_contract_error(
+                    Error::SpendingCapExceeded as u32,
+                ))
+            }
         };
 
         if new_spent > session_info.spending_cap {
-            return Err(soroban_sdk::Error::from_contract_error(Error::SpendingCapExceeded as u32));
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::SpendingCapExceeded as u32,
+            ));
         }
 
         // Update the spent amount
-        env.storage()
-            .instance()
-            .set(&spent_key, &new_spent);
+        env.storage().instance().set(&spent_key, &new_spent);
 
         Ok(())
     }
 }
 
+// Implement the Soroban custom account interface.
+//
+// `__check_auth` is invoked by the host whenever an operation is authorized
+// by this contract's address (e.g. the escrow contract calls
+// `admin.require_auth()` where the admin is this session account). It:
+//   1. Authorizes emergency `pause`/`unpause` on escrows covered by an
+//      unexpired `PauseGrant` (#374).
+//   2. Always authorizes the main account (attached as a delegated signer).
+//   3. Otherwise requires an active, in-window session key to be attached as
+//      a delegated signer.
+#[contractimpl]
+impl CustomAccountInterface for SessionAccount {
+    type Signature = ();
+    type Error = Error;
+
+    fn __check_auth(
+        env: Env,
+        _signature_payload: Hash<32>,
+        _signatures: (),
+        auth_contexts: Vec<Context>,
+    ) -> Result<(), Error> {
+        let main_account: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MainAccount)
+            .ok_or(Error::NotInitialized)?;
+
+        // (1) Emergency circuit-breaker pause grants (#374).
+        for ctx in auth_contexts.iter() {
+            let (contract, fn_name) = match ctx {
+                Context::Contract(ContractContext {
+                    contract, fn_name, ..
+                }) => (contract, fn_name),
+                _ => continue,
+            };
+            if fn_name == Symbol::new(&env, "pause") || fn_name == Symbol::new(&env, "unpause") {
+                let expiry: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PauseGrant(contract.clone()))
+                    .unwrap_or(0);
+                if expiry == 0 {
+                    return Err(Error::PauseGrantNotFound);
+                }
+                if u32::from(env.ledger().sequence()) > expiry {
+                    return Err(Error::PauseGrantExpired);
+                }
+                return Ok(());
+            }
+        }
+
+        // (2) The main account always authorizes.
+        let delegated = env.custom_account().get_delegated_signers();
+        if delegated.iter().any(|d| d == main_account) {
+            return Ok(());
+        }
+
+        // (3) Otherwise an active, in-window session key must be attached.
+        for signer in delegated.iter() {
+            let info: SessionKeyInfo = env
+                .storage()
+                .instance()
+                .get(&DataKey::SessionKey(signer.clone()))
+                .ok_or(Error::UnauthorizedSigner)?;
+            if !info.active {
+                return Err(Error::SessionKeyInactive);
+            }
+            let current_ledger = u64::from(env.ledger().sequence());
+            if current_ledger < info.valid_from_ledger {
+                return Err(Error::SessionKeyNotYetValid);
+            }
+            if current_ledger > info.valid_until_ledger {
+                return Err(Error::SessionKeyExpired);
+            }
+            return Ok(());
+        }
+
+        Err(Error::UnauthorizedSigner)
+    }
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
 
     fn setup_env() -> (Env, Address) {
         let env = Env::default();
@@ -420,13 +600,8 @@ mod test {
         let spending_cap = 0; // Invalid
 
         env.as_contract(&contract_address, || {
-            let result = SessionAccount::create_session_key(
-                env.clone(),
-                session_key,
-                spending_cap,
-                7,
-                0,
-            );
+            let result =
+                SessionAccount::create_session_key(env.clone(), session_key, spending_cap, 7, 0);
             assert_eq!(result, Err(Error::InvalidSpendingCap));
         });
     }
@@ -443,7 +618,8 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
@@ -468,7 +644,8 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         let new_cap = 200_000_000;
@@ -496,7 +673,13 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Test duration > 30 days
-            let result = SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 31, 0);
+            let result = SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                100_000_000,
+                31,
+                0,
+            );
             assert_eq!(result, Err(Error::InvalidTimeWindow));
         });
     }
@@ -514,25 +697,38 @@ mod test {
         let spending_cap = 50_000_000; // 5 USDC in stroops
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), spending_cap, 7, 0).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                spending_cap,
+                7,
+                0,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // First authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+                .unwrap();
 
             // Check spent amount
             let spent = SessionAccount::get_spent(env.clone(), session_key.clone()).unwrap();
             assert_eq!(spent, 10_000_000);
 
             // Second authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 20_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 20_000_000)
+                .unwrap();
 
             let spent = SessionAccount::get_spent(env.clone(), session_key.clone()).unwrap();
             assert_eq!(spent, 30_000_000);
 
             // Third authorization should exceed cap and fail
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 30_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                30_000_000,
+            );
             assert!(result.is_err());
         });
     }
@@ -551,12 +747,23 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Create session key with 1 day delay
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), spending_cap, 7, 1).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                spending_cap,
+                7,
+                1,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should fail because key is not yet valid
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                10_000_000,
+            );
             assert!(result.is_err());
         });
 
@@ -564,12 +771,20 @@ mod test {
         let session_key2 = Address::generate(&env);
         env.as_contract(&contract_address, || {
             // Create session key with no delay
-            SessionAccount::create_session_key(env.clone(), session_key2.clone(), spending_cap, 7, 0).unwrap();
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key2.clone(),
+                spending_cap,
+                7,
+                0,
+            )
+            .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed because key is immediately valid
-            SessionAccount::check_auth_with_signer(env.clone(), session_key2.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key2.clone(), 10_000_000)
+                .unwrap();
         });
     }
 
@@ -585,12 +800,14 @@ mod test {
         let session_key = Address::generate(&env);
 
         env.as_contract(&contract_address, || {
-            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0).unwrap();
+            SessionAccount::create_session_key(env.clone(), session_key.clone(), 100_000_000, 7, 0)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed initially
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+                .unwrap();
         });
 
         env.as_contract(&contract_address, || {
@@ -600,7 +817,11 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should now fail
-            let result = SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000);
+            let result = SessionAccount::check_auth_with_signer(
+                env.clone(),
+                session_key.clone(),
+                10_000_000,
+            );
             assert!(result.is_err());
         });
     }
@@ -616,7 +837,132 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Main account should always be able to authorize regardless of spending
-            SessionAccount::check_auth_with_signer(env.clone(), main_account.clone(), 1_000_000_000).unwrap();
+            SessionAccount::check_auth_with_signer(
+                env.clone(),
+                main_account.clone(),
+                1_000_000_000,
+            )
+            .unwrap();
+        });
+    }
+
+    // --- Emergency circuit-breaker pause grants (#374) ---
+
+    fn pause_contexts(env: &Env, escrow_contract: &Address) -> Vec<Context> {
+        soroban_sdk::vec![
+            env,
+            Context::Contract(ContractContext {
+                contract: escrow_contract.clone(),
+                fn_name: Symbol::new(env, "pause"),
+                args: soroban_sdk::Vec::new(env),
+            })
+        ]
+    }
+
+    #[test]
+    fn test_emergency_pause_grant_lifecycle() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+        let escrow_contract = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account.clone()).unwrap();
+        });
+
+        // Grant a 100-ledger emergency pause authorization on the escrow.
+        env.as_contract(&contract_address, || {
+            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100)
+                .unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let expiry =
+                SessionAccount::get_emergency_pause_grant(env.clone(), escrow_contract.clone())
+                    .unwrap();
+            assert!(expiry > env.ledger().sequence());
+        });
+
+        // Revocation makes the grant unreadable.
+        env.as_contract(&contract_address, || {
+            SessionAccount::revoke_emergency_pause(env.clone(), escrow_contract.clone()).unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            assert_eq!(
+                SessionAccount::get_emergency_pause_grant(env.clone(), escrow_contract.clone()),
+                Err(Error::PauseGrantNotFound)
+            );
+        });
+    }
+
+    #[test]
+    fn test_check_auth_authorizes_pause_with_grant() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+        let escrow_contract = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account.clone()).unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 100)
+                .unwrap();
+        });
+
+        let hash: Hash<32> = env
+            .crypto()
+            .sha256(&BytesN::from_array(&env, &[0u8; 32]).into());
+        let contexts = pause_contexts(&env, &escrow_contract);
+        env.as_contract(&contract_address, || {
+            SessionAccount::__check_auth(env.clone(), hash.clone(), (), contexts).unwrap();
+        });
+    }
+
+    #[test]
+    fn test_check_auth_rejects_pause_without_grant() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+        let escrow_contract = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account.clone()).unwrap();
+        });
+
+        let hash: Hash<32> = env
+            .crypto()
+            .sha256(&BytesN::from_array(&env, &[0u8; 32]).into());
+        let contexts = pause_contexts(&env, &escrow_contract);
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::__check_auth(env.clone(), hash.clone(), (), contexts);
+            assert_eq!(result, Err(Error::PauseGrantNotFound));
+        });
+    }
+
+    #[test]
+    fn test_check_auth_rejects_expired_grant() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+        let escrow_contract = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account.clone()).unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::grant_emergency_pause(env.clone(), escrow_contract.clone(), 5).unwrap();
+        });
+
+        // Advance the ledger past the grant expiry.
+        env.ledger().with_mut(|li| li.sequence_number += 10);
+
+        let hash: Hash<32> = env
+            .crypto()
+            .sha256(&BytesN::from_array(&env, &[0u8; 32]).into());
+        let contexts = pause_contexts(&env, &escrow_contract);
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::__check_auth(env.clone(), hash.clone(), (), contexts);
+            assert_eq!(result, Err(Error::PauseGrantExpired));
         });
     }
 }

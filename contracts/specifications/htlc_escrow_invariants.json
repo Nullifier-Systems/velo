@@ -50,6 +50,14 @@
       "description": "Privileged admin operations (resolve, pause, set_platform_fee) require valid admin auth or N-of-M multisig threshold. Unauthorized calls must fail.",
       "expression": "unauthorized_caller => privileged_op() == Err(Unauthorized | NotAuthorized)",
       "severity": "CRITICAL"
+    },
+    {
+      "id": "INV-07",
+      "name": "Reserve Conservation & Circuit-Breaker Pause",
+      "category": "Accounting",
+      "description": "The escrow contract's token balance must always equal the sum of amounts held by non-terminal trades (reserve conservation). Arming the circuit-breaker pause must take effect after PAUSE_DELAY_LEDGERS, reject new locks with ContractPaused, and never move existing reserves. Unpausing restores lock operation.",
+      "expression": "balance(contract) == sum(amount: status in {Locked, Disputed}) && paused_effective => lock() == Err(ContractPaused) && paused_effective => sum_active_reserves_unchanged",
+      "severity": "CRITICAL"
     }
   ]
 }

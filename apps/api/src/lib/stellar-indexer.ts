@@ -17,6 +17,14 @@ export interface StellarIndexerOptions {
   retryMinMs?: number;
   retryMaxMs?: number;
   onTrace?: (point: StellarIndexerTracePoint) => void;
+  /**
+   * (#374) Formal invariant verification hook. Invoked after each committed
+   * batch, once EventStore.process has durably indexed `throughLedger`. The
+   * default wiring in index.ts reconciles the reconstructed contract totals
+   * against the on-chain balance and trips the automated circuit breaker on a
+   * VIOLATED verdict.
+   */
+  verify?: (throughLedger: number, events: IndexedEscrowEvent[]) => Promise<void>;
 }
 
 export type StellarIndexerTraceStage =
@@ -108,6 +116,11 @@ export class StellarEscrowIndexer {
     for (const item of deltas) escrowDeltaFeed.publish(item);
     if (events.length) {
       this.logger.info({ throughLedger, eventCount: events.length }, "stellar ledger batch indexed");
+    }
+    // (#374) Invariant verification runs after the batch is durably indexed —
+    // a VIOLATED verdict flips the contract to HALTED via the circuit breaker.
+    if (this.options.verify) {
+      await this.options.verify(throughLedger, events);
     }
     return events.length;
   }

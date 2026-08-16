@@ -9,6 +9,12 @@ import {
   normalizeClock,
   type VectorClock,
 } from "./vector-clock.js";
+import {
+  mergeLedgerClocks,
+  canDeliverLedger,
+  sortLedgerFrames,
+  ledgerHeight,
+} from "./vector-clock.js";
 
 describe("Vector Clock Operations", () => {
   describe("incrementClock", () => {
@@ -256,6 +262,98 @@ describe("Vector Clock Operations", () => {
       const uniqueSellerValues = new Set(sellerSequence);
       expect(uniqueBuyerValues.size).toBe(50); // 50 buyer messages
       expect(uniqueSellerValues.size).toBe(50); // 50 seller messages
+    });
+  });
+
+  describe("mergeLedgerClocks", () => {
+    it("takes the componentwise maximum ledger", () => {
+      const local = { "rpc-a": 100, "rpc-b": 90 };
+      const received = { "rpc-a": 98, "rpc-b": 95 };
+      expect(mergeLedgerClocks(local, received)).toEqual({
+        "rpc-a": 100,
+        "rpc-b": 95,
+      });
+    });
+
+    it("never regresses a source high-water mark", () => {
+      const local = { "rpc-a": 105 };
+      expect(mergeLedgerClocks(local, { "rpc-a": 103 })).toEqual({
+        "rpc-a": 105,
+      });
+    });
+
+    it("adds unknown sources", () => {
+      expect(
+        mergeLedgerClocks({ "rpc-a": 100 }, { "rpc-b": 101 }),
+      ).toEqual({ "rpc-a": 100, "rpc-b": 101 });
+    });
+  });
+
+  describe("canDeliverLedger", () => {
+    it("accepts the exact next ledger for the frame source", () => {
+      const local = { "rpc-a": 100, "rpc-b": 99 };
+      expect(canDeliverLedger(local, "rpc-a", { "rpc-a": 101, "rpc-b": 99 })).toBe(
+        true,
+      );
+    });
+
+    it("rejects a skipped ledger (gap) for the frame source", () => {
+      const local = { "rpc-a": 100 };
+      expect(canDeliverLedger(local, "rpc-a", { "rpc-a": 102 })).toBe(false);
+    });
+
+    it("rejects a duplicate ledger (no advance)", () => {
+      const local = { "rpc-a": 100 };
+      expect(canDeliverLedger(local, "rpc-a", { "rpc-a": 100 })).toBe(false);
+    });
+
+    it("rejects when another source has run ahead", () => {
+      const local = { "rpc-a": 100, "rpc-b": 99 };
+      expect(canDeliverLedger(local, "rpc-a", { "rpc-a": 101, "rpc-b": 101 })).toBe(
+        false,
+      );
+    });
+
+    it("accepts an empty ledger as a fresh source start", () => {
+      const local = {};
+      expect(canDeliverLedger(local, "rpc-a", { "rpc-a": 1 })).toBe(true);
+    });
+  });
+
+  describe("sortLedgerFrames", () => {
+    it("orders causally preceding frames first", () => {
+      const frames: Array<{ source: string; clock: Record<string, number>; frame: string }> = [
+        { source: "rpc-b", clock: { "rpc-a": 100, "rpc-b": 101 }, frame: "b" },
+        { source: "rpc-a", clock: { "rpc-a": 101, "rpc-b": 101 }, frame: "a" },
+      ];
+      expect(sortLedgerFrames(frames).map((f) => f.frame)).toEqual(["b", "a"]);
+    });
+
+    it("breaks concurrent ties by lowest ledger then source name", () => {
+      const frames: Array<{ source: string; clock: Record<string, number>; frame: string }> = [
+        { source: "rpc-b", clock: { "rpc-b": 100 }, frame: "b" },
+        { source: "rpc-a", clock: { "rpc-a": 90 }, frame: "a" },
+        { source: "rpc-c", clock: { "rpc-c": 95 }, frame: "c" },
+      ];
+      expect(sortLedgerFrames(frames).map((f) => f.frame)).toEqual(["a", "c", "b"]);
+    });
+
+    it("is stable for identical clocks and sources", () => {
+      const frames: Array<{ source: string; clock: Record<string, number>; frame: number }> = [
+        { source: "rpc-a", clock: { "rpc-a": 50 }, frame: 1 },
+        { source: "rpc-a", clock: { "rpc-a": 50 }, frame: 2 },
+      ];
+      expect(sortLedgerFrames(frames).map((f) => f.frame)).toEqual([1, 2]);
+    });
+  });
+
+  describe("ledgerHeight", () => {
+    it("returns the maximum ledger across sources", () => {
+      expect(ledgerHeight({ "rpc-a": 10, "rpc-b": 42, "rpc-c": 7 })).toBe(42);
+    });
+
+    it("returns 0 for an empty clock", () => {
+      expect(ledgerHeight({})).toBe(0);
     });
   });
 });
