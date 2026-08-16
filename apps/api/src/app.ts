@@ -26,6 +26,7 @@ import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
 import { Pool } from "pg";
 import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
+import { circuitBreakerRoutes } from "./routes/circuit-breaker.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -352,3 +353,4 @@ app.register(adminRoutes, { prefix: "/api/v1" });
 app.register(sessionRoutes, { prefix: "/api/v1" });
 app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
+app.register(circuitBreakerRoutes, { prefix: "/api/v1" });

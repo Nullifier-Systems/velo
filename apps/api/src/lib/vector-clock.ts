@@ -166,3 +166,76 @@ export function normalizeClock(
   }
   return normalized;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Ledger vector clocks (#374)                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A ledger vector clock tracks per-source last-observed ledger sequences so
+ * the indexer can prove it has ingested every causally preceding frame even
+ * when the RPC stream delivers them out of order. Format:
+ *   { [source: string]: ledgerSequence }
+ * e.g. { "rpc-a": 49281901, "rpc-b": 49281899 }.
+ */
+export type LedgerVectorClock = VectorClock;
+
+/**
+ * Merge two ledger vector clocks by taking the componentwise maximum ledger
+ * sequence. Called when an out-of-order frame arrives from a source we have
+ * already heard from, so we can never regress a source's high-water mark.
+ */
+export function mergeLedgerClocks(
+  local: LedgerVectorClock,
+  received: LedgerVectorClock,
+): LedgerVectorClock {
+  return mergeClock(local, received);
+}
+
+/**
+ * True when `candidate` may be persisted without risking out-of-order state
+ * drift: the frame's own source must be exactly one ledger ahead of our
+ * high-water mark for that source, and no other source may have run ahead
+ * of the frame's observed positions.
+ */
+export function canDeliverLedger(
+  local: LedgerVectorClock,
+  source: string,
+  frameClock: LedgerVectorClock,
+): boolean {
+  const sourceLedger = frameClock[source] ?? 0;
+  const localSourceLedger = local[source] ?? 0;
+  if (sourceLedger !== localSourceLedger + 1) return false;
+  for (const [participant, ledger] of Object.entries(frameClock)) {
+    if (participant !== source && (local[participant] ?? 0) < ledger) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Deterministically order out-of-order ledger frames so they are replayed in
+ * causal order before persistence. Precedence is: strictly-happens-before
+ * (per componentwise comparison), then lower ledger first, then source name
+ * as a stable tiebreak.
+ */
+export function sortLedgerFrames<T>(
+  frames: Array<{ source: string; clock: LedgerVectorClock; frame: T }>,
+): Array<{ source: string; clock: LedgerVectorClock; frame: T }> {
+  return [...frames].sort((a, b) => {
+    const before = happensBefore(a.clock, b.clock);
+    const after = happensBefore(b.clock, a.clock);
+    if (before) return -1;
+    if (after) return 1;
+    const aMin = ledgerHeight(a.clock);
+    const bMin = ledgerHeight(b.clock);
+    if (aMin !== bMin) return aMin - bMin;
+    return a.source < b.source ? -1 : a.source > b.source ? 1 : 0;
+  });
+}
+
+/** The highest ledger sequence observed across all sources in a clock. */
+export function ledgerHeight(clock: LedgerVectorClock): number {
+  return Math.max(0, ...Object.values(clock).map(Number));
+}

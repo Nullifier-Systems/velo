@@ -1,4 +1,5 @@
 import {
+  Address,
   BASE_FEE,
   FeeBumpTransaction,
   Keypair,
@@ -1252,8 +1253,157 @@ export async function submitChainReleaseToLockTx(
   return { hash: result.hash, newTradeId: newTradeId || result.hash };
 }
 
-/** Read authoritative trade state from the Soroban contract. */
-export async function getTradeState(
+// ---------------------------------------------------------------------------
+// Automated circuit-breaker arbitration engine (#374)
+// ---------------------------------------------------------------------------
+
+/** Keypair used to sign emergency pause/unpause transactions. */
+export function loadSessionAccountKeypair(): Keypair {
+  const secret =
+    process.env.SESSION_ACCOUNT_SECRET_KEY ??
+    process.env.CIRCUIT_BREAKER_SESSION_KEY ??
+    process.env.BUYER_SECRET_KEY;
+  if (!secret) {
+    throw new Error(
+      "SESSION_ACCOUNT_SECRET_KEY not set — emergency circuit-breaker signing requires a session-account key. " +
+        "Store it in an HSM or secure secret vault; never in the codebase.",
+    );
+  }
+  return Keypair.fromSecret(secret);
+}
+
+export interface CircuitBreakerBroadcastParams {
+  contractId: string;
+  action: "FORCE_PAUSE" | "UNPAUSE";
+  /** Ledger offset allowed before the broadcast must be observable. */
+  pollTimeout?: number;
+}
+
+export interface CircuitBreakerBroadcastResult {
+  hash: string;
+  status: string;
+  ledger: number;
+  fn: string;
+}
+
+/**
+ * Sign and submit the escrow contract's `pause()` / `unpause()` with the
+ * emergency session-account key, then wait for on-chain confirmation.
+ *
+ * In single-admin mode `pause(env, signers)` authenticates the caller as the
+ * admin (`require_multisig` falls through to `admin.require_auth()`), so the
+ * session account — registered as the escrow admin — authorizes the call by
+ * signing the transaction. Multisig deployments pass the session key in the
+ * signers set instead.
+ */
+export async function broadcastCircuitBreakerPause(
+  params: CircuitBreakerBroadcastParams,
+  logger: StellarLogger = noopLogger,
+): Promise<CircuitBreakerBroadcastResult> {
+  const fn = params.action === "FORCE_PAUSE" ? "pause" : "unpause";
+  const signer = loadSessionAccountKeypair();
+  const pollTimeout = params.pollTimeout ?? RPC_TIMEOUTS.genericPoll;
+  const log = logger.child({ contract: params.contractId, fn });
+
+  const account = await rpcTimeout(
+    `${fn}/getAccount`,
+    RPC_TIMEOUTS.genericBuildSim,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: fn,
+        args: [xdr.ScVal.scvVec([])],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    `${fn}/simulateTransaction`,
+    RPC_TIMEOUTS.genericBuildSim,
+    async () => server.simulateTransaction(tx),
+  );
+  if (Api.isSimulationError(sim)) {
+    log.error({ error: sim.error }, "circuit-breaker simulation failed");
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    log.error({ error: sendResult.errorResult }, "circuit-breaker submission failed");
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const confirmed = await rpcTimeout(`${fn}/poll`, pollTimeout, async () => {
+    let result = await server.getTransaction(sendResult.hash);
+    while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+      await new Promise((r) => setTimeout(r, 1000));
+      result = await server.getTransaction(sendResult.hash);
+    }
+    return result;
+  });
+
+  if (confirmed.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${confirmed.status}`);
+  }
+
+  log.info({ hash: sendResult.hash, ledger: confirmed.ledger }, "circuit-breaker tx confirmed");
+  return {
+    hash: sendResult.hash,
+    status: confirmed.status,
+    ledger: confirmed.ledger || 0,
+    fn,
+  };
+}
+
+/**
+ * Read the escrow contract's actual USDC/token balance for the formal
+ * reserve-conservation invariant (#374).
+ *
+ * Soroban token contracts persist holder balances as a ContractData entry
+ * keyed by the holder `Address` (scval) in the token contract's domain.
+ * Returns null when the entry is absent or unreadable so the invariant
+ * pipeline can skip the reconciliation gracefully (see
+ * `StellarIndexerWorker.runInvariantCheck`).
+ */
+export async function readEscrowTokenBalance(
+  escrowContractId: string,
+  tokenContractId: string,
+): Promise<bigint | null> {
+  const holder = new Address(escrowContractId);
+  const key = xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Address(tokenContractId).toScAddress(),
+      key: holder.toScVal(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+  try {
+    const result = await server.getLedgerEntries(key);
+    const entry = result.entries?.[0];
+    if (!entry) return null;
+    const data = entry.val;
+    if (data.switch() !== xdr.LedgerEntryType.contractData()) return null;
+    const native = scValToNative(data.contractData().val());
+    if (typeof native === "bigint") return native;
+    if (typeof native === "number") return BigInt(Math.trunc(native));
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read authoritative trade state from the Soroban contract. */export async function getTradeState(
   contractId: string,
   tradeId: string,
   _caller?: string,

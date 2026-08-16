@@ -47,3 +47,37 @@ export interface CashRequest {
   qr_payload: string;
   status: "pending" | "locked" | "released" | "refunded";
 }
+
+/* ------------------------------------------------------------------ */
+/*  Real-time ledger indexer & circuit breaker (#374)                 */
+/* ------------------------------------------------------------------ */
+
+/** Formal invariant verdict emitted by the checker every closed ledger. */
+export type InvariantCheckStatus = "HEALTHY" | "WARNING" | "VIOLATED" | "HALTED";
+
+/** What the automated arbitration engine decided to do with a violation. */
+export type CircuitBreakerAction =
+  | "NO_ACTION"
+  | "PAUSE_SINGLE_ESCROW"
+  | "GLOBAL_SYSTEM_PAUSE";
+
+/** Manual admin override actions accepted by POST /admin/circuit-breaker/override. */
+export type CircuitBreakerOverrideAction = "FORCE_PAUSE" | "UNPAUSE";
+
+/**
+ * Shared constants for the real-time indexer + circuit-breaker stack.
+ * Single source of truth so the migration SQL, worker, API routes, and
+ * frontend can never drift apart.
+ */
+export const CIRCUIT_BREAKER = {
+  /** Postgres advisory lock ID used for single-leader indexer election. */
+  ADVISORY_LOCK_ID: 889001,
+  /** How often a standby worker retries for leader election (ms). */
+  LEADER_ELECTION_POLL_MS: 5_000,
+  /** SLA: emergency on-chain pause must be submitted within 1000ms of a violation. */
+  PAUSE_TRIGGER_DEADLINE_MS: 1_000,
+  /** Soroban RPC ledger-stream endpoint (testnet by default). */
+  LEDGER_STREAM_URL: process.env.SOROBAN_LEDGER_STREAM_URL ?? "wss://soroban-testnet.stellar.org",
+  /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
+  DLQ_CHANNEL: "velo:indexer-dlq",
+} as const;
