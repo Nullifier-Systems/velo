@@ -85,6 +85,7 @@
     "trade": "Comercio",
     "connected": "Conectado",
     "connecting": "Conectando...",
+    "reconnecting": "Reconectando...",
     "noMessages": "Aún no hay mensajes. ¡Saluda!",
     "typeMessage": "Escribe un mensaje...",
     "send": "Enviar"

@@ -4,6 +4,7 @@ import { EscrowAnomalyMonitor } from "./lib/escrow-anomaly-monitor.js";
 import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
+import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
@@ -16,6 +17,7 @@ async function startServer() {
     app.log.info(`velo api listening on :${port}`);
 
     startPayoutBatchScheduler();
+    startChatCleanupWorker();
 
     if (stellarEventStore && pgPool) {
       const contractId = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
