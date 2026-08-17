@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import { z } from "zod";
+import { Pool } from "pg";
 import { getCashRequest } from "../lib/store.js";
 import type { ChatMessage } from "../lib/chat-store.js";
 import { parseBody } from "../lib/validation.js";
@@ -11,6 +12,11 @@ import {
   type ChatInfrastructure,
   type SharedTrade,
 } from "../lib/chat-infrastructure.js";
+import {
+  trackChatSocket,
+  touchChatSocket,
+  untrackChatSocket,
+} from "../lib/chat-infrastructure-streams.js";
 
 const publicKeySchema = z.object({
   publicKey: z.string().trim().regex(/^[A-Za-z0-9+/]{42,44}={0,2}$/),
@@ -20,6 +26,53 @@ interface ChatRouteOptions { infrastructure?: ChatInfrastructure }
 interface Room {
   sockets: Set<WebSocket>;
   unsubscribe: () => Promise<void>;
+}
+
+// Best-effort audit logging. No-ops (and never throws) when DATABASE_URL is
+// unset or the migration hasn't been applied, so chat keeps working in dev.
+let sessionPool: Pool | undefined;
+function chatSessionPool(): Pool | undefined {
+  if (!sessionPool && process.env.DATABASE_URL) {
+    sessionPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  }
+  return sessionPool;
+}
+
+async function recordChatConnection(
+  tradeId: string,
+  clientIp: string,
+): Promise<string> {
+  const pool = chatSessionPool();
+  if (!pool) return "";
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO chat_session_connection_logs (trade_id, client_ip)
+       VALUES ($1, $2) RETURNING session_id`,
+      [tradeId, clientIp ?? "unknown"],
+    );
+    return rows[0]?.session_id ?? "";
+  } catch {
+    return "";
+  }
+}
+
+async function recordChatDisconnect(
+  sessionId: string,
+  reason: string | null,
+): Promise<void> {
+  if (!sessionId) return;
+  const pool = chatSessionPool();
+  if (!pool) return;
+  try {
+    await pool.query(
+      `UPDATE chat_session_connection_logs
+       SET disconnected_at = CURRENT_TIMESTAMP, disconnect_reason = $2
+       WHERE session_id = $1`,
+      [sessionId, reason],
+    );
+  } catch {
+    // Table may not exist yet; audit trail is best-effort.
+  }
 }
 
 function bearerToken(req: FastifyRequest): string | undefined {
@@ -130,6 +183,8 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
 
       await joinRoom(tradeId, socket);
       const peer = auth.participant === auth.trade.buyer ? auth.trade.seller : auth.trade.buyer;
+      const sessionId = await recordChatConnection(tradeId, req.socket.remoteAddress ?? "unknown");
+      trackChatSocket(socket, tradeId);
       send(socket, {
         type: "joined",
         tradeId,
@@ -142,13 +197,28 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
         send(socket, { type: "message", data: message, replayed: true });
       }
 
-      let alive = true;
-      socket.on("pong", () => { alive = true; });
+      // Heartbeat: ping every 15s and terminate after two missed pong cycles.
+      // This is what detects clients that vanish without a close frame (lost
+      // cellular data, force-close), so Redis Pub/Sub listeners get released.
+      const heartbeatIntervalMs = Number(process.env.CHAT_HEARTBEAT_INTERVAL_MS ?? 15_000);
+      const heartbeatMissedLimit = Number(process.env.CHAT_HEARTBEAT_MISSED_LIMIT ?? 2);
+      let missedPongs = 0;
+      socket.on("pong", () => {
+        missedPongs = 0;
+        touchChatSocket(socket);
+      });
       const heartbeat = setInterval(() => {
-        if (!alive) return socket.terminate();
-        alive = false;
+        missedPongs += 1;
+        if (missedPongs >= heartbeatMissedLimit) {
+          send(socket, {
+            type: "error",
+            code: "WEBSOCKET_HEARTBEAT_TIMEOUT",
+            message: "WebSocket connection closed due to missing heartbeat response.",
+          });
+          return socket.terminate();
+        }
         socket.ping();
-      }, Number(process.env.CHAT_HEARTBEAT_INTERVAL_MS ?? 30_000));
+      }, heartbeatIntervalMs);
 
       socket.on("message", async (raw: Buffer | string) => {
         let payload: any;
@@ -165,9 +235,15 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
         await infrastructure.publish(tradeId, { type: "message", data: saved });
       });
 
+      // Explicit cleanup on every teardown path (close and error). Both
+      // handlers must release the Redis Pub/Sub channel, otherwise zombie
+      // subscriber callbacks accumulate and leak heap until the process OOMs.
+      socket.on("error", () => socket.terminate());
       socket.once("close", () => {
         clearInterval(heartbeat);
+        untrackChatSocket(socket);
         void leaveRoom(tradeId, socket);
+        void recordChatDisconnect(sessionId, "abrupt");
       });
     },
   );

@@ -14,7 +14,7 @@ export default function Chat() {
   const navigate = useNavigate();
 
   const [input, setInput] = useState("");
-  const { messages, send, connected, closed, canSend, safetyNumber, keyChanged, acknowledgeKeyChange } = useChat({
+  const { messages, send, connected, reconnecting, closed, canSend, safetyNumber, keyChanged, acknowledgeKeyChange } = useChat({
     tradeId: tradeId ?? "",
     participant,
     token,
@@ -46,8 +46,8 @@ export default function Chat() {
       <div className="chat-card">
         <div className="chat-header">
           <span className="chat-trade-label">{t("chat.trade")} {shortAddress(tradeId)}</span>
-          <span className={`chat-status ${connected ? "chat-status--online" : "chat-status--offline"}`}>
-            {connected ? t("chat.connected") : t("chat.connecting")}
+          <span className={`chat-status ${connected ? "chat-status--online" : reconnecting ? "chat-status--reconnecting" : "chat-status--offline"}`}>
+            {connected ? t("chat.connected") : reconnecting ? t("chat.reconnecting") : t("chat.connecting")}
           </span>
         </div>
 

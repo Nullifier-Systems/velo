@@ -13,6 +13,7 @@
  */
 
 import { createClient, type RedisClientType } from "redis";
+import type { WebSocket } from "ws";
 import type { CashRequestRecord } from "./store.js";
 import type { ChatMessage } from "./chat-store.js";
 import {
@@ -22,6 +23,56 @@ import {
   normalizeClock,
   type VectorClock,
 } from "./vector-clock.js";
+
+/* ------------------------------------------------------------------ */
+/*  Chat socket registry — connection garbage-collection lifecycle     */
+/* ------------------------------------------------------------------ */
+
+interface TrackedChatSocket {
+  tradeId: string;
+  lastActivity: number;
+}
+
+const activeChatSockets = new Map<WebSocket, TrackedChatSocket>();
+
+export function trackChatSocket(socket: WebSocket, tradeId: string): void {
+  activeChatSockets.set(socket, { tradeId, lastActivity: Date.now() });
+}
+
+export function touchChatSocket(socket: WebSocket): void {
+  const entry = activeChatSockets.get(socket);
+  if (entry) entry.lastActivity = Date.now();
+}
+
+export function untrackChatSocket(socket: WebSocket): void {
+  activeChatSockets.delete(socket);
+}
+
+export function activeChatSocketCount(): number {
+  return activeChatSockets.size;
+}
+
+/**
+ * Forcibly terminate sockets whose last confirmed activity (a pong) predates
+ * `maxInactiveMs`. The heartbeat in chat.ts detects dead peers first; this is
+ * the safety net that guarantees Redis Pub/Sub listeners are released even
+ * when a client drops without a close frame.
+ */
+export function purgeStaleChatSockets(maxInactiveMs: number): number {
+  const cutoff = Date.now() - maxInactiveMs;
+  let purged = 0;
+  for (const [socket, entry] of activeChatSockets) {
+    if (entry.lastActivity >= cutoff) continue;
+    activeChatSockets.delete(socket);
+    try {
+      socket.terminate();
+    } catch {
+      // Already closed; nothing left to purge.
+    }
+    purged += 1;
+  }
+  return purged;
+}
 
 export type ChatEvent =
   | { type: "message"; data: ChatMessage }
@@ -168,6 +219,13 @@ export class MemoryChatInfrastructure implements ChatInfrastructure {
     };
   }
 
+  /** Number of live subscriber callbacks; returns to 0 after cleanup. */
+  activeSubscriptions(): number {
+    let count = 0;
+    for (const set of this.listeners.values()) count += set.size;
+    return count;
+  }
+
   async getMissedMessages(
     tradeId: string,
     clientClock: VectorClock,
@@ -209,6 +267,7 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
   private subscriber: RedisClientType;
   private ready: Promise<void>;
   private instanceId: string;
+  private listenerCounts = new Map<string, number>();
 
   constructor(url: string) {
     this.instanceId = Math.random().toString(36).substring(2, 10);
@@ -363,10 +422,22 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
         // Ignore parse errors
       }
     };
-    await this.subscriber.subscribe(`velo:chat:events:${id}`, handler);
+    const channel = `velo:chat:events:${id}`;
+    await this.subscriber.subscribe(channel, handler);
+    this.listenerCounts.set(channel, (this.listenerCounts.get(channel) ?? 0) + 1);
     return async () => {
-      await this.subscriber.unsubscribe(`velo:chat:events:${id}`, handler);
+      await this.subscriber.unsubscribe(channel, handler);
+      const remaining = (this.listenerCounts.get(channel) ?? 0) - 1;
+      if (remaining <= 0) this.listenerCounts.delete(channel);
+      else this.listenerCounts.set(channel, remaining);
     };
+  }
+
+  /** Number of live Redis Pub/Sub listeners; returns to 0 after cleanup. */
+  activeSubscriptions(): number {
+    let count = 0;
+    for (const listeners of this.listenerCounts.values()) count += listeners;
+    return count;
   }
 
   async getMissedMessages(

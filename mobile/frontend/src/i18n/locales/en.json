@@ -85,6 +85,7 @@
     "trade": "Trade",
     "connected": "Connected",
     "connecting": "Connecting...",
+    "reconnecting": "Reconnecting...",
     "noMessages": "No messages yet. Say hello!",
     "typeMessage": "Type a message...",
     "send": "Send"

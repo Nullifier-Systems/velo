@@ -48,6 +48,7 @@ const CLIENT_ID = getClientId();
 export function useChat({ tradeId, participant, token }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [closed, setClosed] = useState(false);
   const [peerPublicKeyB64, setPeerPublicKeyB64] = useState<string | null>(null);
   const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
@@ -135,6 +136,7 @@ export function useChat({ tradeId, participant, token }: UseChatOptions) {
 
       ws.onopen = () => {
         reconnectAttempt = 0;
+        setReconnecting(false);
         setConnected(true);
         publishChatKey(tradeId, token, toBase64(keyPair.publicKey)).catch(() => {});
       };
@@ -164,8 +166,11 @@ export function useChat({ tradeId, participant, token }: UseChatOptions) {
         setConnected(false);
         wsRef.current = null;
         if (!cancelled && !terminallyClosed && event.code !== 4000 && event.code !== 4001) {
-          const delay = Math.min(30_000, 500 * 2 ** reconnectAttempt++);
+          const delay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt++);
+          setReconnecting(true);
           reconnectTimer = setTimeout(connect, delay + Math.random() * 250);
+        } else {
+          setReconnecting(false);
         }
       };
     };
@@ -256,6 +261,7 @@ export function useChat({ tradeId, participant, token }: UseChatOptions) {
     messages: decryptedMessages,
     send,
     connected,
+    reconnecting,
     closed,
     canSend: connected && !!peerPublicKeyB64,
     safetyNumber,
