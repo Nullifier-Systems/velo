@@ -222,5 +222,20 @@
     "overrideReason": "Override reason",
     "reasonPlaceholder": "Minimum 10 characters…",
     "broadcasting": "Broadcasting…"
+  },
+  "spatialNetting": {
+    "header": "H3 Spatial Liquidity Netting & Swaps",
+    "activeH3Cell": "Active H3 Cell: [ {{cell}} ] (Resolution {{resolution}})",
+    "nettingLoop": "Netting Loop: Provider A ──► Provider B ──► Provider C",
+    "clearedBalance": "Cleared Balance: $12,500.00 USDC",
+    "htlcLabel": "HTLC Secret Key:",
+    "relayerState": "Relayer State: Propagating Secret Preimage On-Chain...",
+    "abortNetting": "Abort Netting",
+    "executeAtomicSwap": "Execute Atomic Swap",
+    "htlcTimeout": "HTLC Timeout Triggered: Refund Protocol Active",
+    "revertCollateral": "Revert Collateral",
+    "errors": {
+      "invalidSecret": "Secret preimage must be a valid 32-byte hex string"
+    }
   }
 }
