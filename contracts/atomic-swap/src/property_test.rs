@@ -151,4 +151,106 @@ proptest! {
         prop_assert_eq!(f.client.get_trade(&trade_id).unwrap().status, TradeStatus::Locked);
         prop_assert_eq!(f.token.balance(&f.contract_id), amount);
     }
+
+    // ===== MPT Verification Property Tests =====
+
+    #[test]
+    fn block_header_registration_idempotent(block_num in 1000u32..100_000) {
+        let f = setup(10_000);
+        let block_hash = id(&f.env, 1);
+        let state_root = id(&f.env, 2);
+
+        // Register once
+        f.client.register_trusted_block_header(&block_hash, &block_num, &state_root);
+
+        // Register again with same data — should succeed without error
+        f.client.register_trusted_block_header(&block_hash, &block_num, &state_root);
+
+        // Both registrations should result in the same stored state
+        let header1 = f.client.get_trusted_block_header(&block_hash);
+        let header2 = f.client.get_trusted_block_header(&block_hash);
+
+        prop_assert!(header1.is_some());
+        prop_assert!(header2.is_some());
+        prop_assert_eq!(header1.unwrap().block_number, block_num);
+        prop_assert_eq!(header2.unwrap().block_number, block_num);
+    }
+
+    #[test]
+    fn chain_finality_consistent_across_calls(chain_id in vec![1u32, 42161, 137, 10, 8453]) {
+        let f = setup(10_000);
+        let finality1 = f.client.get_chain_finality(&chain_id);
+        let finality2 = f.client.get_chain_finality(&chain_id);
+
+        // Same chain_id should always return the same finality
+        prop_assert_eq!(finality1, finality2);
+
+        // Finality should be > 0 for known chains
+        prop_assert!(finality1 > 0);
+    }
+
+    #[test]
+    fn record_evm_reveal_respects_finality_thresholds(
+        block_height in 1000u32..10_000,
+        current_block in 1000u32..11_000,
+    ) {
+        prop_assume!(current_block >= block_height);
+        let f = setup(10_000);
+
+        let evm_tx_hash = id(&f.env, 10);
+        let secret_val = secret(&f.env, 7);
+        let chain_id = 1u32; // Ethereum
+
+        let confirmations = current_block - block_height;
+        let eth_finality = 64u32;
+
+        let extension = f.client.record_evm_reveal(
+            &evm_tx_hash,
+            &secret_val,
+            &block_height,
+            &chain_id,
+            &current_block,
+        );
+
+        // If confirmations >= finality, extension should be 0
+        // If confirmations < finality, extension should be MAX_REORG_WINDOW_LEDGERS (50)
+        if confirmations >= eth_finality {
+            prop_assert_eq!(extension, 0);
+        } else {
+            prop_assert_eq!(extension, 50);
+        }
+    }
+
+    #[test]
+    fn trusted_block_header_never_returns_unregistered(block_hash: [u8; 32]) {
+        let f = setup(10_000);
+        let hash = BytesN::from_array(&f.env, &block_hash);
+
+        // Unregistered block should return None
+        let header = f.client.get_trusted_block_header(&hash);
+        prop_assert!(header.is_none());
+    }
+
+    #[test]
+    fn merkle_proof_verification_deterministic(
+        state_root: [u8; 32],
+        proof_key: [u8; 32],
+        proof_value: [u8; 32],
+    ) {
+        let f = setup(10_000);
+        let root = BytesN::from_array(&f.env, &state_root);
+        let key = soroban_sdk::Bytes::from_array(&f.env, &proof_key);
+        let value = soroban_sdk::Bytes::from_array(&f.env, &proof_value);
+        let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+        // Two calls with same parameters should produce same result (or both error)
+        let result1 = f.client.try_verify_merkle_proof(&root, &key, &value, &proof);
+        let result2 = f.client.try_verify_merkle_proof(&root, &key, &value, &proof);
+
+        // Both should have the same outcome
+        prop_assert_eq!(result1.is_err(), result2.is_err());
+        if result1.is_ok() && result2.is_ok() {
+            prop_assert_eq!(result1.unwrap(), result2.unwrap());
+        }
+    }
 }

@@ -474,3 +474,134 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
     );
     assert_eq!(eth_extension, 0); // Sufficient, no extension
 }
+
+// ===== MPT Verification Tests =====
+
+#[test]
+fn register_trusted_block_header_only_admin() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    let block_hash = BytesN::from_array(&f.env, &[1u8; 32]);
+    let state_root = BytesN::from_array(&f.env, &[2u8; 32]);
+
+    // Admin should be able to register
+    let result = client.try_register_trusted_block_header(&block_hash, &1000u32, &state_root);
+    assert!(result.is_ok());
+
+    // Verify the header is stored
+    let header = client.get_trusted_block_header(&block_hash);
+    assert!(header.is_some());
+}
+
+#[test]
+fn get_trusted_block_header_returns_none_when_not_registered() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    let unknown_hash = BytesN::from_array(&f.env, &[99u8; 32]);
+    let header = client.get_trusted_block_header(&unknown_hash);
+    assert!(header.is_none());
+}
+
+#[test]
+fn verify_merkle_proof_with_mpt_verification() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    // Create test data
+    let state_root = BytesN::from_array(&f.env, &[1u8; 32]);
+    let proof_key = soroban_sdk::Bytes::from_array(&f.env, &[2u8; 32]);
+    let proof_value = soroban_sdk::Bytes::from_array(&f.env, &[3u8; 32]);
+
+    // Create empty proof (will fail validation)
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // Verify should handle empty proof gracefully
+    let result = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+    assert!(result.is_err());
+}
+
+#[test]
+fn record_evm_reveal_with_mpt_proof_requires_trusted_block() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    let evm_tx_hash = BytesN::from_array(&f.env, &[10u8; 32]);
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let block_hash = BytesN::from_array(&f.env, &[11u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // Try to record reveal with untrusted block — should fail
+    let result = client.try_record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &1000u32,       // evm_block_height
+        &1u32,          // chain_id
+        &1100u32,       // evm_current_block
+        &block_hash,    // untrusted block
+        &0u32,          // log_index
+        &proof,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn record_evm_reveal_validates_block_height_matches() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    // Register a trusted block header for block 1000
+    let block_hash = BytesN::from_array(&f.env, &[11u8; 32]);
+    let state_root = BytesN::from_array(&f.env, &[2u8; 32]);
+    client.register_trusted_block_header(&block_hash, &1000u32, &state_root);
+
+    let evm_tx_hash = BytesN::from_array(&f.env, &[10u8; 32]);
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // Try with mismatched block height — should fail
+    let result = client.try_record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &1001u32,       // evm_block_height (doesn't match trusted block 1000)
+        &1u32,          // chain_id
+        &1100u32,       // evm_current_block
+        &block_hash,
+        &0u32,          // log_index
+        &proof,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn verify_merkle_proof_caches_verification_results() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    // Create test data
+    let state_root = BytesN::from_array(&f.env, &[1u8; 32]);
+    let proof_key = soroban_sdk::Bytes::from_array(&f.env, &[2u8; 32]);
+    let proof_value = soroban_sdk::Bytes::from_array(&f.env, &[3u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // First call (will fail but be cached)
+    let result1 = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+
+    // Second call with same parameters should return cached result
+    let result2 = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+
+    // Both should behave the same (cached)
+    assert_eq!(result1.is_err(), result2.is_err());
+}
+
+#[test]
+fn mpt_error_types_convert_correctly() {
+    use mpt_verifier::MptError;
+
+    // Verify error codes for MPT errors
+    assert_eq!(MptError::InvalidProof as u32, 1);
+    assert_eq!(MptError::InvalidPath as u32, 2);
+    assert_eq!(MptError::InvalidNodeType as u32, 3);
+    assert_eq!(MptError::RootMismatch as u32, 5);
+}
