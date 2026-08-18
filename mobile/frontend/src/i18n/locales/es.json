@@ -228,6 +228,12 @@
     "activeH3Cell": "Celda H3 activa: [{{cell}}] (Resolución {{resolution}})",
     "nettingLoop": "Bucle de neteo",
     "revertCollateral": "Revertir colateral",
+    "clearedBalance": "Saldo liquidado",
+    "htlcLabel": "HTLC",
+    "relayerState": "Estado del relayer",
+    "abortNetting": "Abortar neteo",
+    "executeAtomicSwap": "Ejecutar intercambio atómico",
+    "htlcTimeout": "Tiempo de expiración HTLC",
     "errors": {
       "invalidSecret": "Clave secreta no válida"
     }
