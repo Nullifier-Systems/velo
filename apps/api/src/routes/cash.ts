@@ -16,8 +16,7 @@ import {
   submitChainReleaseToLockTx,
   getTradeState,
   getEscrowPauseState,
-  batchReleaseEscrow,
-  releaseBatchEscrow,
+  releaseBatchAtomic,
   NETWORK_PASSPHRASE,
   getLatestLedgerSequence,
   getTradeOnChain,
@@ -1450,7 +1449,9 @@ export async function cashRoutes(app: FastifyInstance) {
    * POST /api/v1/cash/batch-release — Atomically release a batch of pending trades.
    *
    * Provider provides a list of trade IDs they want to release together.
-   * The contract validates ALL trades, then releases ALL or NONE (atomic).
+   * This maps to the escrow contract's atomic `release_batch()` entrypoint,
+   * which releases ALL or NONE — distinct from `batch_release()`, which skips
+   * invalid legs and is used by the background payout batcher.
    *
    * Contract behavior:
    * - Validates ALL trades exist, are Locked, and have valid secrets BEFORE any changes
@@ -1458,10 +1459,15 @@ export async function cashRoutes(app: FastifyInstance) {
    * - Aggregates fees across all trades and pays them once
    * - All succeed together or all fail together (true atomicity)
    *
+   * Because settlement is all-or-nothing, off-chain records are only marked
+   * `released` after the contract call succeeds. If it reverts, every trade is
+   * left in `pending_batch` untouched, so a single bad leg never leaves the
+   * batch half-settled.
+   *
    * Request body: { trade_ids: string[] }  — array of hex trade IDs to release
    *
-   * Returns: { released_count: number, total_payout: string, total_fees: string }
-   * On error: { error: string, detail: string } + 400/502/504 status
+   * Returns: { released_count: number, trade_ids: string[], total_amount: string }
+   * On error: { error, code, statusCode } (validation) or { error, detail } (502/504)
    */
   app.post<{ Body: { trade_ids?: string[] } }>(
     "/cash/batch-release",
@@ -1560,13 +1566,14 @@ export async function cashRoutes(app: FastifyInstance) {
 
       try {
         // Call the atomic release_batch() function on the contract.
-        // If ANY trade fails validation, the entire batch reverts.
-        await releaseBatchEscrow({
+        // If ANY trade fails validation, the entire batch reverts and this
+        // throws, so no trade below is marked released (clean rollback).
+        await releaseBatchAtomic({
           contractId,
           releases,
         });
       } catch (err) {
-        req.log.error(err, "releaseBatchEscrow failed");
+        req.log.error(err, "releaseBatchAtomic failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
             error: "rpc_timeout",
@@ -1583,14 +1590,12 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      // On success, mark all trades as released and notify.
+      // The atomic release_batch() succeeded, so every leg settled on-chain.
+      // Mark them all released and notify.
       let totalPayout = 0n;
-      let totalFees = 0n;
 
       for (const record of records) {
         const amount = BigInt(record.amountStroops);
-        // Fee calculation matches contract: fee = (amount * fee_bps) / 10_000
-        // We don't have fee_bps here, but the contract applied it, so we just track totals.
         updateStatus(record.id, "released");
         await notifyTradeStatus(record.id, "released");
         await sendNotification(record, "released", (req as any).locale ?? "en");
