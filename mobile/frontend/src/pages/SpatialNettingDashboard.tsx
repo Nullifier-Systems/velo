@@ -36,7 +36,7 @@ export const SpatialNettingDashboard: React.FC = () => {
             </div>
             {error && <div className="error">{error}</div>}
 
-            <div className="progress-bar">[=========================>  ] 80%</div>
+            <div className="progress-bar">{'[=========================>  ] 80%'}</div>
             <div>{t('spatialNetting.relayerState')}</div>
 
             <div className="actions">
