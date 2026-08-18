@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './SpatialNettingDashboard.css';
-import { useTranslation, Trans } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 
 export const SpatialNettingDashboard: React.FC = () => {
     const { t } = useTranslation();
@@ -19,11 +19,7 @@ export const SpatialNettingDashboard: React.FC = () => {
         <div className="spatial-netting-dashboard">
             <div className="header">{t('spatialNetting.header')}</div>
 
-            <div>
-                <Trans i18nKey="spatialNetting.activeH3Cell" values={{ cell: '8828308281fffff', resolution: 8 }}>
-                    Active H3 Cell: [ {{cell}} ] (Resolution {{resolution}})
-                </Trans>
-            </div>
+            <div>{t('spatialNetting.activeH3Cell', { cell: '8828308281fffff', resolution: 8 })}</div>
 
             <div>{t('spatialNetting.nettingLoop')}</div>
             <div>{t('spatialNetting.clearedBalance')}</div>

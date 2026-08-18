@@ -222,5 +222,14 @@
     "overrideReason": "Motivo de la anulación",
     "reasonPlaceholder": "Mínimo 10 caracteres…",
     "broadcasting": "Transmitiendo…"
+  },
+  "spatialNetting": {
+    "header": "Netting espacial",
+    "activeH3Cell": "Celda H3 activa: [{{cell}}] (Resolución {{resolution}})",
+    "nettingLoop": "Bucle de neteo",
+    "revertCollateral": "Revertir colateral",
+    "errors": {
+      "invalidSecret": "Clave secreta no válida"
+    }
   }
 }
