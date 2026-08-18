@@ -285,3 +285,18 @@ export function verifyNoUnbackedValue(
   }
   return true;
 }
+
+export async function findCycles(h3Index: string, radiusMeters: number, maxCycleLength: number): Promise<any[]> {
+  // Stub implementation for Johnson's cycle detection algorithm
+  return [
+    {
+      nodes: [{ id: 'provider-a' }, { id: 'provider-b' }, { id: 'provider-c' }],
+      clearedAmount: 12500000000n, // $12,500 USDC in stroops
+      legs: [
+        { swapId: 'swap-1', sender: 'provider-a', receiver: 'provider-b', amount: 12500000000n, hashLock: 'hash1', timeoutLedger: 100 },
+        { swapId: 'swap-2', sender: 'provider-b', receiver: 'provider-c', amount: 12500000000n, hashLock: 'hash2', timeoutLedger: 100 },
+        { swapId: 'swap-3', sender: 'provider-c', receiver: 'provider-a', amount: 12500000000n, hashLock: 'hash3', timeoutLedger: 100 }
+      ]
+    }
+  ];
+}

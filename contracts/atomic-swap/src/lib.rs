@@ -407,7 +407,9 @@ impl Htlc for AtomicSwapContract {
         // The revealed secret is the cross-chain payload: the relayer reads it
         // from this event and uses it to claim the counterpart HTLC.
         env.events()
-            .publish((Symbol::new(&env, "released"), id), secret);
+            .publish((Symbol::new(&env, "released"), id.clone()), secret.clone());
+        env.events()
+            .publish((Symbol::new(&env, "secret_reveal"), id), secret);
     }
 
     fn refund(env: Env, id: BytesN<32>) {

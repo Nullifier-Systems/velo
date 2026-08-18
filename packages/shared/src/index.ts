@@ -79,5 +79,12 @@ export const CIRCUIT_BREAKER = {
   /** Soroban RPC ledger-stream endpoint (testnet by default). */
   LEDGER_STREAM_URL: process.env.SOROBAN_LEDGER_STREAM_URL ?? "wss://soroban-testnet.stellar.org",
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
-  DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
+
+import { z } from 'zod';
+export const SpatialClearRequestSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  radiusMeters: z.number().positive().max(5000),
+  maxCycleLength: z.number().int().min(2).max(10).default(5),
+});
