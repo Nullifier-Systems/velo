@@ -1171,6 +1171,28 @@ export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<st
 
 export const releaseBatchEscrow = batchReleaseEscrow;
 
+/**
+ * Testnet-only: custodial ATOMIC batch release (API signs). Invokes the escrow
+ * contract's `release_batch()` — the all-or-nothing sibling of `batch_release()`.
+ *
+ * The contract validates every leg (exists, is Locked, secret matches) in a
+ * first pass and only then settles them; if a single leg is invalid the whole
+ * invocation reverts, so nothing is partially settled and this call throws.
+ * Use it when the caller hands us a specific, fixed set of trades that must
+ * settle together or not at all (see POST /cash/batch-release).
+ *
+ * Contrast with `batchReleaseEscrow()` (`batch_release`), which skips an
+ * invalid leg and settles the rest — the right choice for opportunistic
+ * background batching where a stale trade should simply be retried next tick.
+ */
+export async function releaseBatchAtomic(params: BatchReleaseParams): Promise<void> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases?.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex ?? "")) ?? []
+    );
+    await invokeContract(params.contractId, "release_batch", [itemsScVal], signer);
+}
+
 
 export interface ResolveParams {
     contractId: string;
