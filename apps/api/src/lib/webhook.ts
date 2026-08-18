@@ -61,3 +61,46 @@ export async function sendRefundAlert(params: {
     },
   });
 }
+
+/**
+ * Pre-expiry countdown warning: a locked (or partially released) trade is
+ * approaching its refund timeout. This is the heads-up that fires BEFORE the
+ * timeout, so operators know a permissionless refund is imminent. It is the
+ * counterpart to sendRefundAlert() above, which fires AFTER a refund settles.
+ */
+export async function sendRefundCountdownAlert(params: {
+  tradeId: string;
+  amountStroops: string;
+  buyer: string;
+  seller: string;
+  timeoutLedger: number;
+  latestLedger: number;
+  ledgersUntilRefund: number;
+  estimatedSecondsUntilRefund: number;
+}): Promise<void> {
+  const {
+    tradeId,
+    amountStroops,
+    buyer,
+    seller,
+    timeoutLedger,
+    latestLedger,
+    ledgersUntilRefund,
+    estimatedSecondsUntilRefund,
+  } = params;
+  const amountUsdc = (Number(amountStroops) / 10_000_000).toFixed(2);
+  const etaMinutes = Math.max(1, Math.round(estimatedSecondsUntilRefund / 60));
+  await sendWebhookAlert({
+    title: "Refund countdown",
+    text: `Trade \`${tradeId}\` becomes refundable in ${ledgersUntilRefund} ledger(s), about ${etaMinutes} min.`,
+    fields: {
+      "Trade ID": `\`${tradeId}\``,
+      Amount: `${amountUsdc} USDC`,
+      "Ledgers until refund": String(ledgersUntilRefund),
+      "Timeout ledger": String(timeoutLedger),
+      "Latest ledger": String(latestLedger),
+      Buyer: `\`${buyer}\``,
+      Seller: `\`${seller}\``,
+    },
+  });
+}
