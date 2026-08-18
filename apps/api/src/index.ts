@@ -1,5 +1,6 @@
 import { app, stellarEventStore, pgPool } from "./app.js";
 import { startPayoutBatchScheduler } from "./lib/payout-batcher.js";
+import { startRefundCountdownScheduler } from "./lib/refund-scheduler.js";
 import { EscrowAnomalyMonitor } from "./lib/escrow-anomaly-monitor.js";
 import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
@@ -18,6 +19,11 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
+
+    // (#380) Watch locked trades for approaching refund timeouts: warn 100
+    // ledgers before expiry, auto-refund once the timeout is breached, and
+    // verify the seller_payouts + buyer_refund + fees == original invariant.
+    startRefundCountdownScheduler();
 
     if (stellarEventStore && pgPool) {
       const contractId = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
