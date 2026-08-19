@@ -1,7 +1,7 @@
 //! Incremental Merkle Tree implementation for ZK credential registry.
 
-use soroban_sdk::{contracttype, Bytes, BytesN, Env, Vec};
 use crate::DataKey;
+use soroban_sdk::{contracttype, Bytes, BytesN, Env, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
