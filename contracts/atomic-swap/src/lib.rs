@@ -27,7 +27,7 @@ use soroban_sdk::{
 };
 
 mod mpt_verifier;
-use mpt_verifier::{MptVerifier, MptError};
+use mpt_verifier::{MptError, MptVerifier};
 
 #[contracttype]
 enum DataKey {
@@ -421,7 +421,12 @@ impl AtomicSwapContract {
         // Compute cache key from proof components to detect duplicate verifications
         let cache_input = soroban_sdk::Bytes::from_slice(
             &env,
-            &[state_root.as_ref(), proof_key.as_ref(), proof_value.as_ref()].concat(),
+            &[
+                state_root.as_ref(),
+                proof_key.as_ref(),
+                proof_value.as_ref(),
+            ]
+            .concat(),
         );
         let cache_hash = env.crypto().sha256(&cache_input);
         let cache_key_bytes: BytesN<32> = cache_hash.try_into().unwrap_or_else(|_| BytesN::new());

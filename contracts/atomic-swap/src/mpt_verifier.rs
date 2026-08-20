@@ -98,7 +98,8 @@ impl MptVerifier {
 
             // Verify the node hash matches current expected hash
             let computed_hash = env.crypto().sha256(node_data);
-            let computed_hash_bytes: BytesN<32> = computed_hash.try_into()
+            let computed_hash_bytes: BytesN<32> = computed_hash
+                .try_into()
                 .map_err(|_| MptError::InvalidProof)?;
 
             if computed_hash_bytes != current_hash {
@@ -230,7 +231,6 @@ impl MptVerifier {
         }
 
         if is_leaf {
-
             // Leaf node: final value should be the last field
             let value_data = &node_data.slice(key_offset + key_path.len(), node_data.len());
 
@@ -239,11 +239,18 @@ impl MptVerifier {
             }
 
             // Terminal node found
-            Ok((true, key_path, BytesN::try_from(soroban_sdk::Bytes::new(env)).unwrap()))
+            Ok((
+                true,
+                key_path,
+                BytesN::try_from(soroban_sdk::Bytes::new(env)).unwrap(),
+            ))
         } else {
             // Extension node: contains reference to next node
             let next_hash: BytesN<32> = node_data
-                .slice(key_offset + key_path.len(), key_offset + key_path.len() + 32)
+                .slice(
+                    key_offset + key_path.len(),
+                    key_offset + key_path.len() + 32,
+                )
                 .try_into()
                 .map_err(|_| MptError::InvalidExtensionNode)?;
 

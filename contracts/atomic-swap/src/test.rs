@@ -536,11 +536,11 @@ fn record_evm_reveal_with_mpt_proof_requires_trusted_block() {
     let result = client.try_record_evm_reveal(
         &evm_tx_hash,
         &secret,
-        &1000u32,       // evm_block_height
-        &1u32,          // chain_id
-        &1100u32,       // evm_current_block
-        &block_hash,    // untrusted block
-        &0u32,          // log_index
+        &1000u32,    // evm_block_height
+        &1u32,       // chain_id
+        &1100u32,    // evm_current_block
+        &block_hash, // untrusted block
+        &0u32,       // log_index
         &proof,
     );
     assert!(result.is_err());
@@ -564,11 +564,11 @@ fn record_evm_reveal_validates_block_height_matches() {
     let result = client.try_record_evm_reveal(
         &evm_tx_hash,
         &secret,
-        &1001u32,       // evm_block_height (doesn't match trusted block 1000)
-        &1u32,          // chain_id
-        &1100u32,       // evm_current_block
+        &1001u32, // evm_block_height (doesn't match trusted block 1000)
+        &1u32,    // chain_id
+        &1100u32, // evm_current_block
         &block_hash,
-        &0u32,          // log_index
+        &0u32, // log_index
         &proof,
     );
     assert!(result.is_err());
