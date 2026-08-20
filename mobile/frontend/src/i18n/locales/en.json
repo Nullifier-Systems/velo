@@ -222,5 +222,21 @@
     "overrideReason": "Override reason",
     "reasonPlaceholder": "Minimum 10 characters…",
     "broadcasting": "Broadcasting…"
+  },
+  "zkSettle": {
+    "modalTitle": "Zero-Knowledge Settlement",
+    "nullifierSpent": "Nullifier already spent",
+    "settledBadge": "Settled On-Chain",
+    "viewStellarExpert": "View on StellarExpert",
+    "secretLabel": "Credential Secret Key (64-char hex):",
+    "secretPlaceholder": "e.g. 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    "invalidHexKey": "Invalid hex key",
+    "generatingProof": "Generating Proof...",
+    "settlingOnStellar": "Settling on Stellar...",
+    "closeModal": "Close Modal",
+    "cancel": "Cancel",
+    "generateAndSettle": "Generate Proof & Settle",
+    "failedSubmit": "Failed to submit settlement",
+    "networkError": "Network error"
   }
 }

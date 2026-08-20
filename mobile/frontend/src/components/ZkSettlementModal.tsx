@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ZkSettlementModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ export function ZkSettlementModal({
   initialNullifierHash = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
   initialCommitment = "f9e8d7c6b5a4039281706f5e4d3c2b1a0f9e8d7c6b5a4039281706f5e4d3c2b1",
 }: ZkSettlementModalProps) {
+  const { t } = useTranslation();
   const [secretKey, setSecretKey] = useState("");
   const [secretError, setSecretError] = useState<string | null>(null);
   const [step, setStep] = useState<ModalStep>("IDLE");
@@ -34,7 +36,7 @@ export function ZkSettlementModal({
               setTxHash(data.txHash || "0x1234567890abcdef");
               setStep("SETTLED");
             } else if (data.status === "REJECTED") {
-              setErrorMessage("Nullifier already spent");
+              setErrorMessage(t("zkSettle.nullifierSpent"));
               setStep("ERROR");
             }
           }
@@ -47,7 +49,7 @@ export function ZkSettlementModal({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [step, initialNullifierHash]);
+  }, [step, initialNullifierHash, t]);
 
   if (!isOpen) return null;
 
@@ -58,7 +60,7 @@ export function ZkSettlementModal({
     }
     const isValidHex = /^[0-9a-fA-F]{64}$/.test(secretKey.trim());
     if (!isValidHex) {
-      setSecretError("Invalid hex key");
+      setSecretError(t("zkSettle.invalidHexKey"));
     } else {
       setSecretError(null);
     }
@@ -66,7 +68,7 @@ export function ZkSettlementModal({
 
   const handleGenerateAndSettle = async () => {
     if (secretError || (secretKey && !/^[0-9a-fA-F]{64}$/.test(secretKey.trim()))) {
-      setSecretError("Invalid hex key");
+      setSecretError(t("zkSettle.invalidHexKey"));
       return;
     }
 
@@ -89,14 +91,14 @@ export function ZkSettlementModal({
         });
 
         if (res.status === 409) {
-          setErrorMessage("Nullifier already spent");
+          setErrorMessage(t("zkSettle.nullifierSpent"));
           setStep("ERROR");
         } else if (!res.ok) {
-          setErrorMessage("Failed to submit settlement");
+          setErrorMessage(t("zkSettle.failedSubmit"));
           setStep("ERROR");
         }
       } catch (err) {
-        setErrorMessage("Network error");
+        setErrorMessage(t("zkSettle.networkError"));
         setStep("ERROR");
       }
     }, 1500);
@@ -124,7 +126,7 @@ export function ZkSettlementModal({
         width: "90%",
         boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
       }}>
-        <h3 style={{ marginTop: 0, color: "#cba6f7" }}>Zero-Knowledge Settlement</h3>
+        <h3 style={{ marginTop: 0, color: "#cba6f7" }}>{t("zkSettle.modalTitle")}</h3>
 
         {step === "ERROR" && (
           <div className="error-banner" style={{
@@ -135,7 +137,7 @@ export function ZkSettlementModal({
             marginBottom: "16px",
             fontWeight: "bold",
           }}>
-            {errorMessage || "Nullifier already spent"}
+            {errorMessage || t("zkSettle.nullifierSpent")}
           </div>
         )}
 
@@ -149,7 +151,7 @@ export function ZkSettlementModal({
             textAlign: "center",
             fontWeight: "bold",
           }}>
-            Settled On-Chain
+            {t("zkSettle.settledBadge")}
             {txHash && (
               <div style={{ marginTop: "6px" }}>
                 <a
@@ -158,7 +160,7 @@ export function ZkSettlementModal({
                   rel="noreferrer"
                   style={{ color: "#1e1e2e", textDecoration: "underline" }}
                 >
-                  View on StellarExpert
+                  {t("zkSettle.viewStellarExpert")}
                 </a>
               </div>
             )}
@@ -168,14 +170,14 @@ export function ZkSettlementModal({
         {step === "IDLE" && (
           <div style={{ marginBottom: "16px" }}>
             <label style={{ display: "block", marginBottom: "8px", fontSize: "0.9rem" }}>
-              Credential Secret Key (64-char hex):
+              {t("zkSettle.secretLabel")}
             </label>
             <input
               type="text"
               value={secretKey}
               onChange={(e) => setSecretKey(e.target.value)}
               onBlur={handleBlurSecret}
-              placeholder="e.g. 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+              placeholder={t("zkSettle.secretPlaceholder")}
               style={{
                 width: "100%",
                 padding: "8px 12px",
@@ -196,14 +198,14 @@ export function ZkSettlementModal({
 
         {step === "GENERATING" && (
           <div style={{ padding: "16px 0", textAlign: "center", fontStyle: "italic" }}>
-            Generating Proof...
+            {t("zkSettle.generatingProof")}
           </div>
         )}
 
         {step === "SETTLING" && (
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <span className="spinner" style={{ display: "inline-block", marginRight: "8px" }}>⏳</span>
-            Settling on Stellar...
+            {t("zkSettle.settlingOnStellar")}
           </div>
         )}
 
@@ -221,7 +223,7 @@ export function ZkSettlementModal({
                 fontWeight: "bold",
               }}
             >
-              Close Modal
+              {t("zkSettle.closeModal")}
             </button>
           ) : (
             <>
@@ -237,7 +239,7 @@ export function ZkSettlementModal({
                   cursor: "pointer",
                 }}
               >
-                Cancel
+                {t("zkSettle.cancel")}
               </button>
               {step === "IDLE" && (
                 <button
@@ -252,7 +254,7 @@ export function ZkSettlementModal({
                     fontWeight: "bold",
                   }}
                 >
-                  Generate Proof & Settle
+                  {t("zkSettle.generateAndSettle")}
                 </button>
               )}
             </>
