@@ -1,10 +1,34 @@
-import { describe, it, expect } from "vitest";
+// @vitest-environment jsdom
+import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import "../i18n/index.js";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        "zkSettle.modalTitle": "Zero-Knowledge Settlement",
+        "zkSettle.secretLabel": "Credential Secret Key (64-char hex):",
+        "zkSettle.secretPlaceholder": "e.g. 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "zkSettle.invalidHexKey": "Invalid hex key",
+        "zkSettle.generatingProof": "Generating Proof...",
+        "zkSettle.settlingOnStellar": "Settling on Stellar...",
+        "zkSettle.closeModal": "Close Modal",
+        "zkSettle.cancel": "Cancel",
+        "zkSettle.generateAndSettle": "Generate Proof & Settle",
+      };
+      return translations[key] || key;
+    },
+  }),
+}));
+
 import { ZkSettlementModal } from "./ZkSettlementModal";
 
 describe("ZkSettlementModal Component (Issue #371)", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("renders modal when open and shows header", () => {
     render(<ZkSettlementModal isOpen={true} onClose={() => {}} />);
     expect(screen.getByText("Zero-Knowledge Settlement")).toBeDefined();
