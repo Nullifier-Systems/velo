@@ -25,7 +25,7 @@ const zkSettleBodySchema = z.object({
 
 export async function zkSettleRoutes(app: FastifyInstance) {
   // POST /api/v1/cash/zk-settle
-  app.post("/api/v1/cash/zk-settle", async (req, reply) => {
+  app.post("/cash/zk-settle", async (req, reply) => {
     const parseResult = zkSettleBodySchema.safeParse(req.body);
     if (!parseResult.success) {
       return reply.status(422).send({
@@ -123,7 +123,7 @@ export async function zkSettleRoutes(app: FastifyInstance) {
   });
 
   // GET /api/v1/cash/zk-settle/status/:nullifierHash
-  app.get("/api/v1/cash/zk-settle/status/:nullifierHash", async (req, reply) => {
+  app.get("/cash/zk-settle/status/:nullifierHash", async (req, reply) => {
     const { nullifierHash } = req.params as { nullifierHash: string };
 
     const pg = (app as any).pg;

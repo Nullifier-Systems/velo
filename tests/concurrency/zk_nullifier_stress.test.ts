@@ -13,15 +13,15 @@ describe("ZK Nullifier Concurrency Stress Test (Issue #371)", () => {
   });
 
   it("50 simultaneous POST requests with identical nullifier hash yield 1x 202 and 49x 409", async () => {
-    const nullifierHash = "d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3";
-    const commitment = "c6b5a4039281706f5e4d3c2b1a0f9e8d7c6b5a4039281706f5e4d3c2b1f9e8d7";
+    const nullifierHash = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const commitment = "f9e8d7c6b5a4039281706f5e4d3c2b1a0f9e8d7c6b5a4039281706f5e4d3c2b1";
 
     const requests = Array.from({ length: 50 }).map(() =>
       app.inject({
         method: "POST",
         url: "/api/v1/cash/zk-settle",
         payload: {
-          proof: "concurrent_test_proof",
+          proof: "valid_concurrent_test_proof",
           nullifierHash,
           commitment,
         },
