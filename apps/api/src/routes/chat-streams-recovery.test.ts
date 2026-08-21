@@ -9,13 +9,7 @@ import {
   purgeStaleChatSockets,
   trackChatSocket,
 } from "../lib/chat-infrastructure-streams.js";
-import {
-  incrementClock,
-  mergeClock,
-  compareClocks,
-  canDeliver,
-} from "../lib/vector-clock.js";
-import type { VectorClock } from "../lib/vector-clock.js";
+import { incrementClock, compareClocks } from "../lib/vector-clock.js";
 import { chatRoutes } from "./chat.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 
@@ -177,8 +171,12 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
       expect(recovered[1].clock).toBeDefined();
       expect(recovered[2].clock).toBeDefined();
       // Verify the ordering is causal (each happens before the next)
-      expect(compareClocks(recovered[0].clock, recovered[1].clock)).toBeLessThanOrEqual(0);
-      expect(compareClocks(recovered[1].clock, recovered[2].clock)).toBeLessThanOrEqual(0);
+      expect(
+        compareClocks(recovered[0].clock, recovered[1].clock),
+      ).toBeLessThanOrEqual(0);
+      expect(
+        compareClocks(recovered[1].clock, recovered[2].clock),
+      ).toBeLessThanOrEqual(0);
     });
 
     it("prevents out-of-order delivery", async () => {
@@ -194,7 +192,7 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
       // (client hasn't processed msg2)
       const canDeliverMsg3 = canDeliver(msg1Clock, BUYER, msg3Clock);
       expect(canDeliverMsg3).toBe(false); // Cannot skip msg2
-      
+
       // But msg2 is ready to deliver
       const canDeliverMsg2 = canDeliver(msg1Clock, BUYER, msg2Clock);
       expect(canDeliverMsg2).toBe(true);
@@ -453,9 +451,14 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
   const sockets: WebSocket[] = [];
 
   beforeEach(async () => {
-    process.env.CHAT_CAPABILITY_SECRET = "test-chat-capability-secret-at-least-32-bytes";
+    process.env.CHAT_CAPABILITY_SECRET =
+      "test-chat-capability-secret-at-least-32-bytes";
     infra = new MemoryChatInfrastructure();
-    await infra.putTrade(TRADE_ID, { buyer: BUYER, seller: SELLER, status: "locked" });
+    await infra.putTrade(TRADE_ID, {
+      buyer: BUYER,
+      seller: SELLER,
+      status: "locked",
+    });
   });
 
   afterEach(async () => {
@@ -472,7 +475,10 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
     const app = Fastify();
     apps.push(app);
     await app.register(websocket);
-    await app.register(chatRoutes, { prefix: "/api/v1", infrastructure: infra });
+    await app.register(chatRoutes, {
+      prefix: "/api/v1",
+      infrastructure: infra,
+    });
     await app.listen({ port: 0 });
     return (app.server.address() as any).port as number;
   }
@@ -488,7 +494,10 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
 
   function waitForJoined(socket: WebSocket): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timed out waiting for joined")), 2_000);
+      const timer = setTimeout(
+        () => reject(new Error("timed out waiting for joined")),
+        2_000,
+      );
       socket.on("message", (raw) => {
         const payload = JSON.parse(raw.toString());
         if (payload.type === "joined") {
@@ -502,7 +511,10 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
 
   function waitForClose(socket: WebSocket): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timed out waiting for close")), 2_000);
+      const timer = setTimeout(
+        () => reject(new Error("timed out waiting for close")),
+        2_000,
+      );
       socket.once("close", () => {
         clearTimeout(timer);
         resolve();
@@ -514,7 +526,8 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
   async function eventually(predicate: () => boolean): Promise<void> {
     const start = Date.now();
     while (!predicate()) {
-      if (Date.now() - start > 2_000) throw new Error("condition not met in time");
+      if (Date.now() - start > 2_000)
+        throw new Error("condition not met in time");
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
@@ -536,7 +549,11 @@ describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
     process.env.CHAT_HEARTBEAT_INTERVAL_MS = "50";
     process.env.CHAT_HEARTBEAT_MISSED_LIMIT = "2";
     const port = await server();
-    const socket = await connect(port, issueChatCapability(TRADE_ID, BUYER), false);
+    const socket = await connect(
+      port,
+      issueChatCapability(TRADE_ID, BUYER),
+      false,
+    );
     await waitForJoined(socket);
     expect(infra.activeSubscriptions()).toBe(1);
 

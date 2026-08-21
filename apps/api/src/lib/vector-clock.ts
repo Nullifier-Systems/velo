@@ -96,3 +96,51 @@ export function compareClocks(
   if (bGreater && !aGreater) return -1;
   return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Ledger Vector Clock (for Stellar indexer ordering)                */
+/* ------------------------------------------------------------------ */
+
+export type LedgerVectorClock = Record<string, number>;
+
+/**
+ * Get the ledger height (max sequence) from a ledger vector clock.
+ */
+export function ledgerHeight(clock: LedgerVectorClock): number {
+  let max = 0;
+  for (const seq of Object.values(clock)) {
+    if (seq > max) max = seq;
+  }
+  return max;
+}
+
+/**
+ * Merge two ledger vector clocks, taking the maximum for each source.
+ */
+export function mergeLedgerClocks(
+  a: LedgerVectorClock,
+  b: LedgerVectorClock,
+): LedgerVectorClock {
+  const result = { ...a };
+  for (const [key, val] of Object.entries(b)) {
+    result[key] = Math.max(result[key] ?? 0, val);
+  }
+  return result;
+}
+
+/**
+ * Sort ledger frames into causal order using vector clocks.
+ */
+export function sortLedgerFrames(
+  frames: Array<{ source: string; clock: LedgerVectorClock; frame: any }>,
+): Array<{ source: string; clock: LedgerVectorClock; frame: any }> {
+  return frames.sort((a, b) => {
+    // Primary: sort by max ledger height
+    const aHeight = ledgerHeight(a.clock);
+    const bHeight = ledgerHeight(b.clock);
+    if (aHeight !== bHeight) return aHeight - bHeight;
+
+    // Tiebreaker: source name (for deterministic ordering)
+    return a.source.localeCompare(b.source);
+  });
+}
