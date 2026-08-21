@@ -12,58 +12,58 @@ describe("StateChannelStore", () => {
   let mockDb: any;
 
   beforeEach(() => {
-    mockDb = {
-      // Mock postgres-style query with template tag
-      async query(...args: any[]) {
-        if (args[0]?.includes("INSERT INTO state_channels")) {
-          return [
-            {
-              channel_id: "test-channel",
-              party_a: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-              party_b: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
-              total_deposit_stroops: "1000000000",
-              nonce: "0",
-              status: "OPEN",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-          ];
-        }
-        if (args[0]?.includes("SELECT * FROM state_channels")) {
-          return [
-            {
-              channel_id: "test-channel",
-              party_a: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-              party_b: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
-              total_deposit_stroops: "1000000000",
-              nonce: "0",
-              status: "OPEN",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-          ];
-        }
-        if (
-          args[0]?.includes("INSERT INTO state_channel_commits")
-        ) {
-          return [
-            {
-              commit_id: "commit-1",
-              channel_id: "test-channel",
-              sequence_number: "1",
-              signer: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-              state_root: "root123",
-              signature:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              party_a_balance: "500000000",
-              party_b_balance: "500000000",
-              created_at: new Date().toISOString(),
-            },
-          ];
-        }
+    let channels: any[] = [];
+    let commits: any[] = [];
+
+    // Mock db as a template tag function
+    mockDb = async function (strings: any[], ...values: any[]) {
+      const query = strings.join("?");
+
+      if (query.includes("INSERT INTO state_channels")) {
+        const channel = {
+          channel_id: values[0],
+          party_a: values[1],
+          party_b: values[2],
+          total_deposit_stroops: values[3].toString(),
+          nonce: "0",
+          status: "OPEN",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        channels.push(channel);
+        return [channel];
+      }
+
+      if (query.includes("SELECT * FROM state_channels WHERE channel_id")) {
+        const result = channels.filter((c) => c.channel_id === values[0]);
+        return result.length > 0 ? result : [];
+      }
+
+      if (query.includes("INSERT INTO state_channel_commits")) {
+        const commit = {
+          commit_id: "commit-1",
+          channel_id: values[0],
+          sequence_number: values[1].toString(),
+          signer: values[2],
+          state_root: values[3],
+          signature: values[4],
+          party_a_balance: values[5].toString(),
+          party_b_balance: values[6].toString(),
+          created_at: new Date().toISOString(),
+        };
+        commits.push(commit);
+        return [commit];
+      }
+
+      if (query.includes("SELECT * FROM state_channel_commits")) {
+        return commits.filter((c) => c.channel_id === values[0]);
+      }
+
+      if (query.includes("UPDATE state_channels SET status")) {
         return [];
-      },
+      }
+
+      return [];
     };
 
     store = new StateChannelStore({ db: mockDb, redis: undefined });
@@ -73,8 +73,8 @@ describe("StateChannelStore", () => {
     it("creates a new channel with initial state", async () => {
       const channel = await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
@@ -90,8 +90,8 @@ describe("StateChannelStore", () => {
       // Create first
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
@@ -113,15 +113,15 @@ describe("StateChannelStore", () => {
       // Create channel first
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
       const commit = await store.recordCommit(
         "test-channel",
         1n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -137,8 +137,8 @@ describe("StateChannelStore", () => {
       // Create channel
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
@@ -146,7 +146,7 @@ describe("StateChannelStore", () => {
       await store.recordCommit(
         "test-channel",
         1n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -159,7 +159,7 @@ describe("StateChannelStore", () => {
         store.recordCommit(
           "test-channel",
           1n, // Same sequence
-          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
           "root123",
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -173,8 +173,8 @@ describe("StateChannelStore", () => {
       // Create channel
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
@@ -182,7 +182,7 @@ describe("StateChannelStore", () => {
       await store.recordCommit(
         "test-channel",
         5n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -195,7 +195,7 @@ describe("StateChannelStore", () => {
         store.recordCommit(
           "test-channel",
           3n, // Lower than 5
-          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
           "root123",
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -212,7 +212,7 @@ describe("StateChannelStore", () => {
         "message",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
       );
       expect(result).toBe(true);
     });
@@ -221,7 +221,7 @@ describe("StateChannelStore", () => {
       const result = await store["verifySignature"](
         "message",
         "invalid-signature",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
       );
       expect(result).toBe(false);
     });
@@ -242,8 +242,8 @@ describe("StateChannelStore", () => {
       // Create channel first
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
@@ -253,7 +253,8 @@ describe("StateChannelStore", () => {
           settlement_id: "settlement-1",
           channel_id: "test-channel",
           final_sequence_number: "100",
-          initiator: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+          initiator:
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
           party_a_final_balance: "500000000",
           party_b_final_balance: "500000000",
           merkle_root: "0xabcd",
@@ -268,7 +269,7 @@ describe("StateChannelStore", () => {
       const settlement = await store.recordSettlement(
         "test-channel",
         100n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         500000000n,
         500000000n,
         "0xabcd",
