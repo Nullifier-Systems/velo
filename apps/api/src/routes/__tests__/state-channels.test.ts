@@ -82,8 +82,9 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+          partyA:
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
           totalDepositStroops: "1000000000",
         },
       });
@@ -100,8 +101,10 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-          partyB: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+          partyA:
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+          partyB:
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
           totalDepositStroops: "1000000000",
         },
       });
@@ -117,8 +120,9 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
-          partyB: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+          partyA: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+          partyB:
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
           totalDepositStroops: "1000000000",
         },
       });
