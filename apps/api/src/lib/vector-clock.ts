@@ -54,3 +54,45 @@ export function createVectorClock(channelId: string): VectorClock {
     lastSigner: "",
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Legacy Chat Vector Clock Functions (for chat stream ordering)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Legacy: Increment vector clock for chat messages (per-participant tracking).
+ * Returns a new clock with sender's component incremented.
+ */
+export function incrementClock(
+  clock: Record<string, number>,
+  sender: string,
+): Record<string, number> {
+  return {
+    ...clock,
+    [sender]: (clock[sender] ?? 0) + 1,
+  };
+}
+
+/**
+ * Legacy: Compare two vector clocks for causal ordering.
+ * Returns: -1 if a < b, 0 if concurrent, 1 if a > b
+ */
+export function compareClocks(
+  a: Record<string, number>,
+  b: Record<string, number>,
+): number {
+  const allKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  let aGreater = false;
+  let bGreater = false;
+
+  for (const key of allKeys) {
+    const aVal = a[key] ?? 0;
+    const bVal = b[key] ?? 0;
+    if (aVal > bVal) aGreater = true;
+    if (bVal > aVal) bGreater = true;
+  }
+
+  if (aGreater && !bGreater) return 1;
+  if (bGreater && !aGreater) return -1;
+  return 0;
+}

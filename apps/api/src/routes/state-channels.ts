@@ -9,7 +9,7 @@ import { z } from "zod";
 import { ApiError } from "../lib/errors.js";
 import { parseBody } from "../lib/validation.js";
 import { StateChannelStore } from "../lib/state-channels/state-channel-store.js";
-import type { StateChannelUpdate } from "packages/shared";
+import type { StateChannelUpdate } from "@velo/shared";
 
 const createChannelSchema = z.object({
   channelId: z.string().min(1).max(64),
@@ -29,6 +29,14 @@ const stateUpdateSchema = z.object({
   timestamp: z.number(),
 });
 
+const settleSchema = z.object({
+  finalSequenceNumber: z.string().transform((v) => BigInt(v)),
+  initiator: z.string().regex(/^[A-Z0-9]{56}$/),
+  partyAFinalBalance: z.string().transform((v) => BigInt(v)),
+  partyBFinalBalance: z.string().transform((v) => BigInt(v)),
+  merkleRoot: z.string(),
+});
+
 interface StateChannelRouteOptions {
   db: any;
   redis: any;
@@ -41,7 +49,7 @@ interface WebSocketRoom {
 
 export async function stateChannelRoutes(
   app: FastifyInstance,
-  options: StateChannelRouteOptions
+  options: StateChannelRouteOptions,
 ) {
   const store = new StateChannelStore({ db: options.db, redis: options.redis });
   const rooms = new Map<string, WebSocketRoom>();
@@ -65,7 +73,7 @@ export async function stateChannelRoutes(
         throw new ApiError(
           400,
           "INVALID_PARTY_ORDER",
-          "partyA must be less than partyB (sorted)"
+          "partyA must be less than partyB (sorted)",
         );
       }
 
@@ -74,7 +82,7 @@ export async function stateChannelRoutes(
           body.channelId,
           body.partyA,
           body.partyB,
-          body.totalDepositStroops
+          body.totalDepositStroops,
         );
 
         return {
@@ -89,7 +97,7 @@ export async function stateChannelRoutes(
         const message = err instanceof Error ? err.message : "Unknown error";
         throw new ApiError(500, "CHANNEL_CREATION_FAILED", message);
       }
-    }
+    },
   );
 
   /**
@@ -114,7 +122,7 @@ export async function stateChannelRoutes(
         createdAt: channel.createdAt,
         updatedAt: channel.updatedAt,
       };
-    }
+    },
   );
 
   /**
@@ -179,7 +187,7 @@ export async function stateChannelRoutes(
             "", // stateRoot: computed on settlement
             update.signature,
             update.partyABalance,
-            update.partyBBalance
+            update.partyBBalance,
           );
 
           // Broadcast to both parties
@@ -200,12 +208,13 @@ export async function stateChannelRoutes(
                 JSON.stringify({
                   type: "state_update",
                   data: response,
-                })
+                }),
               );
             }
           }
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Invalid message";
+          const message =
+            err instanceof Error ? err.message : "Invalid message";
           send({
             type: "error",
             message,
@@ -226,49 +235,50 @@ export async function stateChannelRoutes(
         clearInterval(heartbeatInterval);
         room.sockets.delete(socket);
       });
-    }
+    },
   );
 
   /**
    * POST /api/v1/state-channels/:channelId/settle
    * Submit a cooperative settlement to the blockchain.
    */
-  app.post<{ Params: { channelId: string }; Body: any }>(
-    "/state-channels/:channelId/settle",
-    async (req, reply) => {
-      const { channelId } = req.params;
-      const { finalSequenceNumber, initiator, partyAFinalBalance, partyBFinalBalance, merkleRoot } =
-        req.body;
+  app.post<{
+    Params: { channelId: string };
+    Body: z.infer<typeof settleSchema>;
+  }>("/state-channels/:channelId/settle", async (req, reply) => {
+    const body = parseBody(settleSchema, req.body, reply);
+    if (!body) return;
 
-      try {
-        const channel = await store.getChannel(channelId);
-        if (!channel) {
-          throw new ApiError(404, "CHANNEL_NOT_FOUND", "Channel does not exist");
-        }
+    const { channelId } = req.params;
 
-        // Record settlement submission
-        const settlement = await store.recordSettlement(
-          channelId,
-          BigInt(finalSequenceNumber),
-          initiator,
-          BigInt(partyAFinalBalance),
-          BigInt(partyBFinalBalance),
-          merkleRoot
-        );
-
-        return {
-          settlementId: settlement.settlementId,
-          channelId: settlement.channelId,
-          finalSequenceNumber: settlement.finalSequenceNumber.toString(),
-          status: settlement.status,
-          createdAt: settlement.createdAt,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Settlement failed";
-        throw new ApiError(500, "SETTLEMENT_FAILED", message);
+    try {
+      const channel = await store.getChannel(channelId);
+      if (!channel) {
+        throw new ApiError(404, "CHANNEL_NOT_FOUND", "Channel does not exist");
       }
+
+      // Record settlement submission
+      const settlement = await store.recordSettlement(
+        channelId,
+        body.finalSequenceNumber,
+        body.initiator,
+        body.partyAFinalBalance,
+        body.partyBFinalBalance,
+        body.merkleRoot,
+      );
+
+      return {
+        settlementId: settlement.settlementId,
+        channelId: settlement.channelId,
+        finalSequenceNumber: settlement.finalSequenceNumber.toString(),
+        status: settlement.status,
+        createdAt: settlement.createdAt,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Settlement failed";
+      throw new ApiError(500, "SETTLEMENT_FAILED", message);
     }
-  );
+  });
 
   /**
    * GET /api/v1/state-channels/:channelId/latest-commit
@@ -279,7 +289,11 @@ export async function stateChannelRoutes(
     async (req, reply) => {
       const commit = await store.getLatestCommit(req.params.channelId);
       if (!commit) {
-        throw new ApiError(404, "NO_COMMITS", "No commits found for this channel");
+        throw new ApiError(
+          404,
+          "NO_COMMITS",
+          "No commits found for this channel",
+        );
       }
 
       return {
@@ -293,6 +307,6 @@ export async function stateChannelRoutes(
         partyBBalance: commit.partyBBalance.toString(),
         createdAt: commit.createdAt,
       };
-    }
+    },
   );
 }

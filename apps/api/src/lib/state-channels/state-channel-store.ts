@@ -8,13 +8,13 @@ import type {
   StateChannel,
   StateChannelCommit,
   StateChannelSettlement,
-} from "packages/shared";
+} from "@velo/shared";
 import {
   advanceVectorClock,
   createVectorClock,
   isValidVectorClockAdvance,
-} from "../vector-clock";
-import type { VectorClock } from "../vector-clock";
+} from "../vector-clock.js";
+import type { VectorClock } from "../vector-clock.js";
 
 export interface StateChannelStoreConfig {
   db: any; // postgres client

@@ -18,9 +18,7 @@ import type { CashRequestRecord } from "./store.js";
 import type { ChatMessage } from "./chat-store.js";
 import {
   incrementClock,
-  mergeClock,
   compareClocks,
-  normalizeClock,
   type VectorClock,
 } from "./vector-clock.js";
 
@@ -424,7 +422,10 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
     };
     const channel = `velo:chat:events:${id}`;
     await this.subscriber.subscribe(channel, handler);
-    this.listenerCounts.set(channel, (this.listenerCounts.get(channel) ?? 0) + 1);
+    this.listenerCounts.set(
+      channel,
+      (this.listenerCounts.get(channel) ?? 0) + 1,
+    );
     return async () => {
       await this.subscriber.unsubscribe(channel, handler);
       const remaining = (this.listenerCounts.get(channel) ?? 0) - 1;

@@ -4,7 +4,7 @@
  */
 
 import { StateChannelStore } from "./state-channel-store.js";
-import type { StateChannel, StateChannelCommit } from "packages/shared";
+import type { StateChannel, StateChannelCommit } from "@velo/shared";
 
 export interface ChannelManagerConfig {
   db: any;
@@ -29,13 +29,15 @@ export class ChannelManager {
     channelId: string,
     partyA: string,
     partyB: string,
-    totalDepositStroops: bigint
+    totalDepositStroops: bigint,
   ): Promise<StateChannel> {
     // Check if channel already exists
     const existing = await this.store.getChannel(channelId);
     if (existing) {
       if (existing.status !== "OPEN") {
-        throw new Error(`Channel ${channelId} is not open (status: ${existing.status})`);
+        throw new Error(
+          `Channel ${channelId} is not open (status: ${existing.status})`,
+        );
       }
       return existing;
     }
@@ -45,7 +47,7 @@ export class ChannelManager {
       channelId,
       partyA,
       partyB,
-      totalDepositStroops
+      totalDepositStroops,
     );
   }
 
@@ -59,7 +61,7 @@ export class ChannelManager {
     signer: string,
     partyABalance: bigint,
     partyBBalance: bigint,
-    signature: string
+    signature: string,
   ): Promise<StateChannelCommit> {
     const channel = await this.store.getChannel(channelId);
     if (!channel) {
@@ -68,7 +70,7 @@ export class ChannelManager {
 
     if (channel.status !== "OPEN") {
       throw new Error(
-        `Channel ${channelId} is not open (status: ${channel.status})`
+        `Channel ${channelId} is not open (status: ${channel.status})`,
       );
     }
 
@@ -80,7 +82,7 @@ export class ChannelManager {
     // Verify balance conservation
     if (partyABalance + partyBBalance !== channel.totalDepositStroops) {
       throw new Error(
-        `Balance mismatch: ${partyABalance} + ${partyBBalance} ≠ ${channel.totalDepositStroops}`
+        `Balance mismatch: ${partyABalance} + ${partyBBalance} ≠ ${channel.totalDepositStroops}`,
       );
     }
 
@@ -92,7 +94,7 @@ export class ChannelManager {
       "", // stateRoot: computed during settlement
       signature,
       partyABalance,
-      partyBBalance
+      partyBBalance,
     );
   }
 
@@ -105,7 +107,7 @@ export class ChannelManager {
     finalSequenceNumber: bigint,
     partyAFinalBalance: bigint,
     partyBFinalBalance: bigint,
-    merkleRoot: string
+    merkleRoot: string,
   ): Promise<string> {
     const channel = await this.store.getChannel(channelId);
     if (!channel) {
@@ -114,7 +116,7 @@ export class ChannelManager {
 
     if (channel.status !== "OPEN") {
       throw new Error(
-        `Channel ${channelId} is not open (status: ${channel.status})`
+        `Channel ${channelId} is not open (status: ${channel.status})`,
       );
     }
 
@@ -126,7 +128,7 @@ export class ChannelManager {
 
     if (finalSequenceNumber < latestCommit.sequenceNumber) {
       throw new Error(
-        `Final sequence ${finalSequenceNumber} is less than latest ${latestCommit.sequenceNumber}`
+        `Final sequence ${finalSequenceNumber} is less than latest ${latestCommit.sequenceNumber}`,
       );
     }
 
@@ -137,7 +139,7 @@ export class ChannelManager {
       "", // initiator: set by caller
       partyAFinalBalance,
       partyBFinalBalance,
-      merkleRoot
+      merkleRoot,
     );
 
     return settlement.settlementId;
@@ -148,7 +150,7 @@ export class ChannelManager {
    */
   async recordSettlementSubmission(
     settlementId: string,
-    txnHash: string
+    txnHash: string,
   ): Promise<void> {
     await this.store.updateSettlementTxn(settlementId, txnHash);
   }
@@ -177,9 +179,7 @@ export class ChannelManager {
   /**
    * Get the latest committed state for a channel.
    */
-  async getLatestState(
-    channelId: string
-  ): Promise<StateChannelCommit | null> {
+  async getLatestState(channelId: string): Promise<StateChannelCommit | null> {
     return await this.store.getLatestCommit(channelId);
   }
 }

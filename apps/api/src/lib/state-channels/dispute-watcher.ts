@@ -18,7 +18,7 @@ export class DisputeWatcher {
   private contractId: string;
   private pollIntervalMs: number;
   private isRunning = false;
-  private pollTimer?: NodeJS.Timer;
+  private pollTimer?: NodeJS.Timeout;
 
   constructor(config: DisputeWatcherConfig) {
     this.db = config.db;
@@ -121,7 +121,7 @@ export class DisputeWatcher {
           audit.challenged_sequence,
           latest.sequence_number,
           latest.signature,
-          latest.state_root
+          latest.state_root,
         );
 
         // Mark audit as resolved
@@ -134,7 +134,7 @@ export class DisputeWatcher {
     } catch (err) {
       console.error(
         `Error processing dispute for channel ${channel.channel_id}:`,
-        err
+        err,
       );
     }
   }
@@ -147,7 +147,7 @@ export class DisputeWatcher {
     challengedSequence: bigint,
     evidenceSequence: bigint,
     evidenceSignature: string,
-    evidenceRoot: string
+    evidenceRoot: string,
   ): Promise<void> {
     try {
       // Construct Soroban contract invocation to challenge_outdated_state
@@ -169,7 +169,7 @@ export class DisputeWatcher {
       // and submitted via Stellar SDK
       console.log(
         `Submitting penalty challenge for channel ${channel.channel_id}: ` +
-          `challenged_seq=${challengedSequence}, evidence_seq=${evidenceSequence}`
+          `challenged_seq=${challengedSequence}, evidence_seq=${evidenceSequence}`,
       );
 
       // TODO: Implement actual transaction submission via Stellar SDK
@@ -192,7 +192,7 @@ export class DisputeWatcher {
     } catch (err) {
       console.error(
         `Failed to submit penalty challenge for channel ${channel.channel_id}:`,
-        err
+        err,
       );
       throw err;
     }
@@ -203,7 +203,7 @@ export class DisputeWatcher {
  * Factory function to create and start a dispute watcher.
  */
 export async function createDisputeWatcher(
-  config: DisputeWatcherConfig
+  config: DisputeWatcherConfig,
 ): Promise<DisputeWatcher> {
   const watcher = new DisputeWatcher(config);
   watcher.start();
