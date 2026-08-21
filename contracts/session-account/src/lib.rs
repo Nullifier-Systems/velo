@@ -20,7 +20,7 @@ use soroban_sdk::{
     auth::{Context, ContractContext, CustomAccountInterface},
     contract, contracterror, contractimpl, contracttype,
     crypto::Hash,
-    Address, BytesN, Env, Symbol, Vec,
+    Address, BytesN, Env, Symbol,
 };
 
 #[contracttype]

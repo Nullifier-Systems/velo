@@ -23,7 +23,8 @@ extern crate std;
 
 use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, BytesN, Env,
+    Symbol,
 };
 
 mod mpt_verifier;
@@ -285,11 +286,12 @@ impl AtomicSwapContract {
 
         // Verify the MPT proof
         let state_root = block_header.state_root;
+        let log_key = soroban_sdk::Bytes::from_slice(&env, &log_index.to_le_bytes());
         Self::verify_mpt_log_inclusion(
             &env,
             &state_root,
             &secret,
-            &log_index.to_le_bytes().to_vec(),
+            &log_key,
             &mpt_proof,
         )?;
 
@@ -344,7 +346,7 @@ impl AtomicSwapContract {
     ) -> Result<(), Error> {
         let verifier = MptVerifier::new(state_root.clone());
 
-        let secret_bytes = soroban_sdk::Bytes::from_slice(&env, secret.as_ref());
+        let secret_bytes: Bytes = secret.clone().into();
 
         match verifier.verify(env, &log_key, &secret_bytes, &mpt_proof) {
             Ok(true) => Ok(()),
@@ -419,17 +421,15 @@ impl AtomicSwapContract {
         mpt_proof: soroban_sdk::Vec<soroban_sdk::Bytes>,
     ) -> Result<bool, Error> {
         // Compute cache key from proof components to detect duplicate verifications
-        let cache_input = soroban_sdk::Bytes::from_slice(
-            &env,
-            &[
-                state_root.as_ref(),
-                proof_key.as_ref(),
-                proof_value.as_ref(),
-            ]
-            .concat(),
-        );
+        let state_root_bytes: Bytes = state_root.clone().into();
+        let mut cache_input = state_root_bytes;
+        cache_input.append(&proof_key);
+        cache_input.append(&proof_value);
+
         let cache_hash = env.crypto().sha256(&cache_input);
-        let cache_key_bytes: BytesN<32> = cache_hash.try_into().unwrap_or_else(|_| BytesN::new());
+        let cache_key_bytes: BytesN<32> = cache_hash.try_into().unwrap_or_else(|_| {
+            BytesN::from_array(&env, &[0u8; 32])
+        });
         let cache_key = DataKey::ProofCache(cache_key_bytes);
 
         // Check cache first to avoid redundant cryptographic operations

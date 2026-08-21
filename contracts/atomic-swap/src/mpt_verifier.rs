@@ -181,7 +181,7 @@ impl MptVerifier {
 
         // Get the child hash/reference for this nibble
         let child_ref = node_data
-            .get(next_nibble)
+            .get(next_nibble as u32)
             .ok_or(MptError::InvalidBranchNode)?;
 
         // If child_ref is 0, no child exists for this path
@@ -191,7 +191,7 @@ impl MptVerifier {
 
         // Parse child hash from remaining node data
         let child_hash: BytesN<32> = node_data
-            .slice(17 + next_nibble * 32, 17 + (next_nibble + 1) * 32)
+            .slice((17 + next_nibble * 32) as u32..(17 + (next_nibble + 1) * 32) as u32)
             .try_into()
             .map_err(|_| MptError::InvalidBranchNode)?;
 
@@ -219,8 +219,8 @@ impl MptVerifier {
         let is_odd = (prefix_byte & 0x10) != 0;
 
         // Extract the key portion
-        let key_offset = 1;
-        let key_bytes = &node_data.slice(key_offset, node_data.len());
+        let key_offset = 1u32;
+        let key_bytes = &node_data.slice(key_offset..node_data.len() as u32);
 
         // Decode the key path
         let key_path = Self::decode_key_path(key_bytes, is_odd)?;
@@ -232,7 +232,7 @@ impl MptVerifier {
 
         if is_leaf {
             // Leaf node: final value should be the last field
-            let value_data = &node_data.slice(key_offset + key_path.len(), node_data.len());
+            let value_data = &node_data.slice((key_offset + key_path.len() as u32)..node_data.len() as u32);
 
             if value_data != expected_value {
                 return Err(MptError::RootMismatch);
@@ -248,8 +248,7 @@ impl MptVerifier {
             // Extension node: contains reference to next node
             let next_hash: BytesN<32> = node_data
                 .slice(
-                    key_offset + key_path.len(),
-                    key_offset + key_path.len() + 32,
+                    (key_offset + key_path.len() as u32)..(key_offset + key_path.len() as u32 + 32),
                 )
                 .try_into()
                 .map_err(|_| MptError::InvalidExtensionNode)?;
@@ -259,7 +258,7 @@ impl MptVerifier {
     }
 
     /// Decode a key path from compressed nibble format
-    fn decode_key_path(data: &Bytes, is_odd: bool) -> MptResult<Bytes> {
+    fn decode_key_path(data: &Bytes, _is_odd: bool) -> MptResult<Bytes> {
         // Simplified decoder - in production, proper nibble expansion needed
         Ok(data.clone())
     }
@@ -277,8 +276,7 @@ impl MptVerifier {
             return Err(MptError::InvalidPath);
         }
 
-        let result_len = remaining.len() - consumed.len();
-        Ok(remaining.slice(consumed.len(), remaining.len()))
+        Ok(remaining.slice(consumed.len() as u32..remaining.len() as u32))
     }
 }
 
@@ -287,10 +285,10 @@ impl MptVerifier {
 /// This function stores trusted header roots and validates that subsequent
 /// proofs reference valid block headers to prevent "fake block" attacks.
 pub fn verify_evm_header(
-    env: &Env,
-    block_hash: &BytesN<32>,
-    block_number: u32,
-    state_root: &BytesN<32>,
+    _env: &Env,
+    _block_hash: &BytesN<32>,
+    _block_number: u32,
+    _state_root: &BytesN<32>,
 ) -> MptResult<()> {
     // In production, this would:
     // 1. Check if the block_hash is known and trusted
