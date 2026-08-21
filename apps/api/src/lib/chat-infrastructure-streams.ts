@@ -85,7 +85,7 @@ export interface SharedTrade {
 
 export interface ChatStreamEntry {
   id: string; // Redis Stream ID (timestamp-sequence)
-  clock: VectorClock; // Vector clock at time of message
+  clock: Record<string, number>; // Chat-style vector clock (per-participant counters)
   sender: string; // Participant who sent this event
   event: ChatEvent; // Actual chat event
   acked?: boolean; // Whether consumer has acked this message
@@ -116,10 +116,10 @@ export interface ChatInfrastructure {
     tradeId: string,
     listener: (event: ChatEvent) => void,
   ): Promise<() => Promise<void>>;
-  // New: recover missed messages for client reconnect
+  // New: recover missed messages for client reconnect (uses chat-style vector clock)
   getMissedMessages(
     tradeId: string,
-    clientClock: VectorClock,
+    clientClock: Record<string, number>,
     participant: string,
   ): Promise<ChatStreamEntry[]>;
   deleteTradeChat(tradeId: string): Promise<number>;
@@ -131,7 +131,7 @@ export class MemoryChatInfrastructure implements ChatInfrastructure {
   private streams = new Map<string, ChatStreamEntry[]>();
   private keys = new Map<string, { publicKey: string; updatedAt: string }>();
   private listeners = new Map<string, Set<(event: ChatEvent) => void>>();
-  private clocks = new Map<string, VectorClock>(); // Per-trade current vector clock
+  private clocks = new Map<string, Record<string, number>>(); // Per-trade current vector clock
   private sequence = 0;
 
   async putTrade(id: string, trade: SharedTrade) {
@@ -226,7 +226,7 @@ export class MemoryChatInfrastructure implements ChatInfrastructure {
 
   async getMissedMessages(
     tradeId: string,
-    clientClock: VectorClock,
+    clientClock: Record<string, number>,
     _participant: string,
   ): Promise<ChatStreamEntry[]> {
     const stream = this.streams.get(tradeId) ?? [];
@@ -393,7 +393,7 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
 
     // Get current clock for this trade
     const clockJson = await this.publisher.get(this.clockKey(id));
-    let clock: VectorClock = clockJson ? JSON.parse(clockJson) : {};
+    let clock: Record<string, number> = clockJson ? JSON.parse(clockJson) : {};
     clock = incrementClock(clock, sender);
     await this.publisher.set(this.clockKey(id), JSON.stringify(clock));
 
@@ -443,7 +443,7 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
 
   async getMissedMessages(
     tradeId: string,
-    clientClock: VectorClock,
+    clientClock: Record<string, number>,
     participant: string,
   ): Promise<ChatStreamEntry[]> {
     await this.ready;
@@ -462,7 +462,7 @@ export class RedisChatInfrastructure implements ChatInfrastructure {
 
       if (!clockJson || !eventJson) continue;
 
-      const entryClock: VectorClock = JSON.parse(clockJson);
+      const entryClock: Record<string, number> = JSON.parse(clockJson);
       const event = JSON.parse(eventJson) as ChatEvent;
 
       // Entry clock is "newer" than client's clock?
