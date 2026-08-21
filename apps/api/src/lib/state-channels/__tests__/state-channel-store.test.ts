@@ -21,6 +21,14 @@ describe("StateChannelStore", () => {
       const query = strings.join("?");
 
       return (async () => {
+        console.log("Mock DB Query:", {
+          firstLine: query.split("\n")[0],
+          hasInsertSettlements: query.includes(
+            "INSERT INTO state_channel_settlements",
+          ),
+          queryLength: query.length,
+        });
+
         if (query.includes("INSERT INTO state_channels")) {
           const channel = {
             channel_id: values[0],
