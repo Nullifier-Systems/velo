@@ -61,7 +61,10 @@ describe("StateChannelStore", () => {
           return commits.filter((c) => c.channel_id === values[0]);
         }
 
-        if (query.includes("INSERT INTO state_channel_settlements")) {
+        if (
+          query.includes("INSERT INTO state_channel_settlements") ||
+          query.includes("state_channel_settlements")
+        ) {
           const settlement = {
             settlement_id: `settlement-${settlements.length + 1}`,
             channel_id: values[0],
@@ -86,8 +89,11 @@ describe("StateChannelStore", () => {
 
         // Debug: log unmatched queries
         console.error("Mock DB: Unmatched query", {
-          query: query.substring(0, 100),
+          query: query.substring(0, 200),
           valuesCount: values.length,
+          values: values.map((v: any) =>
+            typeof v === "bigint" ? `BigInt(${v})` : v,
+          ),
         });
         return [];
       })();
