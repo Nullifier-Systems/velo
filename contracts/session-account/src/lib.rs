@@ -605,11 +605,7 @@ impl SessionAccount {
 /// `(signer, amount)` pair — used internally by `__check_auth`.
 /// Not exposed via `#[contractimpl]` as a callable contract entry point.
 impl SessionAccount {
-    pub fn check_auth_with_signer(
-        env: Env,
-        signer: Address,
-        amount: i128,
-    ) -> Result<(), Error> {
+    pub fn check_auth_with_signer(env: Env, signer: Address, amount: i128) -> Result<(), Error> {
         Self::check_auth_with_signer_internal(&env, &signer, amount)
     }
 
