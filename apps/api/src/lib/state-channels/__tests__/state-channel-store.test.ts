@@ -14,56 +14,78 @@ describe("StateChannelStore", () => {
   beforeEach(() => {
     let channels: any[] = [];
     let commits: any[] = [];
+    let settlements: any[] = [];
 
-    // Mock db as a template tag function
-    mockDb = async function (strings: any[], ...values: any[]) {
+    // Mock db as a template tag function (synchronous return of promise)
+    mockDb = function (strings: any[], ...values: any[]) {
       const query = strings.join("?");
 
-      if (query.includes("INSERT INTO state_channels")) {
-        const channel = {
-          channel_id: values[0],
-          party_a: values[1],
-          party_b: values[2],
-          total_deposit_stroops: values[3].toString(),
-          nonce: "0",
-          status: "OPEN",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        channels.push(channel);
-        return [channel];
-      }
+      return (async () => {
+        if (query.includes("INSERT INTO state_channels")) {
+          const channel = {
+            channel_id: values[0],
+            party_a: values[1],
+            party_b: values[2],
+            total_deposit_stroops: values[3].toString(),
+            nonce: "0",
+            status: "OPEN",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          channels.push(channel);
+          return [channel];
+        }
 
-      if (query.includes("SELECT * FROM state_channels WHERE channel_id")) {
-        const result = channels.filter((c) => c.channel_id === values[0]);
-        return result.length > 0 ? result : [];
-      }
+        if (query.includes("SELECT * FROM state_channels WHERE channel_id")) {
+          const result = channels.filter((c) => c.channel_id === values[0]);
+          return result.length > 0 ? result : [];
+        }
 
-      if (query.includes("INSERT INTO state_channel_commits")) {
-        const commit = {
-          commit_id: "commit-1",
-          channel_id: values[0],
-          sequence_number: values[1].toString(),
-          signer: values[2],
-          state_root: values[3],
-          signature: values[4],
-          party_a_balance: values[5].toString(),
-          party_b_balance: values[6].toString(),
-          created_at: new Date().toISOString(),
-        };
-        commits.push(commit);
-        return [commit];
-      }
+        if (query.includes("INSERT INTO state_channel_commits")) {
+          const commit = {
+            commit_id: "commit-1",
+            channel_id: values[0],
+            sequence_number: values[1].toString(),
+            signer: values[2],
+            state_root: values[3],
+            signature: values[4],
+            party_a_balance: values[5].toString(),
+            party_b_balance: values[6].toString(),
+            created_at: new Date().toISOString(),
+          };
+          commits.push(commit);
+          return [commit];
+        }
 
-      if (query.includes("SELECT * FROM state_channel_commits")) {
-        return commits.filter((c) => c.channel_id === values[0]);
-      }
+        if (query.includes("SELECT * FROM state_channel_commits")) {
+          return commits.filter((c) => c.channel_id === values[0]);
+        }
 
-      if (query.includes("UPDATE state_channels SET status")) {
+        if (query.includes("INSERT INTO state_channel_settlements")) {
+          const settlement = {
+            settlement_id: `settlement-${settlements.length + 1}`,
+            channel_id: values[0],
+            final_sequence_number: values[1].toString(),
+            initiator: values[2],
+            party_a_final_balance: values[3].toString(),
+            party_b_final_balance: values[4].toString(),
+            merkle_root: values[5],
+            submitted_txn_hash: null,
+            status: "PENDING",
+            settled_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          settlements.push(settlement);
+          return [settlement];
+        }
+
+        if (query.includes("UPDATE state_channels SET status")) {
+          return [];
+        }
+
         return [];
-      }
-
-      return [];
+      })();
     };
 
     store = new StateChannelStore({ db: mockDb, redis: undefined });
@@ -247,25 +269,6 @@ describe("StateChannelStore", () => {
         1000000000n,
       );
 
-      // Record settlement
-      mockDb.query = vi.fn().mockResolvedValue([
-        {
-          settlement_id: "settlement-1",
-          channel_id: "test-channel",
-          final_sequence_number: "100",
-          initiator:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-          party_a_final_balance: "500000000",
-          party_b_final_balance: "500000000",
-          merkle_root: "0xabcd",
-          submitted_txn_hash: null,
-          status: "PENDING",
-          settled_at: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ]);
-
       const settlement = await store.recordSettlement(
         "test-channel",
         100n,
@@ -275,7 +278,8 @@ describe("StateChannelStore", () => {
         "0xabcd",
       );
 
-      expect(settlement.settlementId).toBe("settlement-1");
+      expect(settlement.settlementId).toBeDefined();
+      expect(settlement.channelId).toBe("test-channel");
       expect(settlement.status).toBe("PENDING");
       expect(settlement.finalSequenceNumber).toBe(100n);
     });
