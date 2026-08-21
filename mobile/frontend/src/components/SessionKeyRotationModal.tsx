@@ -1,12 +1,12 @@
 // The modal never polls: the second admin approval reaches it through the injected
 // submit result (status "ANCHORED", or signatures_collected >= required_signatures).
 import { CSSProperties, FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const apiBase = import.meta.env.VITE_API_URL ?? "";
 
 const STELLAR_PUBLIC_KEY = /^G[1-9A-HJ-NP-Za-km-z]{55}$/;
 const REQUIRED_SIGNATURES = 2;
-const INVALID_KEY_MESSAGE = "Invalid Stellar public key address";
 
 export interface RotationRequest {
   oldSessionPubkey: string;
@@ -81,6 +81,7 @@ export default function SessionKeyRotationModal({
   signerPublicKey?: string;
   signature?: string;
 }) {
+  const { t } = useTranslation();
   const [oldKey, setOldKey] = useState("");
   const [newKey, setNewKey] = useState("");
   const [oldKeyError, setOldKeyError] = useState<string | null>(null);
@@ -96,7 +97,7 @@ export default function SessionKeyRotationModal({
       setError(null);
       return;
     }
-    setError(isValidSessionKey(value) ? null : INVALID_KEY_MESSAGE);
+    setError(isValidSessionKey(value) ? null : t("sessionRotation.invalidKey"));
   }
 
   async function submit(): Promise<void> {
@@ -125,8 +126,8 @@ export default function SessionKeyRotationModal({
     event.preventDefault();
     const oldValid = isValidSessionKey(oldKey);
     const newValid = isValidSessionKey(newKey);
-    setOldKeyError(oldValid ? null : INVALID_KEY_MESSAGE);
-    setNewKeyError(newValid ? null : INVALID_KEY_MESSAGE);
+    setOldKeyError(oldValid ? null : t("sessionRotation.invalidKey"));
+    setNewKeyError(newValid ? null : t("sessionRotation.invalidKey"));
     if (!oldValid || !newValid) return;
     void submit();
   }
@@ -134,13 +135,19 @@ export default function SessionKeyRotationModal({
   const showForm = phase === "idle" || phase === "submitting" || phase === "error";
 
   return (
-    <div className="skr-modal" role="dialog" aria-modal="true" aria-label="Rotate session key" style={styles.overlay}>
+    <div
+      className="skr-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("sessionRotation.dialogLabel")}
+      style={styles.overlay}
+    >
       <div className="skr-modal-card" style={styles.card}>
-        <h2>Emergency Session Key Rotation</h2>
+        <h2>{t("sessionRotation.title")}</h2>
 
         {showForm && (
           <form className="skr-form" onSubmit={handleSubmit} style={styles.form}>
-            <label htmlFor="skr-old-key">Old session public key</label>
+            <label htmlFor="skr-old-key">{t("sessionRotation.oldKeyLabel")}</label>
             <input
               id="skr-old-key"
               value={oldKey}
@@ -150,7 +157,7 @@ export default function SessionKeyRotationModal({
             />
             {oldKeyError && <p className="skr-error" role="alert" style={styles.error}>{oldKeyError}</p>}
 
-            <label htmlFor="skr-new-key">New session public key</label>
+            <label htmlFor="skr-new-key">{t("sessionRotation.newKeyLabel")}</label>
             <input
               id="skr-new-key"
               value={newKey}
@@ -161,8 +168,12 @@ export default function SessionKeyRotationModal({
             {newKeyError && <p className="skr-error" role="alert" style={styles.error}>{newKeyError}</p>}
 
             <div style={styles.row}>
-              <button type="button" onClick={onClose} disabled={phase === "submitting"}>Cancel</button>
-              <button type="submit" disabled={phase === "submitting"}>Propose Rotation</button>
+              <button type="button" onClick={onClose} disabled={phase === "submitting"}>
+                {t("common.cancel")}
+              </button>
+              <button type="submit" disabled={phase === "submitting"}>
+                {t("sessionRotation.propose")}
+              </button>
             </div>
           </form>
         )}
@@ -170,7 +181,7 @@ export default function SessionKeyRotationModal({
         {phase === "submitting" && (
           <p className="skr-status" role="status" style={styles.row}>
             <span className="skr-spinner" aria-hidden="true">⏳</span>
-            <span>Submitting Rotation Tx to Soroban...</span>
+            <span>{t("sessionRotation.submitting")}</span>
           </p>
         )}
 
@@ -179,14 +190,14 @@ export default function SessionKeyRotationModal({
             <div
               className="skr-progress"
               role="progressbar"
-              aria-label="Signature threshold progress"
+              aria-label={t("sessionRotation.progressLabel")}
               aria-valuemin={0}
               aria-valuemax={required}
               aria-valuenow={collected}
             >
-              {`${collected} of ${required} Signatures Collected`}
+              {t("sessionRotation.progress", { collected, required })}
             </div>
-            <button type="button" onClick={onClose}>Close</button>
+            <button type="button" onClick={onClose}>{t("common.close")}</button>
           </>
         )}
 
@@ -194,16 +205,16 @@ export default function SessionKeyRotationModal({
           <>
             <p className="skr-badge" style={{ ...styles.row, ...styles.anchored }}>
               <span aria-hidden="true">✓</span>
-              <span>Key Revoked &amp; New Key Activated On-Chain</span>
+              <span>{t("sessionRotation.anchored")}</span>
             </p>
-            <button type="button" onClick={onClose}>Close</button>
+            <button type="button" onClick={onClose}>{t("common.close")}</button>
           </>
         )}
 
         {phase === "error" && (
           <div className="skr-banner" role="alert" style={styles.error}>
-            <p>Rotation Failed: Signature Mismatch</p>
-            <button type="button" onClick={() => void submit()}>Retry Proposal</button>
+            <p>{t("sessionRotation.failed")}</p>
+            <button type="button" onClick={() => void submit()}>{t("sessionRotation.retry")}</button>
           </div>
         )}
       </div>

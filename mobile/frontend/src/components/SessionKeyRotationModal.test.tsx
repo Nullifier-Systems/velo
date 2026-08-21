@@ -3,6 +3,32 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const translations: Record<string, string> = {
+        "common.cancel": "Cancel",
+        "common.close": "Close",
+        "sessionRotation.dialogLabel": "Rotate session key",
+        "sessionRotation.title": "Emergency Session Key Rotation",
+        "sessionRotation.oldKeyLabel": "Old session public key",
+        "sessionRotation.newKeyLabel": "New session public key",
+        "sessionRotation.invalidKey": "Invalid Stellar public key address",
+        "sessionRotation.propose": "Propose Rotation",
+        "sessionRotation.submitting": "Submitting Rotation Tx to Soroban...",
+        "sessionRotation.progressLabel": "Signature threshold progress",
+        "sessionRotation.progress": "{{collected}} of {{required}} Signatures Collected",
+        "sessionRotation.anchored": "Key Revoked & New Key Activated On-Chain",
+        "sessionRotation.failed": "Rotation Failed: Signature Mismatch",
+        "sessionRotation.retry": "Retry Proposal",
+      };
+      const value = translations[key] ?? key;
+      return value.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(options?.[name] ?? ""));
+    },
+  }),
+}));
+
 import SessionKeyRotationModal, {
   isValidSessionKey,
   RotationResult,
