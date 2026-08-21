@@ -81,3 +81,36 @@ export const CIRCUIT_BREAKER = {
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
   DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Nullifier Escrow Settlement (#371)                              */
+/* ------------------------------------------------------------------ */
+
+export type ZkNullifierStatus = "PENDING" | "SETTLED" | "REJECTED";
+
+export interface ZkSettleRequest {
+  proof: string;
+  nullifierHash: string;
+  commitment: string;
+  credentialSecret?: string;
+}
+
+export interface ZkSettleResponse {
+  message: string;
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+}
+
+export interface ZkSettleStatusResponse {
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+  txHash?: string | null;
+  errorMessage?: string | null;
+}
+
+export const ZK_SETTLEMENT = {
+  STREAM_KEY: "velo:zk-settlement-queue",
+  GROUP_NAME: "zk-settlement-group",
+  DLQ_KEY: "velo:zk-settlement-dlq",
+  MAX_RETRIES: 5,
+} as const;
