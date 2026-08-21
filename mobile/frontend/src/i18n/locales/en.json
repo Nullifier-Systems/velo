@@ -238,5 +238,19 @@
     "generateAndSettle": "Generate Proof & Settle",
     "failedSubmit": "Failed to submit settlement",
     "networkError": "Network error"
+  },
+  "sessionRotation": {
+    "dialogLabel": "Rotate session key",
+    "title": "Emergency Session Key Rotation",
+    "oldKeyLabel": "Old session public key",
+    "newKeyLabel": "New session public key",
+    "invalidKey": "Invalid Stellar public key address",
+    "propose": "Propose Rotation",
+    "submitting": "Submitting Rotation Tx to Soroban...",
+    "progressLabel": "Signature threshold progress",
+    "progress": "{{collected}} of {{required}} Signatures Collected",
+    "anchored": "Key Revoked & New Key Activated On-Chain",
+    "failed": "Rotation Failed: Signature Mismatch",
+    "retry": "Retry Proposal"
   }
 }

@@ -6,6 +6,9 @@ import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
+import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
+import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
+import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
@@ -74,6 +77,26 @@ async function startServer() {
       }).start();
     } else {
       app.log.warn("DATABASE_URL is not configured; Stellar indexer, circuit breaker and GraphQL are disabled");
+    }
+
+    // (#375) Session-key multi-sig emergency rotation: drain
+    // velo:session-rotation-queue, confirm each proposal on-chain and retire
+    // the old key. Needs both the registry (Postgres) and the queue (Redis).
+    if (pgPool && process.env.REDIS_URL) {
+      try {
+        const rotationQueue = createClient({ url: process.env.REDIS_URL });
+        rotationQueue.on("error", (error) => app.log.error(error, "session rotation queue error"));
+        await rotationQueue.connect();
+        startSessionRotationWorker({
+          store: createSessionKeyRegistryStore(pgPool),
+          redis: rotationQueue,
+        });
+      } catch (error) {
+        // A Redis outage must not stop the API from serving requests.
+        app.log.error(error, "session-key rotation worker failed to start");
+      }
+    } else {
+      app.log.warn("DATABASE_URL or REDIS_URL is not configured; session-key rotation worker is disabled");
     }
   } catch (err) {
     app.log.error(err);

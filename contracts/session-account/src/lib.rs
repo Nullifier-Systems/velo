@@ -14,6 +14,10 @@
 //!   this account the authority to authorize `pause`/`unpause` on a specific
 //!   escrow contract, letting the API's automated arbitration engine halt a
 //!   compromised escrow within its SLA without holding a per-escrow admin key.
+//! - Emergency 2-of-3 multi-sig key rotation (#375): three rotation admins can
+//!   swap out a compromised session key without the main account key. The old
+//!   key is permanently revoked and the new key inherits the remaining quota
+//!   and the original validity window.
 #![no_std]
 
 use soroban_sdk::{
@@ -35,6 +39,14 @@ pub enum DataKey {
     /// Emergency circuit-breaker pause grant (#374):
     /// PauseGrant(escrow_contract) -> expiry ledger
     PauseGrant(Address),
+    /// The 2-of-3 emergency rotation admin set (#375)
+    RotationAdmins,
+    /// Rotation proposal data: RotationProposal(id) -> RotationProposal
+    RotationProposal(u64),
+    /// Identifier handed to the next rotation proposal
+    NextProposalId,
+    /// Session key revoked by a rotation: Revoked(Address) -> bool
+    Revoked(Address),
 }
 
 #[contracttype]
@@ -50,6 +62,19 @@ pub struct SessionKeyInfo {
     pub valid_until_ledger: u64,
     /// Whether this session key is currently active
     pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationProposal {
+    /// The compromised session key to revoke
+    pub old_key: Address,
+    /// The replacement session key to create on execution
+    pub new_key: Address,
+    /// Rotation admins that have approved so far, proposer first
+    pub approvals: Vec<Address>,
+    /// Whether the rotation has already been carried out
+    pub executed: bool,
 }
 
 #[contracterror]
@@ -83,9 +108,27 @@ pub enum Error {
     PauseGrantNotFound = 13,
     /// Emergency pause grant has expired
     PauseGrantExpired = 14,
+    /// The rotation admin set has not been configured
+    RotationAdminsNotSet = 15,
+    /// Signer is not part of the rotation admin set
+    NotRotationAdmin = 16,
+    /// Rotation proposal not found
+    ProposalNotFound = 17,
+    /// This admin has already approved the proposal
+    AlreadyApproved = 18,
+    /// Rotation proposal has already been executed
+    ProposalAlreadyExecuted = 19,
+    /// Session key was revoked by an emergency rotation
+    SessionKeyRevoked = 20,
+    /// The rotation admin set must hold exactly 3 addresses
+    InvalidAdminCount = 21,
 }
 
 const DAY_IN_LEDGERS: u64 = 8640; // ~24 hours at 10s per ledger
+
+/// Number of admins in the rotation set, and approvals needed to execute.
+const ROTATION_ADMIN_COUNT: u32 = 3;
+const ROTATION_THRESHOLD: u32 = 2;
 
 #[contract]
 pub struct SessionAccount;
@@ -340,6 +383,222 @@ impl SessionAccount {
             .ok_or(Error::PauseGrantNotFound)?;
         Ok(expiry)
     }
+
+    /// Configure the 2-of-3 emergency rotation admin set (#375).
+    ///
+    /// Only the main account can set it, and it must hold exactly 3 addresses.
+    /// Calling it again replaces the whole set, which is how an admin key is
+    /// itself rotated out.
+    pub fn set_rotation_admins(env: Env, admins: Vec<Address>) -> Result<(), Error> {
+        let main_account: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MainAccount)
+            .ok_or(Error::NotInitialized)?;
+
+        main_account.require_auth();
+
+        if admins.len() != ROTATION_ADMIN_COUNT {
+            return Err(Error::InvalidAdminCount);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RotationAdmins, &admins);
+
+        Ok(())
+    }
+
+    /// Propose swapping a compromised session key for a fresh one.
+    ///
+    /// The proposer must be a rotation admin and counts as the first approval,
+    /// so one further admin is enough to execute the rotation.
+    pub fn propose_rotation(
+        env: Env,
+        proposer: Address,
+        old_key: Address,
+        new_key: Address,
+    ) -> Result<u64, Error> {
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationAdmins)
+            .ok_or(Error::RotationAdminsNotSet)?;
+
+        proposer.require_auth();
+
+        if !admins.iter().any(|admin| admin == proposer) {
+            return Err(Error::NotRotationAdmin);
+        }
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::SessionKey(old_key.clone()))
+        {
+            return Err(Error::SessionKeyNotFound);
+        }
+        if Self::is_revoked(&env, &old_key) {
+            return Err(Error::SessionKeyRevoked);
+        }
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::SessionKey(new_key.clone()))
+        {
+            return Err(Error::SessionKeyExists);
+        }
+
+        let proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextProposalId)
+            .unwrap_or(0);
+
+        let proposal = RotationProposal {
+            old_key,
+            new_key,
+            approvals: soroban_sdk::vec![&env, proposer],
+            executed: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RotationProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextProposalId, &(proposal_id + 1));
+
+        Ok(proposal_id)
+    }
+
+    /// Approve a rotation proposal. The second distinct admin approval executes
+    /// it: the old key is revoked and the new key is created with the quota the
+    /// old key had left and the same validity window.
+    pub fn approve_rotation(env: Env, approver: Address, proposal_id: u64) -> Result<(), Error> {
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationAdmins)
+            .ok_or(Error::RotationAdminsNotSet)?;
+
+        approver.require_auth();
+
+        if !admins.iter().any(|admin| admin == approver) {
+            return Err(Error::NotRotationAdmin);
+        }
+
+        let proposal_key = DataKey::RotationProposal(proposal_id);
+        let mut proposal: RotationProposal = env
+            .storage()
+            .instance()
+            .get(&proposal_key)
+            .ok_or(Error::ProposalNotFound)?;
+
+        if proposal.executed {
+            return Err(Error::ProposalAlreadyExecuted);
+        }
+        if proposal.approvals.iter().any(|a| a == approver) {
+            return Err(Error::AlreadyApproved);
+        }
+
+        proposal.approvals.push_back(approver);
+
+        if proposal.approvals.len() >= ROTATION_THRESHOLD {
+            Self::execute_rotation(&env, &mut proposal, proposal_id)?;
+        }
+
+        env.storage().instance().set(&proposal_key, &proposal);
+
+        Ok(())
+    }
+
+    /// Get the rotation admin set.
+    pub fn get_rotation_admins(env: Env) -> Result<Vec<Address>, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::RotationAdmins)
+            .ok_or(Error::RotationAdminsNotSet)
+    }
+
+    /// Get a rotation proposal by id.
+    pub fn get_rotation_proposal(env: Env, proposal_id: u64) -> Result<RotationProposal, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::RotationProposal(proposal_id))
+            .ok_or(Error::ProposalNotFound)
+    }
+}
+
+impl SessionAccount {
+    /// Whether a session key was revoked by an emergency rotation.
+    fn is_revoked(env: &Env, session_key: &Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Revoked(session_key.clone()))
+            .unwrap_or(false)
+    }
+
+    /// Carry out an approved rotation. Revokes the old key and creates the new
+    /// one with the leftover quota and the old validity window.
+    fn execute_rotation(
+        env: &Env,
+        proposal: &mut RotationProposal,
+        proposal_id: u64,
+    ) -> Result<(), Error> {
+        let old_storage_key = DataKey::SessionKey(proposal.old_key.clone());
+        let mut old_info: SessionKeyInfo = env
+            .storage()
+            .instance()
+            .get(&old_storage_key)
+            .ok_or(Error::SessionKeyNotFound)?;
+
+        if Self::is_revoked(env, &proposal.old_key) {
+            return Err(Error::SessionKeyRevoked);
+        }
+
+        old_info.active = false;
+        env.storage().instance().set(&old_storage_key, &old_info);
+        env.storage()
+            .instance()
+            .set(&DataKey::Revoked(proposal.old_key.clone()), &true);
+
+        // The replacement inherits what the old key had left, never zero or
+        // negative, so an exhausted key still rotates to a usable one.
+        let spent: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Spent(proposal.old_key.clone()))
+            .unwrap_or(0);
+        let remaining = old_info.spending_cap.saturating_sub(spent).max(1);
+
+        let new_info = SessionKeyInfo {
+            key: proposal.new_key.clone(),
+            spending_cap: remaining,
+            valid_from_ledger: old_info.valid_from_ledger,
+            valid_until_ledger: old_info.valid_until_ledger,
+            active: true,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::SessionKey(proposal.new_key.clone()), &new_info);
+        env.storage()
+            .instance()
+            .set(&DataKey::Spent(proposal.new_key.clone()), &0i128);
+
+        proposal.executed = true;
+
+        env.events().publish(
+            (Symbol::new(env, "session_key_rotated"),),
+            (
+                proposal.old_key.clone(),
+                proposal.new_key.clone(),
+                proposal_id,
+            ),
+        );
+
+        Ok(())
+    }
 }
 
 /// Legacy helper that enforces session-key bounds against an explicit
@@ -366,6 +625,14 @@ impl SessionAccount {
         // If the signer is the main account, always allow
         if signer == main_account {
             return Ok(());
+        }
+
+        // A key rotated out by the 2-of-3 multi-sig is dead for good (#375),
+        // and that outranks the plain inactive flag.
+        if Self::is_revoked(&env, &signer) {
+            return Err(soroban_sdk::Error::from_contract_error(
+                Error::SessionKeyRevoked as u32,
+            ));
         }
 
         // Check if this is a session key
@@ -440,7 +707,8 @@ impl SessionAccount {
 //      unexpired `PauseGrant` (#374).
 //   2. Always authorizes the main account (attached as a delegated signer).
 //   3. Otherwise requires an active, in-window session key to be attached as
-//      a delegated signer.
+//      a delegated signer. A key rotated out by the 2-of-3 multi-sig (#375) is
+//      rejected before the active flag is even read.
 #[contractimpl]
 impl CustomAccountInterface for SessionAccount {
     type Signature = ();
@@ -490,6 +758,9 @@ impl CustomAccountInterface for SessionAccount {
 
         // (3) Otherwise an active, in-window session key must be attached.
         for signer in delegated.iter() {
+            if Self::is_revoked(&env, &signer) {
+                return Err(Error::SessionKeyRevoked);
+            }
             let info: SessionKeyInfo = env
                 .storage()
                 .instance()
@@ -963,6 +1234,356 @@ mod test {
         env.as_contract(&contract_address, || {
             let result = SessionAccount::__check_auth(env.clone(), hash.clone(), (), contexts);
             assert_eq!(result, Err(Error::PauseGrantExpired));
+        });
+    }
+
+    // --- Emergency 2-of-3 multi-sig key rotation (#375) ---
+
+    /// Initialized account with a rotation admin set and one live session key.
+    fn setup_rotation(
+        env: &Env,
+        contract_address: &Address,
+        spending_cap: i128,
+    ) -> (Vec<Address>, Address) {
+        let main_account = Address::generate(env);
+        let admins = soroban_sdk::vec![
+            env,
+            Address::generate(env),
+            Address::generate(env),
+            Address::generate(env)
+        ];
+        let session_key = Address::generate(env);
+
+        env.as_contract(contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account).unwrap();
+        });
+
+        env.as_contract(contract_address, || {
+            SessionAccount::set_rotation_admins(env.clone(), admins.clone()).unwrap();
+        });
+
+        env.as_contract(contract_address, || {
+            SessionAccount::create_session_key(
+                env.clone(),
+                session_key.clone(),
+                spending_cap,
+                7,
+                0,
+            )
+            .unwrap();
+        });
+
+        (admins, session_key)
+    }
+
+    #[test]
+    fn test_set_rotation_admins() {
+        let (env, contract_address) = setup_env();
+        let (admins, _) = setup_rotation(&env, &contract_address, 100_000_000);
+
+        env.as_contract(&contract_address, || {
+            let stored = SessionAccount::get_rotation_admins(env.clone()).unwrap();
+            assert_eq!(stored, admins);
+        });
+    }
+
+    #[test]
+    fn test_set_rotation_admins_wrong_count_fails() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account).unwrap();
+        });
+
+        let two = soroban_sdk::vec![&env, Address::generate(&env), Address::generate(&env)];
+        let four = soroban_sdk::vec![
+            &env,
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env)
+        ];
+
+        env.as_contract(&contract_address, || {
+            assert_eq!(
+                SessionAccount::set_rotation_admins(env.clone(), two),
+                Err(Error::InvalidAdminCount)
+            );
+        });
+
+        env.as_contract(&contract_address, || {
+            assert_eq!(
+                SessionAccount::set_rotation_admins(env.clone(), four),
+                Err(Error::InvalidAdminCount)
+            );
+        });
+
+        env.as_contract(&contract_address, || {
+            assert_eq!(
+                SessionAccount::get_rotation_admins(env.clone()),
+                Err(Error::RotationAdminsNotSet)
+            );
+        });
+    }
+
+    #[test]
+    fn test_rotation_two_of_three_executes() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let new_key = Address::generate(&env);
+
+        let old_info = env.as_contract(&contract_address, || {
+            SessionAccount::get_session_key(env.clone(), old_key.clone()).unwrap()
+        });
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key.clone(),
+                new_key.clone(),
+            )
+            .unwrap()
+        });
+        assert_eq!(proposal_id, 0);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::approve_rotation(env.clone(), admins.get(1).unwrap(), proposal_id)
+                .unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let proposal = SessionAccount::get_rotation_proposal(env.clone(), proposal_id).unwrap();
+            assert!(proposal.executed);
+            assert_eq!(proposal.approvals.len(), 2);
+
+            // The old key is inactive and permanently revoked.
+            let old = SessionAccount::get_session_key(env.clone(), old_key.clone()).unwrap();
+            assert!(!old.active);
+
+            // The replacement carries the same window and is spendable.
+            let new = SessionAccount::get_session_key(env.clone(), new_key.clone()).unwrap();
+            assert!(new.active);
+            assert_eq!(new.valid_from_ledger, old_info.valid_from_ledger);
+            assert_eq!(new.valid_until_ledger, old_info.valid_until_ledger);
+            assert_eq!(
+                SessionAccount::get_spent(env.clone(), new_key.clone()).unwrap(),
+                0
+            );
+            SessionAccount::check_auth_with_signer(env.clone(), new_key.clone(), 10_000_000)
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn test_rotation_single_approval_does_not_execute() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let new_key = Address::generate(&env);
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key.clone(),
+                new_key.clone(),
+            )
+            .unwrap()
+        });
+
+        env.as_contract(&contract_address, || {
+            let proposal = SessionAccount::get_rotation_proposal(env.clone(), proposal_id).unwrap();
+            assert!(!proposal.executed);
+            assert_eq!(proposal.approvals.len(), 1);
+            assert_eq!(proposal.approvals.get(0).unwrap(), admins.get(0).unwrap());
+
+            // Nothing changed on chain until the second admin signs.
+            let old = SessionAccount::get_session_key(env.clone(), old_key.clone()).unwrap();
+            assert!(old.active);
+            assert_eq!(
+                SessionAccount::get_session_key(env.clone(), new_key.clone()),
+                Err(Error::SessionKeyNotFound)
+            );
+            SessionAccount::check_auth_with_signer(env.clone(), old_key.clone(), 10_000_000)
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn test_propose_rotation_rejects_non_admin() {
+        let (env, contract_address) = setup_env();
+        let (_, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let outsider = Address::generate(&env);
+        let new_key = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::propose_rotation(env.clone(), outsider, old_key, new_key);
+            assert_eq!(result, Err(Error::NotRotationAdmin));
+        });
+    }
+
+    #[test]
+    fn test_propose_rotation_requires_admin_set() {
+        let (env, contract_address) = setup_env();
+        let main_account = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::initialize(env.clone(), main_account).unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::propose_rotation(
+                env.clone(),
+                Address::generate(&env),
+                Address::generate(&env),
+                Address::generate(&env),
+            );
+            assert_eq!(result, Err(Error::RotationAdminsNotSet));
+        });
+    }
+
+    #[test]
+    fn test_approve_rotation_rejects_duplicate_approver() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let new_key = Address::generate(&env);
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key.clone(),
+                new_key,
+            )
+            .unwrap()
+        });
+
+        env.as_contract(&contract_address, || {
+            // The proposer already counts as the first approval.
+            let result =
+                SessionAccount::approve_rotation(env.clone(), admins.get(0).unwrap(), proposal_id);
+            assert_eq!(result, Err(Error::AlreadyApproved));
+
+            let old = SessionAccount::get_session_key(env.clone(), old_key.clone()).unwrap();
+            assert!(old.active);
+        });
+    }
+
+    #[test]
+    fn test_approve_rotation_rejects_executed_proposal() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let new_key = Address::generate(&env);
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(env.clone(), admins.get(0).unwrap(), old_key, new_key)
+                .unwrap()
+        });
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::approve_rotation(env.clone(), admins.get(1).unwrap(), proposal_id)
+                .unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let result =
+                SessionAccount::approve_rotation(env.clone(), admins.get(2).unwrap(), proposal_id);
+            assert_eq!(result, Err(Error::ProposalAlreadyExecuted));
+        });
+    }
+
+    #[test]
+    fn test_approve_rotation_unknown_proposal() {
+        let (env, contract_address) = setup_env();
+        let (admins, _) = setup_rotation(&env, &contract_address, 100_000_000);
+
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::approve_rotation(env.clone(), admins.get(0).unwrap(), 42);
+            assert_eq!(result, Err(Error::ProposalNotFound));
+        });
+    }
+
+    #[test]
+    fn test_rotated_key_fails_auth_with_revoked_error() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 100_000_000);
+        let new_key = Address::generate(&env);
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key.clone(),
+                new_key,
+            )
+            .unwrap()
+        });
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::approve_rotation(env.clone(), admins.get(1).unwrap(), proposal_id)
+                .unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let result =
+                SessionAccount::check_auth_with_signer(env.clone(), old_key.clone(), 10_000_000);
+            assert_eq!(
+                result,
+                Err(soroban_sdk::Error::from_contract_error(
+                    Error::SessionKeyRevoked as u32
+                ))
+            );
+        });
+
+        // A second proposal cannot resurrect the revoked key either.
+        env.as_contract(&contract_address, || {
+            let result = SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key,
+                Address::generate(&env),
+            );
+            assert_eq!(result, Err(Error::SessionKeyRevoked));
+        });
+    }
+
+    #[test]
+    fn test_rotated_key_inherits_remaining_quota() {
+        let (env, contract_address) = setup_env();
+        let (admins, old_key) = setup_rotation(&env, &contract_address, 50_000_000);
+        let new_key = Address::generate(&env);
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::check_auth_with_signer(env.clone(), old_key.clone(), 30_000_000)
+                .unwrap();
+        });
+
+        let proposal_id = env.as_contract(&contract_address, || {
+            SessionAccount::propose_rotation(
+                env.clone(),
+                admins.get(0).unwrap(),
+                old_key,
+                new_key.clone(),
+            )
+            .unwrap()
+        });
+
+        env.as_contract(&contract_address, || {
+            SessionAccount::approve_rotation(env.clone(), admins.get(1).unwrap(), proposal_id)
+                .unwrap();
+        });
+
+        env.as_contract(&contract_address, || {
+            let new = SessionAccount::get_session_key(env.clone(), new_key.clone()).unwrap();
+            assert_eq!(new.spending_cap, 20_000_000);
+
+            // The leftover quota is spendable, one stroop more is not.
+            SessionAccount::check_auth_with_signer(env.clone(), new_key.clone(), 20_000_000)
+                .unwrap();
+            assert!(
+                SessionAccount::check_auth_with_signer(env.clone(), new_key.clone(), 1).is_err()
+            );
         });
     }
 }

@@ -238,5 +238,19 @@
     "generateAndSettle": "Generar prueba y liquidar",
     "failedSubmit": "Error al enviar la liquidación",
     "networkError": "Error de red"
+  },
+  "sessionRotation": {
+    "dialogLabel": "Rotar la clave de sesión",
+    "title": "Rotación de emergencia de la clave de sesión",
+    "oldKeyLabel": "Clave pública de sesión anterior",
+    "newKeyLabel": "Nueva clave pública de sesión",
+    "invalidKey": "Dirección de clave pública de Stellar no válida",
+    "propose": "Proponer rotación",
+    "submitting": "Enviando la transacción de rotación a Soroban...",
+    "progressLabel": "Progreso del umbral de firmas",
+    "progress": "{{collected}} de {{required}} firmas recogidas",
+    "anchored": "Clave revocada y nueva clave activada en la cadena",
+    "failed": "Error de rotación: las firmas no coinciden",
+    "retry": "Reintentar la propuesta"
   }
 }

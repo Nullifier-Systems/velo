@@ -1459,3 +1459,71 @@ export async function readEscrowTokenBalance(
     status: rawStatus.toLowerCase(),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Session-key multi-sig emergency rotation (#375)
+// ---------------------------------------------------------------------------
+
+export interface ProposeRotationParams {
+  contractId: string;
+  proposer: string;
+  oldKey: string;
+  newKey: string;
+}
+
+export interface ApproveRotationParams {
+  contractId: string;
+  approver: string;
+  proposalId: bigint | number | string;
+}
+
+/** On-chain `RotationProposal` as returned by `get_rotation_proposal`. */
+export interface OnChainRotationProposal {
+  old_key: string;
+  new_key: string;
+  approvals: string[];
+  executed: boolean;
+}
+
+/** `propose_rotation(proposer, old_key, new_key) -> u64` — custodial (testnet). */
+export async function proposeRotation(params: ProposeRotationParams): Promise<bigint> {
+  const signer = loadSignerKeypair();
+  const proposalId = await invokeContract(
+    params.contractId,
+    "propose_rotation",
+    [
+      nativeToScVal(params.proposer, { type: "address" }),
+      nativeToScVal(params.oldKey, { type: "address" }),
+      nativeToScVal(params.newKey, { type: "address" }),
+    ],
+    signer,
+  );
+  return BigInt(proposalId as bigint | number | string);
+}
+
+/** `approve_rotation(approver, proposal_id)` — the 2nd approval executes it. */
+export async function approveRotation(params: ApproveRotationParams): Promise<void> {
+  const signer = loadSignerKeypair();
+  await invokeContract(
+    params.contractId,
+    "approve_rotation",
+    [
+      nativeToScVal(params.approver, { type: "address" }),
+      nativeToScVal(BigInt(params.proposalId), { type: "u64" }),
+    ],
+    signer,
+  );
+}
+
+/** Read-only `get_rotation_proposal(proposal_id)`; null when it is unset. */
+export async function getRotationProposal(
+  contractId: string,
+  proposalId: bigint | number | string,
+): Promise<OnChainRotationProposal | null> {
+  const proposal = await simulateContractRead<OnChainRotationProposal | null>(
+    contractId,
+    "get_rotation_proposal",
+    [nativeToScVal(BigInt(proposalId), { type: "u64" })],
+  );
+  return proposal ?? null;
+}
