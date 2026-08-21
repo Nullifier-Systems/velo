@@ -497,7 +497,10 @@ impl CustomAccountInterface for SessionAccount {
 mod test {
     extern crate std;
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger}, BytesN};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        BytesN,
+    };
 
     fn setup_env() -> (Env, Address) {
         let env = Env::default();
@@ -706,11 +709,8 @@ mod test {
             assert_eq!(spent, 30_000_000);
 
             // Third authorization should exceed cap and fail
-            let result = SessionAccount::check_auth_with_signer_internal(
-                &env,
-                &session_key,
-                30_000_000,
-            );
+            let result =
+                SessionAccount::check_auth_with_signer_internal(&env, &session_key, 30_000_000);
             assert!(result.is_err());
         });
     }
@@ -741,11 +741,8 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should fail because key is not yet valid
-            let result = SessionAccount::check_auth_with_signer_internal(
-                &env,
-                &session_key,
-                10_000_000,
-            );
+            let result =
+                SessionAccount::check_auth_with_signer_internal(&env, &session_key, 10_000_000);
             assert!(result.is_err());
         });
 
@@ -799,11 +796,8 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should now fail
-            let result = SessionAccount::check_auth_with_signer_internal(
-                &env,
-                &session_key,
-                10_000_000,
-            );
+            let result =
+                SessionAccount::check_auth_with_signer_internal(&env, &session_key, 10_000_000);
             assert!(result.is_err());
         });
     }
@@ -819,12 +813,8 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Main account should always be able to authorize regardless of spending
-            SessionAccount::check_auth_with_signer_internal(
-                &env,
-                &main_account,
-                1_000_000_000,
-            )
-            .unwrap();
+            SessionAccount::check_auth_with_signer_internal(&env, &main_account, 1_000_000_000)
+                .unwrap();
         });
     }
 
@@ -841,7 +831,8 @@ mod test {
         let token_admin = Address::generate(&env);
         let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
         let token_client = soroban_sdk::token::Client::new(&env, &token_contract.address());
-        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_contract.address());
+        let token_admin_client =
+            soroban_sdk::token::StellarAssetClient::new(&env, &token_contract.address());
 
         // Mint 100 USDC (100_000_000 stroops) to session account
         token_admin_client.mint(&session_account_addr, &100_000_000);
@@ -853,10 +844,12 @@ mod test {
         // Create session key
         session_account_client.create_session_key(&session_key, &cap, &7, &0);
 
-        let account_sc: soroban_sdk::xdr::ScAddress = session_account_addr.clone().try_into().unwrap();
+        let account_sc: soroban_sdk::xdr::ScAddress =
+            session_account_addr.clone().try_into().unwrap();
         let delegate_sc: soroban_sdk::xdr::ScAddress = session_key.clone().try_into().unwrap();
         let recipient_sc: soroban_sdk::xdr::ScAddress = recipient.clone().try_into().unwrap();
-        let token_sc: soroban_sdk::xdr::ScAddress = token_contract.address().clone().try_into().unwrap();
+        let token_sc: soroban_sdk::xdr::ScAddress =
+            token_contract.address().clone().try_into().unwrap();
 
         let amount_30 = 30_000_000i128;
 
@@ -883,7 +876,9 @@ mod test {
                 function: soroban_sdk::xdr::SorobanAuthorizedFunction::ContractFn(
                     soroban_sdk::xdr::InvokeContractArgs {
                         contract_address: token_sc.clone(),
-                        function_name: soroban_sdk::xdr::StringM::try_from("transfer").unwrap().into(),
+                        function_name: soroban_sdk::xdr::StringM::try_from("transfer")
+                            .unwrap()
+                            .into(),
                         args: std::vec![
                             soroban_sdk::xdr::ScVal::Address(account_sc.clone()),
                             soroban_sdk::xdr::ScVal::Address(recipient_sc.clone()),
@@ -928,7 +923,9 @@ mod test {
                 function: soroban_sdk::xdr::SorobanAuthorizedFunction::ContractFn(
                     soroban_sdk::xdr::InvokeContractArgs {
                         contract_address: token_sc.clone(),
-                        function_name: soroban_sdk::xdr::StringM::try_from("transfer").unwrap().into(),
+                        function_name: soroban_sdk::xdr::StringM::try_from("transfer")
+                            .unwrap()
+                            .into(),
                         args: std::vec![
                             soroban_sdk::xdr::ScVal::Address(account_sc.clone()),
                             soroban_sdk::xdr::ScVal::Address(recipient_sc.clone()),

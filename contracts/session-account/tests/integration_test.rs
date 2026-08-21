@@ -1,10 +1,7 @@
 #![cfg(test)]
 
 use session_account::{SessionAccount, SessionAccountClient};
-use soroban_sdk::{
-    testutils::Address as _,
-    token, xdr, Address, Env,
-};
+use soroban_sdk::{testutils::Address as _, token, xdr, Address, Env};
 
 fn i128_to_scval(v: i128) -> xdr::ScVal {
     xdr::ScVal::I128(xdr::Int128Parts {
@@ -67,19 +64,17 @@ fn test_integration_token_transfer_flows() {
             },
         ),
         root_invocation: xdr::SorobanAuthorizedInvocation {
-            function: xdr::SorobanAuthorizedFunction::ContractFn(
-                xdr::InvokeContractArgs {
-                    contract_address: token_sc.clone(),
-                    function_name: xdr::StringM::try_from("transfer").unwrap().into(),
-                    args: std::vec![
-                        xdr::ScVal::Address(account_sc.clone()),
-                        xdr::ScVal::Address(recipient_sc.clone()),
-                        i128_to_scval(transfer_30),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                },
-            ),
+            function: xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                contract_address: token_sc.clone(),
+                function_name: xdr::StringM::try_from("transfer").unwrap().into(),
+                args: std::vec![
+                    xdr::ScVal::Address(account_sc.clone()),
+                    xdr::ScVal::Address(recipient_sc.clone()),
+                    i128_to_scval(transfer_30),
+                ]
+                .try_into()
+                .unwrap(),
+            }),
             sub_invocations: Default::default(),
         },
     }]);
@@ -108,30 +103,29 @@ fn test_integration_token_transfer_flows() {
             },
         ),
         root_invocation: xdr::SorobanAuthorizedInvocation {
-            function: xdr::SorobanAuthorizedFunction::ContractFn(
-                xdr::InvokeContractArgs {
-                    contract_address: token_sc.clone(),
-                    function_name: xdr::StringM::try_from("transfer").unwrap().into(),
-                    args: std::vec![
-                        xdr::ScVal::Address(account_sc.clone()),
-                        xdr::ScVal::Address(recipient_sc.clone()),
-                        i128_to_scval(transfer_30),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                },
-            ),
+            function: xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                contract_address: token_sc.clone(),
+                function_name: xdr::StringM::try_from("transfer").unwrap().into(),
+                args: std::vec![
+                    xdr::ScVal::Address(account_sc.clone()),
+                    xdr::ScVal::Address(recipient_sc.clone()),
+                    i128_to_scval(transfer_30),
+                ]
+                .try_into()
+                .unwrap(),
+            }),
             sub_invocations: Default::default(),
         },
     }]);
 
-    let cap_exceeded_res = token_client.try_transfer(&session_account_addr, &recipient, &transfer_30);
+    let cap_exceeded_res =
+        token_client.try_transfer(&session_account_addr, &recipient, &transfer_30);
     assert!(cap_exceeded_res.is_err());
 
     // 3. Transfer after revocation fails
     let session_key2 = Address::generate(&env);
     let delegate_sc2: xdr::ScAddress = session_key2.clone().try_into().unwrap();
-    
+
     env.mock_all_auths();
     session_account_client.create_session_key(&session_key2, &cap, &7, &0);
     session_account_client.revoke_session_key(&session_key2);
@@ -156,19 +150,17 @@ fn test_integration_token_transfer_flows() {
             },
         ),
         root_invocation: xdr::SorobanAuthorizedInvocation {
-            function: xdr::SorobanAuthorizedFunction::ContractFn(
-                xdr::InvokeContractArgs {
-                    contract_address: token_sc.clone(),
-                    function_name: xdr::StringM::try_from("transfer").unwrap().into(),
-                    args: std::vec![
-                        xdr::ScVal::Address(account_sc.clone()),
-                        xdr::ScVal::Address(recipient_sc.clone()),
-                        i128_to_scval(transfer_10),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                },
-            ),
+            function: xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                contract_address: token_sc.clone(),
+                function_name: xdr::StringM::try_from("transfer").unwrap().into(),
+                args: std::vec![
+                    xdr::ScVal::Address(account_sc.clone()),
+                    xdr::ScVal::Address(recipient_sc.clone()),
+                    i128_to_scval(transfer_10),
+                ]
+                .try_into()
+                .unwrap(),
+            }),
             sub_invocations: Default::default(),
         },
     }]);
