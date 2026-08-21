@@ -287,37 +287,49 @@ export class StateChannelStore {
     partyBFinalBalance: bigint,
     merkleRoot: string,
   ): Promise<StateChannelSettlement> {
-    const result = await this.db`
-      INSERT INTO state_channel_settlements (
-        channel_id, final_sequence_number, initiator,
-        party_a_final_balance, party_b_final_balance, merkle_root, status
-      )
-      VALUES (
-        ${channelId}, ${finalSequenceNumber}, ${initiator},
-        ${partyAFinalBalance}, ${partyBFinalBalance}, ${merkleRoot}, 'PENDING'
-      )
-      RETURNING *
-    `;
+    try {
+      const result = await this.db`
+        INSERT INTO state_channel_settlements (
+          channel_id, final_sequence_number, initiator,
+          party_a_final_balance, party_b_final_balance, merkle_root, status
+        )
+        VALUES (
+          ${channelId}, ${finalSequenceNumber}, ${initiator},
+          ${partyAFinalBalance}, ${partyBFinalBalance}, ${merkleRoot}, 'PENDING'
+        )
+        RETURNING *
+      `;
 
-    if (result.length === 0) {
-      throw new Error(`Failed to record settlement for channel ${channelId}`);
+      if (result.length === 0) {
+        throw new Error(
+          `Settlement INSERT returned no rows for channel ${channelId}`,
+        );
+      }
+
+      const row = result[0];
+      return {
+        settlementId: row.settlement_id,
+        channelId: row.channel_id,
+        finalSequenceNumber: BigInt(row.final_sequence_number),
+        initiator: row.initiator,
+        partyAFinalBalance: BigInt(row.party_a_final_balance),
+        partyBFinalBalance: BigInt(row.party_b_final_balance),
+        merkleRoot: row.merkle_root,
+        submittedTxnHash: row.submitted_txn_hash,
+        status: row.status,
+        settledAt: row.settled_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to record settlement for channel ${channelId}: ${message}`,
+        {
+          cause: err,
+        },
+      );
     }
-
-    const row = result[0];
-    return {
-      settlementId: row.settlement_id,
-      channelId: row.channel_id,
-      finalSequenceNumber: BigInt(row.final_sequence_number),
-      initiator: row.initiator,
-      partyAFinalBalance: BigInt(row.party_a_final_balance),
-      partyBFinalBalance: BigInt(row.party_b_final_balance),
-      merkleRoot: row.merkle_root,
-      submittedTxnHash: row.submitted_txn_hash,
-      status: row.status,
-      settledAt: row.settled_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
   }
 
   /**

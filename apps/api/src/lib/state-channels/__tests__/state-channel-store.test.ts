@@ -84,11 +84,22 @@ describe("StateChannelStore", () => {
           return [];
         }
 
+        // Debug: log unmatched queries
+        console.error("Mock DB: Unmatched query", {
+          query: query.substring(0, 100),
+          valuesCount: values.length,
+        });
         return [];
       })();
     };
 
     store = new StateChannelStore({ db: mockDb, redis: undefined });
+  });
+
+  afterEach(() => {
+    // Clean up any resources
+    mockDb = null;
+    store = null;
   });
 
   describe("createChannel", () => {
