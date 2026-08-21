@@ -20,7 +20,7 @@ use soroban_sdk::{
     auth::{Context, ContractContext, CustomAccountInterface},
     contract, contracterror, contractimpl, contracttype,
     crypto::Hash,
-    Address, BytesN, Env, Symbol, Vec,
+    Address, Env, Symbol, TryIntoVal, Vec,
 };
 
 #[contracttype]
@@ -342,29 +342,22 @@ impl SessionAccount {
     }
 }
 
-/// Legacy helper that enforces session-key bounds against an explicit
-/// `(signer, amount)` pair — kept for backwards compatibility and used by the
-/// API before full auth-context plumbing was wired. Prefer the
-/// `CustomAccountInterface` implementation for new integrations.
-#[contractimpl]
+/// Internal helper that enforces session-key bounds against an explicit
+/// `(signer, amount)` pair — used internally by `__check_auth`.
+/// Not exposed via `#[contractimpl]` as a callable contract entry point.
 impl SessionAccount {
-    /// Custom authorization hook that enforces session key bounds.
-    pub fn check_auth_with_signer(
-        env: Env,
-        signer: Address,
+    fn check_auth_with_signer_internal(
+        env: &Env,
+        signer: &Address,
         amount: i128,
-    ) -> Result<(), soroban_sdk::Error> {
+    ) -> Result<(), Error> {
         let main_account: Address = match env.storage().instance().get(&DataKey::MainAccount) {
             Some(addr) => addr,
-            None => {
-                return Err(soroban_sdk::Error::from_contract_error(
-                    Error::NotInitialized as u32,
-                ))
-            }
+            None => return Err(Error::NotInitialized),
         };
 
         // If the signer is the main account, always allow
-        if signer == main_account {
+        if *signer == main_account {
             return Ok(());
         }
 
@@ -372,37 +365,25 @@ impl SessionAccount {
         let key = DataKey::SessionKey(signer.clone());
         let session_info: SessionKeyInfo = match env.storage().instance().get(&key) {
             Some(info) => info,
-            None => {
-                return Err(soroban_sdk::Error::from_contract_error(
-                    Error::UnauthorizedSigner as u32,
-                ))
-            }
+            None => return Err(Error::UnauthorizedSigner),
         };
 
         // Check if session key is active
         if !session_info.active {
-            return Err(soroban_sdk::Error::from_contract_error(
-                Error::SessionKeyInactive as u32,
-            ));
+            return Err(Error::SessionKeyInactive);
         }
 
         // Check time window
         let current_ledger = env.ledger().sequence();
         if u64::from(current_ledger) < session_info.valid_from_ledger {
-            return Err(soroban_sdk::Error::from_contract_error(
-                Error::SessionKeyNotYetValid as u32,
-            ));
+            return Err(Error::SessionKeyNotYetValid);
         }
         if u64::from(current_ledger) > session_info.valid_until_ledger {
-            return Err(soroban_sdk::Error::from_contract_error(
-                Error::SessionKeyExpired as u32,
-            ));
+            return Err(Error::SessionKeyExpired);
         }
 
         if amount <= 0 {
-            return Err(soroban_sdk::Error::from_contract_error(
-                Error::InvalidSpendingCap as u32,
-            ));
+            return Err(Error::InvalidSpendingCap);
         }
 
         // Check spending cap
@@ -411,17 +392,11 @@ impl SessionAccount {
 
         let new_spent = match current_spent.checked_add(amount) {
             Some(val) => val,
-            None => {
-                return Err(soroban_sdk::Error::from_contract_error(
-                    Error::SpendingCapExceeded as u32,
-                ))
-            }
+            None => return Err(Error::SpendingCapExceeded),
         };
 
         if new_spent > session_info.spending_cap {
-            return Err(soroban_sdk::Error::from_contract_error(
-                Error::SpendingCapExceeded as u32,
-            ));
+            return Err(Error::SpendingCapExceeded);
         }
 
         // Update the spent amount
@@ -434,13 +409,12 @@ impl SessionAccount {
 // Implement the Soroban custom account interface.
 //
 // `__check_auth` is invoked by the host whenever an operation is authorized
-// by this contract's address (e.g. the escrow contract calls
-// `admin.require_auth()` where the admin is this session account). It:
+// by this contract's address (e.g. token transfer or escrow pause). It:
 //   1. Authorizes emergency `pause`/`unpause` on escrows covered by an
 //      unexpired `PauseGrant` (#374).
 //   2. Always authorizes the main account (attached as a delegated signer).
 //   3. Otherwise requires an active, in-window session key to be attached as
-//      a delegated signer.
+//      a delegated signer, extracting transfer amount from auth_contexts.
 #[contractimpl]
 impl CustomAccountInterface for SessionAccount {
     type Signature = ();
@@ -482,29 +456,36 @@ impl CustomAccountInterface for SessionAccount {
             }
         }
 
-        // (2) The main account always authorizes.
+        // (2) Retrieve delegated signers attached to the auth context
         let delegated = env.custom_account().get_delegated_signers();
+        if delegated.is_empty() {
+            return Err(Error::UnauthorizedSigner);
+        }
+
+        // (3) The main account always authorizes.
         if delegated.iter().any(|d| d == main_account) {
             return Ok(());
         }
 
-        // (3) Otherwise an active, in-window session key must be attached.
+        // Extract transfer amount from auth_contexts if present
+        let mut transfer_amount: Option<i128> = None;
+        for ctx in auth_contexts.iter() {
+            if let Context::Contract(ContractContext { fn_name, args, .. }) = ctx {
+                if fn_name == Symbol::new(&env, "transfer") {
+                    if args.len() >= 3 {
+                        if let Ok(amt) = args.get(2).unwrap().try_into_val(&env) {
+                            transfer_amount = Some(amt);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // (4) Validate delegated session key signers
         for signer in delegated.iter() {
-            let info: SessionKeyInfo = env
-                .storage()
-                .instance()
-                .get(&DataKey::SessionKey(signer.clone()))
-                .ok_or(Error::UnauthorizedSigner)?;
-            if !info.active {
-                return Err(Error::SessionKeyInactive);
-            }
-            let current_ledger = u64::from(env.ledger().sequence());
-            if current_ledger < info.valid_from_ledger {
-                return Err(Error::SessionKeyNotYetValid);
-            }
-            if current_ledger > info.valid_until_ledger {
-                return Err(Error::SessionKeyExpired);
-            }
+            let amount = transfer_amount.unwrap_or(0);
+            Self::check_auth_with_signer_internal(&env, &signer, amount)?;
             return Ok(());
         }
 
@@ -514,8 +495,9 @@ impl CustomAccountInterface for SessionAccount {
 
 #[cfg(test)]
 mod test {
+    extern crate std;
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{testutils::{Address as _, Ledger}, BytesN};
 
     fn setup_env() -> (Env, Address) {
         let env = Env::default();
@@ -709,7 +691,7 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // First authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+            SessionAccount::check_auth_with_signer_internal(&env, &session_key, 10_000_000)
                 .unwrap();
 
             // Check spent amount
@@ -717,16 +699,16 @@ mod test {
             assert_eq!(spent, 10_000_000);
 
             // Second authorization should succeed
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 20_000_000)
+            SessionAccount::check_auth_with_signer_internal(&env, &session_key, 20_000_000)
                 .unwrap();
 
             let spent = SessionAccount::get_spent(env.clone(), session_key.clone()).unwrap();
             assert_eq!(spent, 30_000_000);
 
             // Third authorization should exceed cap and fail
-            let result = SessionAccount::check_auth_with_signer(
-                env.clone(),
-                session_key.clone(),
+            let result = SessionAccount::check_auth_with_signer_internal(
+                &env,
+                &session_key,
                 30_000_000,
             );
             assert!(result.is_err());
@@ -759,9 +741,9 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should fail because key is not yet valid
-            let result = SessionAccount::check_auth_with_signer(
-                env.clone(),
-                session_key.clone(),
+            let result = SessionAccount::check_auth_with_signer_internal(
+                &env,
+                &session_key,
                 10_000_000,
             );
             assert!(result.is_err());
@@ -783,7 +765,7 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed because key is immediately valid
-            SessionAccount::check_auth_with_signer(env.clone(), session_key2.clone(), 10_000_000)
+            SessionAccount::check_auth_with_signer_internal(&env, &session_key2, 10_000_000)
                 .unwrap();
         });
     }
@@ -806,7 +788,7 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should succeed initially
-            SessionAccount::check_auth_with_signer(env.clone(), session_key.clone(), 10_000_000)
+            SessionAccount::check_auth_with_signer_internal(&env, &session_key, 10_000_000)
                 .unwrap();
         });
 
@@ -817,9 +799,9 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Authorization should now fail
-            let result = SessionAccount::check_auth_with_signer(
-                env.clone(),
-                session_key.clone(),
+            let result = SessionAccount::check_auth_with_signer_internal(
+                &env,
+                &session_key,
                 10_000_000,
             );
             assert!(result.is_err());
@@ -837,13 +819,134 @@ mod test {
 
         env.as_contract(&contract_address, || {
             // Main account should always be able to authorize regardless of spending
-            SessionAccount::check_auth_with_signer(
-                env.clone(),
-                main_account.clone(),
+            SessionAccount::check_auth_with_signer_internal(
+                &env,
+                &main_account,
                 1_000_000_000,
             )
             .unwrap();
         });
+    }
+
+    #[test]
+    fn test_token_transfer_via_session_key() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let main_account = Address::generate(&env);
+        let session_account_addr = env.register(SessionAccount, ());
+        let session_account_client = SessionAccountClient::new(&env, &session_account_addr);
+
+        session_account_client.initialize(&main_account);
+
+        let token_admin = Address::generate(&env);
+        let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_contract.address());
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_contract.address());
+
+        // Mint 100 USDC (100_000_000 stroops) to session account
+        token_admin_client.mint(&session_account_addr, &100_000_000);
+
+        let session_key = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let cap = 50_000_000i128; // 50 USDC cap
+
+        // Create session key
+        session_account_client.create_session_key(&session_key, &cap, &7, &0);
+
+        let account_sc: soroban_sdk::xdr::ScAddress = session_account_addr.clone().try_into().unwrap();
+        let delegate_sc: soroban_sdk::xdr::ScAddress = session_key.clone().try_into().unwrap();
+        let recipient_sc: soroban_sdk::xdr::ScAddress = recipient.clone().try_into().unwrap();
+        let token_sc: soroban_sdk::xdr::ScAddress = token_contract.address().clone().try_into().unwrap();
+
+        let amount_30 = 30_000_000i128;
+
+        // 1. Authorize 30 USDC transfer using session key delegate
+        env.set_auths(&[soroban_sdk::xdr::SorobanAuthorizationEntry {
+            credentials: soroban_sdk::xdr::SorobanCredentials::AddressWithDelegates(
+                soroban_sdk::xdr::SorobanAddressCredentialsWithDelegates {
+                    address_credentials: soroban_sdk::xdr::SorobanAddressCredentials {
+                        address: account_sc.clone(),
+                        nonce: 1,
+                        signature_expiration_ledger: 100,
+                        signature: soroban_sdk::xdr::ScVal::Void,
+                    },
+                    delegates: std::vec![soroban_sdk::xdr::SorobanDelegateSignature {
+                        address: delegate_sc.clone(),
+                        signature: soroban_sdk::xdr::ScVal::Void,
+                        nested_delegates: Default::default(),
+                    }]
+                    .try_into()
+                    .unwrap(),
+                },
+            ),
+            root_invocation: soroban_sdk::xdr::SorobanAuthorizedInvocation {
+                function: soroban_sdk::xdr::SorobanAuthorizedFunction::ContractFn(
+                    soroban_sdk::xdr::InvokeContractArgs {
+                        contract_address: token_sc.clone(),
+                        function_name: soroban_sdk::xdr::StringM::try_from("transfer").unwrap().into(),
+                        args: std::vec![
+                            soroban_sdk::xdr::ScVal::Address(account_sc.clone()),
+                            soroban_sdk::xdr::ScVal::Address(recipient_sc.clone()),
+                            soroban_sdk::xdr::ScVal::I128(soroban_sdk::xdr::Int128Parts {
+                                hi: (amount_30 >> 64) as i64,
+                                lo: amount_30 as u64,
+                            }),
+                        ]
+                        .try_into()
+                        .unwrap(),
+                    },
+                ),
+                sub_invocations: Default::default(),
+            },
+        }]);
+
+        token_client.transfer(&session_account_addr, &recipient, &amount_30);
+
+        // Assert success and Spent == 30 USDC
+        assert_eq!(session_account_client.get_spent(&session_key), 30_000_000);
+
+        // 2. Attempt second 30 USDC transfer (cumulative 60 USDC > 50 USDC cap)
+        env.set_auths(&[soroban_sdk::xdr::SorobanAuthorizationEntry {
+            credentials: soroban_sdk::xdr::SorobanCredentials::AddressWithDelegates(
+                soroban_sdk::xdr::SorobanAddressCredentialsWithDelegates {
+                    address_credentials: soroban_sdk::xdr::SorobanAddressCredentials {
+                        address: account_sc.clone(),
+                        nonce: 2,
+                        signature_expiration_ledger: 100,
+                        signature: soroban_sdk::xdr::ScVal::Void,
+                    },
+                    delegates: std::vec![soroban_sdk::xdr::SorobanDelegateSignature {
+                        address: delegate_sc.clone(),
+                        signature: soroban_sdk::xdr::ScVal::Void,
+                        nested_delegates: Default::default(),
+                    }]
+                    .try_into()
+                    .unwrap(),
+                },
+            ),
+            root_invocation: soroban_sdk::xdr::SorobanAuthorizedInvocation {
+                function: soroban_sdk::xdr::SorobanAuthorizedFunction::ContractFn(
+                    soroban_sdk::xdr::InvokeContractArgs {
+                        contract_address: token_sc.clone(),
+                        function_name: soroban_sdk::xdr::StringM::try_from("transfer").unwrap().into(),
+                        args: std::vec![
+                            soroban_sdk::xdr::ScVal::Address(account_sc.clone()),
+                            soroban_sdk::xdr::ScVal::Address(recipient_sc.clone()),
+                            soroban_sdk::xdr::ScVal::I128(soroban_sdk::xdr::Int128Parts {
+                                hi: (amount_30 >> 64) as i64,
+                                lo: amount_30 as u64,
+                            }),
+                        ]
+                        .try_into()
+                        .unwrap(),
+                    },
+                ),
+                sub_invocations: Default::default(),
+            },
+        }]);
+
+        let res = token_client.try_transfer(&session_account_addr, &recipient, &amount_30);
+        assert!(res.is_err());
     }
 
     // --- Emergency circuit-breaker pause grants (#374) ---
