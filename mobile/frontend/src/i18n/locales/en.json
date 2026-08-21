@@ -71,6 +71,8 @@
     "somethingWentWrong": "something went wrong",
     "pausedTitle": "New trades are paused",
     "pausedBody": "Velo has temporarily stopped new cash requests. This existing claim can still be released or refunded — your locked funds are not trapped.",
+    "feeErrorTitle": "Transaction fee calculation error",
+    "feeErrorBody": "We couldn't release this claim because the transaction fee could not be calculated precisely. Your funds are safe — please try again or contact support.",
     "waitNormal": "Locking escrow on Stellar…",
     "waitLonger": "Taking a bit longer than usual — the RPC node may be busy. Your funds are safe.",
     "waitStill": "Still working. The transaction has been submitted; we're waiting for on-chain confirmation.",
