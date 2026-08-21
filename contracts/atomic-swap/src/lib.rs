@@ -410,7 +410,7 @@ impl Htlc for AtomicSwapContract {
             .publish((Symbol::new(&env, "released"), id), secret);
     }
 
-    fn refund(env: Env, id: BytesN<32>) {
+    fn refund(env: Env, id: BytesN<32>) -> i128 {
         let key = DataKey::Trade(id.clone());
         let mut state: TradeState = env
             .storage()
@@ -420,7 +420,7 @@ impl Htlc for AtomicSwapContract {
 
         // No-op if already released or refunded (trait invariant).
         if state.status != TradeStatus::Locked {
-            return;
+            return 0;
         }
         if env.ledger().sequence() < state.timeout_ledger {
             panic_with_error(&env, Error::TimeoutNotReached);
@@ -439,6 +439,8 @@ impl Htlc for AtomicSwapContract {
 
         env.events()
             .publish((Symbol::new(&env, "refunded"), id), state.amount);
+
+        state.amount
     }
 }
 

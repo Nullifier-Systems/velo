@@ -7,6 +7,7 @@ import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
 import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
+import { startTrancheRefundWorker } from "./lib/workers/trancheRefundWorker.js";
 import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
 import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
@@ -22,6 +23,7 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
+    startTrancheRefundWorker();
 
     // (#380) Watch locked trades for approaching refund timeouts: warn 100
     // ledgers before expiry, auto-refund once the timeout is breached, and
