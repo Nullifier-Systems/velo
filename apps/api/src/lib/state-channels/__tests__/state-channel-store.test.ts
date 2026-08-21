@@ -8,7 +8,7 @@ import { StateChannelStore } from "../state-channel-store.js";
 import { createVectorClock } from "../../vector-clock.js";
 
 describe("StateChannelStore", () => {
-  let store: StateChannelStore | null = null;
+  let store: StateChannelStore;
   let mockDb: any;
 
   beforeEach(() => {
@@ -111,14 +111,13 @@ describe("StateChannelStore", () => {
   });
 
   afterEach(() => {
-    // Clean up any resources
+    // Clean up any resources (mockDb will be recreated in next beforeEach)
     mockDb = null;
-    store = null;
   });
 
   describe("createChannel", () => {
     it("creates a new channel with initial state", async () => {
-      const channel = await store!.createChannel(
+      const channel = await store.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -135,7 +134,7 @@ describe("StateChannelStore", () => {
   describe("getChannel", () => {
     it("retrieves an existing channel", async () => {
       // Create first
-      await store.createChannel(
+      await store!.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -143,14 +142,14 @@ describe("StateChannelStore", () => {
       );
 
       // Then retrieve
-      const channel = await store.getChannel("test-channel");
+      const channel = await store!.getChannel("test-channel");
       expect(channel).not.toBeNull();
       expect(channel?.channelId).toBe("test-channel");
     });
 
     it("returns null for nonexistent channel", async () => {
       mockDb.query = vi.fn().mockResolvedValue([]);
-      const channel = await store.getChannel("nonexistent");
+      const channel = await store!.getChannel("nonexistent");
       expect(channel).toBeNull();
     });
   });
@@ -158,14 +157,14 @@ describe("StateChannelStore", () => {
   describe("recordCommit with vector clock validation", () => {
     it("accepts a valid first commit (sequence 1 > 0)", async () => {
       // Create channel first
-      await store.createChannel(
+      await store!.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
         1000000000n,
       );
 
-      const commit = await store.recordCommit(
+      const commit = await store!.recordCommit(
         "test-channel",
         1n,
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
@@ -182,7 +181,7 @@ describe("StateChannelStore", () => {
 
     it("rejects a stale sequence number", async () => {
       // Create channel
-      await store.createChannel(
+      await store!.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -190,7 +189,7 @@ describe("StateChannelStore", () => {
       );
 
       // Record first commit at sequence 1
-      await store.recordCommit(
+      await store!.recordCommit(
         "test-channel",
         1n,
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
@@ -203,7 +202,7 @@ describe("StateChannelStore", () => {
 
       // Attempt to record at sequence 1 again (stale)
       await expect(
-        store.recordCommit(
+        store!.recordCommit(
           "test-channel",
           1n, // Same sequence
           "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -218,7 +217,7 @@ describe("StateChannelStore", () => {
 
     it("rejects sequences that go backwards", async () => {
       // Create channel
-      await store.createChannel(
+      await store!.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -226,7 +225,7 @@ describe("StateChannelStore", () => {
       );
 
       // Record at sequence 5
-      await store.recordCommit(
+      await store!.recordCommit(
         "test-channel",
         5n,
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
@@ -239,7 +238,7 @@ describe("StateChannelStore", () => {
 
       // Attempt to record at sequence 3 (going backwards)
       await expect(
-        store.recordCommit(
+        store!.recordCommit(
           "test-channel",
           3n, // Lower than 5
           "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
@@ -255,7 +254,7 @@ describe("StateChannelStore", () => {
 
   describe("verifySignature", () => {
     it("validates signature format", async () => {
-      const result = await store["verifySignature"](
+      const result = await store!["verifySignature"](
         "message",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -265,7 +264,7 @@ describe("StateChannelStore", () => {
     });
 
     it("rejects invalid signature format", async () => {
-      const result = await store["verifySignature"](
+      const result = await store!["verifySignature"](
         "message",
         "invalid-signature",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
@@ -274,7 +273,7 @@ describe("StateChannelStore", () => {
     });
 
     it("rejects invalid public key format", async () => {
-      const result = await store["verifySignature"](
+      const result = await store!["verifySignature"](
         "message",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
