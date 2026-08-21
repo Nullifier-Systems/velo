@@ -11,14 +11,8 @@ import { stateChannelRoutes } from "../state-channels.js";
 
 describe("State Channels API", () => {
   let app: FastifyInstance;
-  let mockDb: any;
 
   beforeEach(async () => {
-    mockDb = {
-      query: vi.fn(),
-      run: vi.fn(),
-    };
-
     app = Fastify();
     await app.register(websocket);
     await app.register(stateChannelRoutes, {
@@ -35,62 +29,50 @@ describe("State Channels API", () => {
   function createMockDb() {
     let channels: any[] = [];
     let commits: any[] = [];
-    let settlements: any[] = [];
 
-    return {
-      query: vi.fn(),
-      close: vi.fn(),
-      // Mock postgres-style template string calls
-      [Symbol.for("query.raw")]: vi.fn(),
-      __proto__: {
-        // Allow destructuring for template tag syntax
-        async [Symbol.for("query")](...args: any[]) {
-          // Mock: INSERT INTO state_channels
-          if (args[0]?.includes?.("INSERT INTO state_channels")) {
-            const channel = {
-              channel_id: "test-channel-1",
-              party_a: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-              party_b: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
-              total_deposit_stroops: "1000000000",
-              nonce: "0",
-              status: "OPEN",
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-            channels.push(channel);
-            return [channel];
-          }
+    // Create a function that works as a template tag
+    const db = async function (strings: any[], ...values: any[]) {
+      const query = strings.join("?");
 
-          // Mock: SELECT * FROM state_channels
-          if (args[0]?.includes?.("SELECT * FROM state_channels")) {
-            return channels;
-          }
+      if (query.includes("INSERT INTO state_channels")) {
+        const channel = {
+          channel_id: values[0],
+          party_a: values[1],
+          party_b: values[2],
+          total_deposit_stroops: values[3].toString(),
+          nonce: "0",
+          status: "OPEN",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        channels.push(channel);
+        return [channel];
+      }
 
-          // Mock: INSERT INTO state_channel_commits
-          if (
-            args[0]?.includes?.("INSERT INTO state_channel_commits")
-          ) {
-            const commit = {
-              commit_id: "commit-1",
-              channel_id: "test-channel-1",
-              sequence_number: "1",
-              signer: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-              state_root: "root123",
-              signature:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              party_a_balance: "500000000",
-              party_b_balance: "500000000",
-              created_at: new Date().toISOString(),
-            };
-            commits.push(commit);
-            return [commit];
-          }
+      if (query.includes("SELECT * FROM state_channels WHERE channel_id")) {
+        return channels.filter((c) => c.channel_id === values[0]);
+      }
 
-          return [];
-        },
-      },
+      if (query.includes("INSERT INTO state_channel_commits")) {
+        const commit = {
+          commit_id: "commit-1",
+          channel_id: values[0],
+          sequence_number: values[1].toString(),
+          signer: values[2],
+          state_root: values[3],
+          signature: values[4],
+          party_a_balance: values[5].toString(),
+          party_b_balance: values[6].toString(),
+          created_at: new Date().toISOString(),
+        };
+        commits.push(commit);
+        return [commit];
+      }
+
+      return [];
     };
+
+    return db;
   }
 
   describe("POST /api/v1/state-channels", () => {
