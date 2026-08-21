@@ -252,5 +252,30 @@
     "anchored": "Key Revoked & New Key Activated On-Chain",
     "failed": "Rotation Failed: Signature Mismatch",
     "retry": "Retry Proposal"
+  },
+  "stateChannels": {
+    "title": "Micropayment Dashboard",
+    "connecting": "Connecting...",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "dismiss": "Dismiss",
+    "throughput": "Throughput",
+    "txSec": "tx/s",
+    "targetTps": "Target: 500 tx/s",
+    "totalTransactions": "Total Transactions",
+    "offChainCommits": "off-chain commits",
+    "sequenceNumber": "Sequence Number",
+    "vectorClockPosition": "vector clock position",
+    "channelCapacity": "Channel Capacity",
+    "capacityUsed": "% used",
+    "currentBalance": "Current Balance",
+    "yourBalance": "Your Balance",
+    "usdc": "USDC",
+    "counterpartyBalance": "Counterparty Balance",
+    "noBalanceData": "No balance data yet",
+    "settlement": "Settlement",
+    "settlementInfo": "When ready, settle this channel on-chain with a single transaction. Both parties must have signed the final state.",
+    "settling": "Settling...",
+    "settleButton": "Close & Settle Channel"
   }
 }

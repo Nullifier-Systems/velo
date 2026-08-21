@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useStateChannel } from "../hooks/useStateChannel.js";
 
 interface DashboardMetrics {
@@ -27,6 +28,7 @@ export function MicropaymentDashboard({
   totalDepositStroops,
   apiBaseUrl,
 }: MicropaymentDashboardProps) {
+  const { t } = useTranslation();
   const [metrics, setMetrics] = useState<DashboardMetrics>({
     transactionsPerSecond: 0,
     totalTransactions: 0,
@@ -52,7 +54,9 @@ export function MicropaymentDashboard({
       setMetrics((prev) => ({
         ...prev,
         totalTransactions: prev.totalTransactions + 1,
-        channelCapacityUsed: Number(update.partyABalance + update.partyBBalance),
+        channelCapacityUsed: Number(
+          update.partyABalance + update.partyBBalance,
+        ),
       }));
     },
     onError: (error) => {
@@ -75,46 +79,46 @@ export function MicropaymentDashboard({
 
   const handleSettlement = async () => {
     if (!latestBalance) {
-      setError("No state to settle");
+      setError(t("stateChannels.noBalanceData"));
       return;
     }
 
     try {
       setIsSettling(true);
-      await requestSettlement(
-        latestBalance.partyA,
-        latestBalance.partyB
-      );
+      await requestSettlement(latestBalance.partyA, latestBalance.partyB);
       setMetrics((prev) => ({
         ...prev,
         isSettlementReady: false,
       }));
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Settlement failed"
-      );
+      setError(err instanceof Error ? err.message : "Settlement failed");
     } finally {
       setIsSettling(false);
     }
   };
 
   const capacityPercentage =
-    (metrics.channelCapacityUsed / Number(metrics.channelCapacityTotal)) *
-    100;
+    (metrics.channelCapacityUsed / Number(metrics.channelCapacityTotal)) * 100;
 
   return (
     <div className="micropayment-dashboard">
       <div className="header">
-        <h1>Micropayment Dashboard</h1>
+        <h1>{t("stateChannels.title")}</h1>
         <div className="connection-status">
           {isConnecting && (
-            <span className="status connecting">Connecting...</span>
+            <span className="status connecting">
+              {t("stateChannels.connecting")}
+            </span>
           )}
           {isConnected && (
-            <span className="status connected">Connected</span>
+            <span className="status connected">
+              {t("stateChannels.connected")}
+            </span>
           )}
           {!isConnected && !isConnecting && (
-            <span className="status disconnected">Disconnected</span>
+            <span className="status disconnected">
+              {t("stateChannels.disconnected")}
+            </span>
           )}
         </div>
       </div>
@@ -122,33 +126,40 @@ export function MicropaymentDashboard({
       {error && (
         <div className="error-banner">
           <p>{error}</p>
-          <button onClick={() => setError(null)}>Dismiss</button>
+          <button onClick={() => setError(null)}>
+            {t("stateChannels.dismiss")}
+          </button>
         </div>
       )}
 
       <div className="metrics-grid">
         <div className="metric-card">
-          <h3>Throughput</h3>
+          <h3>{t("stateChannels.throughput")}</h3>
           <div className="metric-value">
-            {metrics.transactionsPerSecond.toFixed(1)} tx/s
+            {metrics.transactionsPerSecond.toFixed(1)}{" "}
+            {t("stateChannels.txSec")}
           </div>
-          <div className="metric-unit">Target: 500 tx/s</div>
+          <div className="metric-unit">{t("stateChannels.targetTps")}</div>
         </div>
 
         <div className="metric-card">
-          <h3>Total Transactions</h3>
+          <h3>{t("stateChannels.totalTransactions")}</h3>
           <div className="metric-value">{metrics.totalTransactions}</div>
-          <div className="metric-unit">off-chain commits</div>
+          <div className="metric-unit">
+            {t("stateChannels.offChainCommits")}
+          </div>
         </div>
 
         <div className="metric-card">
-          <h3>Sequence Number</h3>
+          <h3>{t("stateChannels.sequenceNumber")}</h3>
           <div className="metric-value">{Number(sequenceNumber)}</div>
-          <div className="metric-unit">vector clock position</div>
+          <div className="metric-unit">
+            {t("stateChannels.vectorClockPosition")}
+          </div>
         </div>
 
         <div className="metric-card">
-          <h3>Channel Capacity</h3>
+          <h3>{t("stateChannels.channelCapacity")}</h3>
           <div className="capacity-bar">
             <div
               className="capacity-used"
@@ -156,39 +167,39 @@ export function MicropaymentDashboard({
             />
           </div>
           <div className="metric-unit">
-            {(capacityPercentage || 0).toFixed(1)}% used
+            {(capacityPercentage || 0).toFixed(1)}{" "}
+            {t("stateChannels.capacityUsed")}
           </div>
         </div>
       </div>
 
       <div className="balance-section">
-        <h2>Current Balance</h2>
+        <h2>{t("stateChannels.currentBalance")}</h2>
         {latestBalance ? (
           <div className="balance-display">
             <div className="balance-item">
-              <label>Your Balance</label>
+              <label>{t("stateChannels.yourBalance")}</label>
               <div className="balance-value">
-                {(Number(latestBalance.partyA) / 1e7).toFixed(2)} USDC
+                {(Number(latestBalance.partyA) / 1e7).toFixed(2)}{" "}
+                {t("stateChannels.usdc")}
               </div>
             </div>
             <div className="balance-item">
-              <label>Counterparty Balance</label>
+              <label>{t("stateChannels.counterpartyBalance")}</label>
               <div className="balance-value">
-                {(Number(latestBalance.partyB) / 1e7).toFixed(2)} USDC
+                {(Number(latestBalance.partyB) / 1e7).toFixed(2)}{" "}
+                {t("stateChannels.usdc")}
               </div>
             </div>
           </div>
         ) : (
-          <p className="placeholder">No balance data yet</p>
+          <p className="placeholder">{t("stateChannels.noBalanceData")}</p>
         )}
       </div>
 
       <div className="settlement-section">
-        <h2>Settlement</h2>
-        <p className="settlement-info">
-          When ready, settle this channel on-chain with a single transaction.
-          Both parties must have signed the final state.
-        </p>
+        <h2>{t("stateChannels.settlement")}</h2>
+        <p className="settlement-info">{t("stateChannels.settlementInfo")}</p>
         <button
           className="settle-button"
           onClick={handleSettlement}
@@ -199,7 +210,9 @@ export function MicropaymentDashboard({
             !metrics.isSettlementReady
           }
         >
-          {isSettling ? "Settling..." : "Close & Settle Channel"}
+          {isSettling
+            ? t("stateChannels.settling")
+            : t("stateChannels.settleButton")}
         </button>
       </div>
 
