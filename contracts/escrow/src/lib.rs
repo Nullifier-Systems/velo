@@ -35,6 +35,81 @@ pub struct ArbitratorSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisputeInfo {
     pub start_ledger: u32,
+    /// Jury size for this dispute (number of jurors selected)
+    pub jury_size: u32,
+    /// Voting deadline ledger
+    pub voting_deadline: u32,
+}
+
+/// Jury voting record for a specific dispute
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JuryVote {
+    pub juror: Address,
+    pub vote_for_buyer: bool, // true = vote for buyer, false = vote for seller
+    pub voted_at_ledger: u32,
+}
+
+/// Complete jury state for a disputed trade
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JuryState {
+    pub jurors: Vec<Address>,
+    pub votes: Vec<JuryVote>,
+    pub voting_deadline: u32,
+    pub total_stake_at_selection: i128,
+}
+
+/// Enhanced arbitrator metadata with slashing and reputation tracking
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArbitratorMeta {
+    /// Ledger sequence at which this membership period began. Reset to the
+    /// current ledger every time the arbitrator (re)joins, so a leave/rejoin
+    /// cycle can never be used to shortcut the activation delay.
+    pub joined_ledger: u32,
+    /// Whether currently a member of the pool. `join_arbitrator_pool` /
+    /// `leave_arbitrator_pool` toggle this; the address itself is never
+    /// removed from `DataKey::ArbitratorPool` so pool indices stay stable.
+    pub active: bool,
+    /// Count of disputes currently assigned to this arbitrator that haven't
+    /// been resolved or timed out yet. `leave_arbitrator_pool` refuses to
+    /// let an arbitrator exit while this is nonzero, so a selected
+    /// arbitrator can't dodge a dispute by leaving.
+    pub pending_disputes: u32,
+    /// Total disputes resolved by this arbitrator
+    pub total_resolved: u32,
+    /// Disputes where arbitrator voted with the majority (honest behavior)
+    pub honest_votes: u32,
+    /// Disputes where arbitrator voted against the majority (potential malicious behavior)
+    pub dissenting_votes: u32,
+    /// Total stake slashed from this arbitrator
+    pub total_slashed: i128,
+    /// Total rewards earned by this arbitrator
+    pub total_rewards: i128,
+    /// Last activity ledger (for inactivity tracking)
+    pub last_activity_ledger: u32,
+}
+
+/// Slashing configuration parameters
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashingConfig {
+    /// Percentage of stake to slash for inactivity (basis points)
+    pub inactivity_slash_bps: u32,
+    /// Percentage of stake to slash for malicious voting (basis points)
+    pub malicious_slash_bps: u32,
+    /// Minimum ledgers of inactivity before slashing
+    pub inactivity_threshold_ledgers: u32,
+    /// Reward for honest jurors (basis points of dispute amount)
+    pub honest_juror_reward_bps: u32,
+}
+
+/// Original DisputeInfo for backward compatibility
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LegacyDisputeInfo {
+    pub start_ledger: u32,
 }
 
 #[contracttype]
@@ -95,6 +170,14 @@ enum DataKey {
     /// Maximum escrow USD value allowed at lock time, in oracle base units
     /// (same scale as `price / 10^decimals`). `0` disables the limit.
     MaxUsdLimit,
+    /// Jury state for a disputed trade
+    JuryState(BytesN<32>),
+    /// Slashing configuration parameters
+    SlashingConfig,
+    /// Jury size configuration (number of jurors per dispute)
+    JurySize,
+    /// Voting window in ledgers
+    VotingWindowLedgers,
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -178,6 +261,20 @@ pub enum Error {
     NoTranches = 49,
     /// Multi-tranche trade detected — use release_tranche() instead of release().
     MultiTrancheUseReleaseTranche = 50,
+    /// Juror not assigned to this dispute
+    JurorNotAssigned = 51,
+    /// Juror has already voted
+    AlreadyVoted = 52,
+    /// Voting window has closed
+    VotingWindowClosed = 53,
+    /// Insufficient jurors for majority decision
+    InsufficientJurors = 55,
+    /// Invalid jury size configuration
+    InvalidJurySize = 56,
+    /// Not a juror for this dispute
+    NotAJuror = 57,
+    /// Jury selection already performed
+    JuryAlreadySelected = 58,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -225,6 +322,18 @@ const ARBITRATOR_SELECTION_DELAY_LEDGERS: u32 = 6;
 /// well within Soroban's per-invocation compute budget. Mirrors
 /// `MAX_BATCH_SIZE`'s rationale above.
 const MAX_ARBITRATOR_POOL_SIZE: u32 = 64;
+
+/// Default number of jurors per dispute
+const DEFAULT_JURY_SIZE: u32 = 5;
+
+/// Default voting window in ledgers (~24 hours at 5s/ledger)
+const DEFAULT_VOTING_WINDOW_LEDGERS: u32 = 6 * 60 * 24;
+
+/// Minimum jury size (at least 3 jurors for majority decisions)
+const MIN_JURY_SIZE: u32 = 3;
+
+/// Maximum jury size (bounded by compute budget)
+const MAX_JURY_SIZE: u32 = 11;
 /// MEV Protection: Commitment state in Phase 1 of commit-reveal protocol.
 #[derive(Clone)]
 #[contracttype]
@@ -285,6 +394,18 @@ pub struct ArbitratorMeta {
     /// let an arbitrator exit while this is nonzero, so a selected
     /// arbitrator can't dodge a dispute by leaving.
     pub pending_disputes: u32,
+    /// Total disputes resolved by this arbitrator
+    pub total_resolved: u32,
+    /// Disputes where arbitrator voted with the majority (honest behavior)
+    pub honest_votes: u32,
+    /// Disputes where arbitrator voted against the majority (potential malicious behavior)
+    pub dissenting_votes: u32,
+    /// Total stake slashed from this arbitrator
+    pub total_slashed: i128,
+    /// Total rewards earned by this arbitrator
+    pub total_rewards: i128,
+    /// Last activity ledger (for inactivity tracking)
+    pub last_activity_ledger: u32,
 }
 
 /// Pool-selection state for one disputed trade, created by `raise_dispute()`
@@ -383,6 +504,32 @@ fn bond_params(env: &Env) -> BondParams {
             establish_threshold: ESTABLISH_THRESHOLD,
             min_establish_amount: MIN_ESTABLISH_AMOUNT,
         })
+}
+
+fn slashing_config(env: &Env) -> SlashingConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::SlashingConfig)
+        .unwrap_or(SlashingConfig {
+            inactivity_slash_bps: 1000, // 10% slash for inactivity
+            malicious_slash_bps: 5000, // 50% slash for malicious voting
+            inactivity_threshold_ledgers: 6 * 60 * 24 * 7, // 7 days
+            honest_juror_reward_bps: 100, // 1% reward for honest jurors
+        })
+}
+
+fn jury_size(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::JurySize)
+        .unwrap_or(DEFAULT_JURY_SIZE)
+}
+
+fn voting_window_ledgers(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::VotingWindowLedgers)
+        .unwrap_or(DEFAULT_VOTING_WINDOW_LEDGERS)
 }
 
 // Invariant: funds can only ever leave this contract's balance through
@@ -570,6 +717,12 @@ impl EscrowContract {
                 joined_ledger: env.ledger().sequence(),
                 active: true,
                 pending_disputes: meta.pending_disputes,
+                total_resolved: meta.total_resolved,
+                honest_votes: meta.honest_votes,
+                dissenting_votes: meta.dissenting_votes,
+                total_slashed: meta.total_slashed,
+                total_rewards: meta.total_rewards,
+                last_activity_ledger: env.ledger().sequence(),
             };
             env.storage().persistent().set(&key, &meta);
             env.storage()
@@ -598,6 +751,12 @@ impl EscrowContract {
             joined_ledger: env.ledger().sequence(),
             active: true,
             pending_disputes: 0,
+            total_resolved: 0,
+            honest_votes: 0,
+            dissenting_votes: 0,
+            total_slashed: 0,
+            total_rewards: 0,
+            last_activity_ledger: env.ledger().sequence(),
         };
         env.storage().persistent().set(&key, &meta);
         env.storage()
@@ -703,11 +862,407 @@ impl EscrowContract {
             .get(&DataKey::DisputeSelection(id))
     }
 
+    /// Select multiple jurors for a disputed trade using the jury system.
+    /// This replaces the single-arbitrator selection with a decentralized jury.
+    /// Permissionless — anyone may call this once the selection delay has passed.
+    pub fn select_jury(env: Env, id: BytesN<32>) -> Result<Vec<Address>, Error> {
+        let selection_key = DataKey::DisputeSelection(id.clone());
+        let selection: Option<DisputeSelection> = env.storage().persistent().get(&selection_key);
+        
+        let eligible = match selection {
+            Some(s) if !s.eligible.is_empty() => s.eligible,
+            _ => return Err(Error::NoDisputeSelection),
+        };
+
+        let jury_sz = jury_size(&env);
+        if jury_sz < MIN_JURY_SIZE || jury_sz > MAX_JURY_SIZE {
+            return Err(Error::InvalidJurySize);
+        }
+
+        if eligible.len() < jury_sz as usize {
+            return Err(Error::InsufficientJurors);
+        }
+
+        // Check if jury already selected
+        let jury_key = DataKey::JuryState(id.clone());
+        if env.storage().persistent().get::<DataKey, JuryState>(&jury_key).is_some() {
+            return Err(Error::JuryAlreadySelected);
+        }
+
+        // Select jurors using Fisher-Yates shuffle for random selection
+        let mut jurors = Vec::new(&env);
+        let mut indices: Vec<u32> = (0..eligible.len() as u32).collect();
+        
+        // Shuffle indices using PRNG
+        for i in (1..indices.len()).rev() {
+            let j = env.prng().gen_range::<u32>(0..(i + 1) as u32) as usize;
+            indices.swap(i, j);
+        }
+
+        // Select first jury_sz jurors
+        for i in 0..jury_sz as usize {
+            jurors.push_back(eligible.get(indices[i]).unwrap());
+        }
+
+        // Calculate total stake of selected jurors
+        let mut total_stake: i128 = 0;
+        for juror in jurors.iter() {
+            let stake_key = DataKey::ArbitratorStake(juror.clone());
+            let stake: i128 = env.storage().persistent().get(&stake_key).unwrap_or(0);
+            total_stake += stake;
+            
+            // Increment pending disputes for each juror
+            let meta_key = DataKey::ArbitratorMember(juror.clone());
+            if let Some(mut meta) = env.storage().persistent().get::<DataKey, ArbitratorMeta>(&meta_key) {
+                meta.pending_disputes += 1;
+                meta.last_activity_ledger = env.ledger().sequence();
+                env.storage().persistent().set(&meta_key, &meta);
+                env.storage().persistent().extend_ttl(&meta_key, 100_000, 100_000);
+            }
+        }
+
+        let dispute_info: DisputeInfo = env.storage().persistent().get(&DataKey::Dispute(id.clone()))
+            .ok_or(Error::TradeNotDisputed)?;
+
+        let jury_state = JuryState {
+            jurors: jurors.clone(),
+            votes: Vec::new(&env),
+            voting_deadline: dispute_info.voting_deadline,
+            total_stake_at_selection: total_stake,
+        };
+
+        env.storage().persistent().set(&jury_key, &jury_state);
+        env.storage().persistent().extend_ttl(&jury_key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(&env, "jury_selected"), id), jurors.clone());
+
+        Ok(jurors)
+    }
+
+    /// Submit a vote on a disputed trade. Only selected jurors may vote.
+    pub fn cast_vote(env: Env, id: BytesN<32>, juror: Address, vote_for_buyer: bool) -> Result<(), Error> {
+        juror.require_auth();
+
+        let jury_key = DataKey::JuryState(id.clone());
+        let mut jury_state: JuryState = env.storage().persistent().get(&jury_key)
+            .ok_or(Error::NoDisputeSelection)?;
+
+        // Verify juror is part of the jury
+        let mut is_juror = false;
+        for j in jury_state.jurors.iter() {
+            if j == juror {
+                is_juror = true;
+                break;
+            }
+        }
+        if !is_juror {
+            return Err(Error::NotAJuror);
+        }
+
+        // Check if juror already voted
+        for vote in jury_state.votes.iter() {
+            if vote.juror == juror {
+                return Err(Error::AlreadyVoted);
+            }
+        }
+
+        // Check voting window - votes can be cast after selection delay until deadline
+        let now = env.ledger().sequence();
+        if now > jury_state.voting_deadline {
+            return Err(Error::VotingWindowClosed);
+        }
+
+        // Record the vote
+        let vote = JuryVote {
+            juror: juror.clone(),
+            vote_for_buyer,
+            voted_at_ledger: now,
+        };
+        jury_state.votes.push_back(vote);
+
+        // Update juror activity
+        let meta_key = DataKey::ArbitratorMember(juror.clone());
+        if let Some(mut meta) = env.storage().persistent().get::<DataKey, ArbitratorMeta>(&meta_key) {
+            meta.last_activity_ledger = now;
+            env.storage().persistent().set(&meta_key, &meta);
+            env.storage().persistent().extend_ttl(&meta_key, 100_000, 100_000);
+        }
+
+        env.storage().persistent().set(&jury_key, &jury_state);
+        env.storage().persistent().extend_ttl(&jury_key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(&env, "vote_cast"), id), (juror, vote_for_buyer));
+
+        Ok(())
+    }
+
+    /// Read-only accessor for jury state.
+    pub fn get_jury_state(env: Env, id: BytesN<32>) -> Option<JuryState> {
+        env.storage().persistent().get(&DataKey::JuryState(id))
+    }
+
+    /// Resolve a disputed trade using jury voting. Tallies votes from all jurors
+    /// and distributes funds based on the majority decision. Applies slashing
+    /// to jurors who voted against the majority and rewards honest jurors.
+    pub fn resolve_by_jury(env: Env, id: BytesN<32>) -> Result<(), Error> {
+        let jury_key = DataKey::JuryState(id.clone());
+        let jury_state: JuryState = env.storage().persistent().get(&jury_key)
+            .ok_or(Error::NoDisputeSelection)?;
+
+        // Check if voting deadline has passed
+        let now = env.ledger().sequence();
+        if now < jury_state.voting_deadline {
+            return Err(Error::TimeoutNotReached);
+        }
+
+        // Check if we have enough votes for a decision
+        let total_jurors = jury_state.jurors.len();
+        let votes_cast = jury_state.votes.len();
+        
+        // Require at least 2/3 of jurors to vote for a decision
+        if votes_cast * 3 < total_jurors * 2 {
+            return Err(Error::InsufficientJurors);
+        }
+
+        // Tally votes
+        let mut votes_for_buyer: u32 = 0;
+        let mut votes_for_seller: u32 = 0;
+        
+        for vote in jury_state.votes.iter() {
+            if vote.vote_for_buyer {
+                votes_for_buyer += 1;
+            } else {
+                votes_for_seller += 1;
+            }
+        }
+
+        // Determine majority decision
+        let majority_for_buyer = votes_for_buyer > votes_for_seller;
+        let buyer_share_bps = if majority_for_buyer {
+            // Buyer wins - full refund
+            10_000
+        } else {
+            // Seller wins - full payment (minus fee)
+            0
+        };
+
+        // Get trade state
+        let trade_key = DataKey::Trade(id.clone());
+        let mut state: TradeState = env.storage().persistent().get(&trade_key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if state.status != TradeStatus::Disputed {
+            return Err(Error::TradeNotDisputed);
+        }
+
+        // Apply slashing and rewards
+        let slash_config = slashing_config(&env);
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let client = token::Client::new(&env, &token_addr);
+
+        // Process each juror
+        for juror in jury_state.jurors.iter() {
+            let meta_key = DataKey::ArbitratorMember(juror.clone());
+            if let Some(mut meta) = env.storage().persistent().get::<DataKey, ArbitratorMeta>(&meta_key) {
+                // Find this juror's vote
+                let mut voted = false;
+                let mut voted_with_majority = false;
+                
+                for vote in jury_state.votes.iter() {
+                    if vote.juror == *juror {
+                        voted = true;
+                        voted_with_majority = vote.vote_for_buyer == majority_for_buyer;
+                        break;
+                    }
+                }
+
+                if voted {
+                    meta.total_resolved += 1;
+                    
+                    if voted_with_majority {
+                        meta.honest_votes += 1;
+                        
+                        // Reward honest juror
+                        let reward = (state.amount * slash_config.honest_juror_reward_bps as i128) / 10_000;
+                        if reward > 0 {
+                            meta.total_rewards += reward;
+                            
+                            // Transfer reward from contract to juror
+                            let stake_key = DataKey::ArbitratorStake(juror.clone());
+                            let current_stake: i128 = env.storage().persistent().get(&stake_key).unwrap_or(0);
+                            if current_stake >= reward {
+                                env.storage().persistent().set(&stake_key, &(current_stake + reward));
+                                client.transfer(&env.current_contract_address(), juror, &reward);
+                            }
+                        }
+                    } else {
+                        meta.dissenting_votes += 1;
+                        
+                        // Slash malicious juror
+                        let stake_key = DataKey::ArbitratorStake(juror.clone());
+                        let current_stake: i128 = env.storage().persistent().get(&stake_key).unwrap_or(0);
+                        let slash_amount = (current_stake * slash_config.malicious_slash_bps as i128) / 10_000;
+                        
+                        if slash_amount > 0 {
+                            meta.total_slashed += slash_amount;
+                            let new_stake = current_stake - slash_amount;
+                            env.storage().persistent().set(&stake_key, &new_stake);
+                            
+                            // Transfer slashed amount to admin
+                            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+                            client.transfer(&env.current_contract_address(), &admin, &slash_amount);
+                        }
+                    }
+                }
+
+                meta.pending_disputes = meta.pending_disputes.saturating_sub(1);
+                meta.last_activity_ledger = now;
+                env.storage().persistent().set(&meta_key, &meta);
+                env.storage().persistent().extend_ttl(&meta_key, 100_000, 100_000);
+            }
+        }
+
+        // Now resolve the trade with the majority decision
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let fee_bps: u32 = env.storage().instance().get(&DataKey::PlatformFeeBps).unwrap_or(0);
+
+        let buyer_amount = (state.amount * buyer_share_bps as i128) / 10_000;
+        let seller_gross = state.amount - buyer_amount;
+        let fee = (seller_gross * fee_bps as i128) / 10_000;
+        let seller_payout = seller_gross - fee;
+
+        state.status = TradeStatus::Resolved;
+        env.storage().persistent().set(&trade_key, &state);
+        env.storage().persistent().extend_ttl(&trade_key, TTL_EXTEND, TTL_EXTEND);
+        
+        // Clean up jury state
+        env.storage().persistent().remove(&jury_key);
+        env.storage().persistent().remove(&DataKey::Dispute(id.clone()));
+        env.storage().persistent().remove(&DataKey::DisputeSelection(id.clone()));
+
+        // Distribute funds
+        if buyer_amount > 0 {
+            client.transfer(&env.current_contract_address(), &state.buyer, &buyer_amount);
+        }
+        if seller_payout > 0 {
+            client.transfer(&env.current_contract_address(), &state.seller, &seller_payout);
+        }
+        if fee > 0 {
+            client.transfer(&env.current_contract_address(), &admin, &fee);
+        }
+
+        env.events().publish(
+            (symbol_short(&env, "jury_resolved"), id),
+            (votes_for_buyer, votes_for_seller, buyer_share_bps),
+        );
+
+        Ok(())
+    }
+
     /// Read-only accessor for an arbitrator's pool membership state.
     pub fn get_arbitrator(env: Env, arbitrator: Address) -> Option<ArbitratorMeta> {
         env.storage()
             .persistent()
             .get(&DataKey::ArbitratorMember(arbitrator))
+    }
+
+    /// Set the jury size configuration (number of jurors per dispute).
+    /// Requires admin or multisig authorization.
+    pub fn set_jury_size(env: Env, size: u32, signers: Vec<Address>) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+        if size < MIN_JURY_SIZE || size > MAX_JURY_SIZE {
+            return Err(Error::InvalidJurySize);
+        }
+        env.storage().instance().set(&DataKey::JurySize, &size);
+        Ok(())
+    }
+
+    /// Set the voting window configuration (in ledgers).
+    /// Requires admin or multisig authorization.
+    pub fn set_voting_window(env: Env, ledgers: u32, signers: Vec<Address>) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+        if ledgers < 6 {
+            return Err(Error::InvalidTimeout); // Minimum 30 seconds
+        }
+        env.storage().instance().set(&DataKey::VotingWindowLedgers, &ledgers);
+        Ok(())
+    }
+
+    /// Set the slashing configuration parameters.
+    /// Requires admin or multisig authorization.
+    pub fn set_slashing_config(env: Env, config: SlashingConfig, signers: Vec<Address>) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+        if config.inactivity_slash_bps > 10_000 
+            || config.malicious_slash_bps > 10_000 
+            || config.honest_juror_reward_bps > 10_000 {
+            return Err(Error::InvalidFee);
+        }
+        env.storage().instance().set(&DataKey::SlashingConfig, &config);
+        Ok(())
+    }
+
+    /// Apply inactivity slashing to arbitrators who haven't participated recently.
+    /// Permissionless - anyone can call this to enforce activity requirements.
+    pub fn apply_inactivity_slashing(env: Env, arbitrator: Address) -> Result<(), Error> {
+        let meta_key = DataKey::ArbitratorMember(arbitrator.clone());
+        let mut meta: ArbitratorMeta = env.storage().persistent().get(&meta_key)
+            .ok_or(Error::ArbitratorNotRegistered)?;
+
+        if !meta.active {
+            return Err(Error::ArbitratorNotRegistered);
+        }
+
+        let slash_config = slashing_config(&env);
+        let now = env.ledger().sequence();
+        let inactive_ledgers = now.saturating_sub(meta.last_activity_ledger);
+
+        if inactive_ledgers < slash_config.inactivity_threshold_ledgers {
+            return Err(Error::TimeoutNotReached);
+        }
+
+        // Apply inactivity slash
+        let stake_key = DataKey::ArbitratorStake(arbitrator.clone());
+        let current_stake: i128 = env.storage().persistent().get(&stake_key).unwrap_or(0);
+        let slash_amount = (current_stake * slash_config.inactivity_slash_bps as i128) / 10_000;
+
+        if slash_amount > 0 {
+            meta.total_slashed += slash_amount;
+            let new_stake = current_stake - slash_amount;
+            env.storage().persistent().set(&stake_key, &new_stake);
+
+            // Transfer slashed amount to admin
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(&env.current_contract_address(), &admin, &slash_amount);
+        }
+
+        // Update last activity to prevent repeated slashing
+        meta.last_activity_ledger = now;
+        env.storage().persistent().set(&meta_key, &meta);
+        env.storage().persistent().extend_ttl(&meta_key, 100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short(&env, "inactivity_slash"),), (arbitrator, slash_amount));
+
+        Ok(())
+    }
+
+    /// Get current slashing configuration.
+    pub fn get_slashing_config(env: Env) -> SlashingConfig {
+        slashing_config(&env)
+    }
+
+    /// Get current jury size configuration.
+    pub fn get_jury_size_config(env: Env) -> u32 {
+        jury_size(&env)
+    }
+
+    /// Get current voting window configuration.
+    pub fn get_voting_window_config(env: Env) -> u32 {
+        voting_window_ledgers(&env)
     }
 
     /// Whether `lock()` is currently rejected (pause armed and delay elapsed).
@@ -785,8 +1340,14 @@ impl EscrowContract {
             .persistent()
             .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
+        let jury_sz = jury_size(&env);
+        let voting_window = voting_window_ledgers(&env);
+        let now = env.ledger().sequence();
+
         let info = DisputeInfo {
-            start_ledger: env.ledger().sequence(),
+            start_ledger: now,
+            jury_size: jury_sz,
+            voting_deadline: now + voting_window,
         };
         env.storage()
             .persistent()
@@ -2325,6 +2886,9 @@ impl EscrowContract {
         Ok(payout)
     }
 }
+
+#[cfg(test)]
+mod jury_test;
 
 /// Derives the id for a trade created via `chain_release_to_lock()`:
 /// sha256(release_trade_id || new_secret_hash). Deterministic rather than
