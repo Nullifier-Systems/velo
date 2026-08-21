@@ -3,12 +3,12 @@
  * Testing persistence layer, vector clock, and signature validation.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StateChannelStore } from "../state-channel-store.js";
 import { createVectorClock } from "../../vector-clock.js";
 
 describe("StateChannelStore", () => {
-  let store: StateChannelStore;
+  let store: StateChannelStore | null = null;
   let mockDb: any;
 
   beforeEach(() => {
@@ -118,7 +118,7 @@ describe("StateChannelStore", () => {
 
   describe("createChannel", () => {
     it("creates a new channel with initial state", async () => {
-      const channel = await store.createChannel(
+      const channel = await store!.createChannel(
         "test-channel",
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
