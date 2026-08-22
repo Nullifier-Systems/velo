@@ -12,6 +12,8 @@ import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
+import { createEnterpriseStore } from "./lib/enterprise-store.js";
+import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -97,6 +99,14 @@ async function startServer() {
       }
     } else {
       app.log.warn("DATABASE_URL or REDIS_URL is not configured; session-key rotation worker is disabled");
+    }
+
+    // (#401) Dual-control expiration: expire PENDING approvals after 24h, poll 60s
+    try {
+      const enterpriseStore = createEnterpriseStore(pgPool as never);
+      startApprovalTimeoutWorker({ store: enterpriseStore });
+    } catch (error) {
+      app.log.error(error, "approval timeout worker failed to start");
     }
   } catch (err) {
     app.log.error(err);
