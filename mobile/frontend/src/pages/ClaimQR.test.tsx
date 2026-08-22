@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRefundCountdown } from "../lib/api";
+import { formatRefundCountdown, GatewayTimeoutError, isGatewayTimeoutError } from "../lib/api";
 
 function statusLabel(status: 'locked' | 'expired' | 'released' | 'refunded'): string {
   if (status === 'locked') return 'Ready to claim';
@@ -46,5 +46,50 @@ describe("ClaimQR logic and status formatting", () => {
   it("shows pause banner when escrow circuit breaker is active", () => {
     expect(pauseBannerVisible(true)).toBe(true);
     expect(pauseBannerVisible(false)).toBe(false);
+  });
+
+  describe("504 Gateway Timeout Error Handling", () => {
+    it("creates GatewayTimeoutError with correct properties", () => {
+      const error = new GatewayTimeoutError(
+        "The payment network request timed out. Please retry your operation.",
+        "req-tout-504-abc123",
+        "POST /cash/request (custodial lock)",
+        10500
+      );
+
+      expect(error.name).toBe("GatewayTimeoutError");
+      expect(error.message).toBe("The payment network request timed out. Please retry your operation.");
+      expect(error.requestId).toBe("req-tout-504-abc123");
+      expect(error.operation).toBe("POST /cash/request (custodial lock)");
+      expect(error.elapsedMs).toBe(10500);
+    });
+
+    it("identifies GatewayTimeoutError instances correctly", () => {
+      const timeoutError = new GatewayTimeoutError(
+        "Timeout message",
+        "req-123",
+        "operation",
+        5000
+      );
+      const regularError = new Error("Regular error");
+
+      expect(isGatewayTimeoutError(timeoutError)).toBe(true);
+      expect(isGatewayTimeoutError(regularError)).toBe(false);
+      expect(isGatewayTimeoutError(null)).toBe(false);
+      expect(isGatewayTimeoutError(undefined)).toBe(false);
+    });
+
+    it("handles GatewayTimeoutError with minimal properties", () => {
+      const error = new GatewayTimeoutError(
+        "Simple timeout",
+        "req-456"
+      );
+
+      expect(error.name).toBe("GatewayTimeoutError");
+      expect(error.message).toBe("Simple timeout");
+      expect(error.requestId).toBe("req-456");
+      expect(error.operation).toBeUndefined();
+      expect(error.elapsedMs).toBeUndefined();
+    });
   });
 });
