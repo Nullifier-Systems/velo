@@ -18,8 +18,12 @@ use soroban_sdk::{
 const LEDGERS_PER_DAY: u32 = 17_280;
 const MAX_TRADES: u32 = 200;
 
+/// TTL extension (in ledgers) for persistent storage entries. ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key.
+const TTL_EXTEND: u32 = 100_000;
+
 // Pre-computed exp(-0.01 * n) * 1_000_000 for n = 0..365
-const DECAY_TABLE: [u32; 356] = [
+const DECAY_TABLE: [u32; 366] = [
     1_000_000, 990_049, 980_198, 970_445, 960_789, 951_229, 941_764, 932_393, 923_116, 913_931,
     904_837, 895_834, 886_920, 878_095, 869_358, 860_707, 852_143, 843_664, 835_270, 826_959,
     818_730, 810_584, 802_518, 794_533, 786_627, 778_800, 771_051, 763_379, 755_783, 748_263,
@@ -53,7 +57,7 @@ const DECAY_TABLE: [u32; 356] = [
     28_925, 28_181, 27_439, 26_699, 25_962, 25_227, 24_494, 23_763, 23_034, 22_308, 21_583, 20_861,
     20_141, 19_423, 18_707, 17_993, 17_281, 16_571, 15_864, 15_158, 14_455, 13_753, 13_054, 12_357,
     11_662, 10_969, 10_278, 9_590, 8_903, 8_218, 7_536, 6_856, 6_178, 5_502, 4_829, 4_158, 3_489,
-    2_823, 2_159, 1_497, 838, 181, 0,
+    2_823, 2_159, 1_497, 838, 181, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 // ---------------------------------------------------------------------------
@@ -112,7 +116,13 @@ impl ReputationContract {
         env.storage().persistent().set(&RepDataKey::Admin, &admin);
         env.storage()
             .persistent()
+            .extend_ttl(&RepDataKey::Admin, TTL_EXTEND, TTL_EXTEND);
+        env.storage()
+            .persistent()
             .set(&RepDataKey::EscrowContract, &escrow_contract);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::EscrowContract, TTL_EXTEND, TTL_EXTEND);
     }
 
     /// Register a verified identity Merkle root (admin only).
@@ -129,7 +139,10 @@ impl ReputationContract {
 
         env.storage()
             .persistent()
-            .set(&RepDataKey::VerifiedRoot(root), &true);
+            .set(&RepDataKey::VerifiedRoot(root.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::VerifiedRoot(root), TTL_EXTEND, TTL_EXTEND);
         Ok(())
     }
 
@@ -182,6 +195,9 @@ impl ReputationContract {
         env.storage()
             .persistent()
             .set(&RepDataKey::SpentNullifier(nullifier_hash.clone()), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::SpentNullifier(nullifier_hash.clone()), TTL_EXTEND, TTL_EXTEND);
 
         // Emit verification event
         env.events().publish(
@@ -243,9 +259,12 @@ impl ReputationContract {
         let count = call_escrow_u32(&env, &escrow, "get_trade_count");
         let scan_max = core::cmp::min(count, MAX_TRADES);
         if scan_max == 0 {
-            env.storage()
-                .persistent()
-                .set(&RepDataKey::CachedScore(address), &0u32);
+        env.storage()
+            .persistent()
+            .set(&RepDataKey::CachedScore(address.clone()), &0u32);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
             return 0;
         }
 
@@ -254,6 +273,7 @@ impl ReputationContract {
         let mut disputed: u32 = 0;
         let mut volume: i128 = 0;
         let mut counterparties: Map<Address, bool> = Map::new(&env);
+        let mut last_trade_seq: u32 = 0;
 
         for idx in 1..=scan_max {
             let trade_id: Option<BytesN<32>> = call_escrow_get_trade_id(&env, &escrow, idx);
@@ -272,6 +292,9 @@ impl ReputationContract {
             }
 
             total += 1;
+            if t.timeout_ledger > last_trade_seq {
+                last_trade_seq = t.timeout_ledger;
+            }
             let counterparty = if is_seller {
                 t.buyer.clone()
             } else {
@@ -297,13 +320,16 @@ impl ReputationContract {
             disputed,
             volume,
             counterparties.len(),
-            total,
+            last_trade_seq,
             &env,
         );
 
         env.storage()
             .persistent()
-            .set(&RepDataKey::CachedScore(address), &score);
+            .set(&RepDataKey::CachedScore(address.clone()), &score);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
         score
     }
 
@@ -314,15 +340,90 @@ impl ReputationContract {
     }
 
     pub fn get_score_breakdown(env: Env, address: Address) -> ScoreBreakdown {
-        let score = Self::compute_score(env.clone(), address);
+        let escrow = env
+            .storage()
+            .persistent()
+            .get::<RepDataKey, Address>(&RepDataKey::EscrowContract)
+            .expect("escrow contract not set");
+
+        let count = call_escrow_u32(&env, &escrow, "get_trade_count");
+        let scan_max = core::cmp::min(count, MAX_TRADES);
+        if scan_max == 0 {
+            return ScoreBreakdown {
+                total_trades: 0,
+                completed_trades: 0,
+                disputed_trades: 0,
+                total_volume: 0,
+                unique_counterparties: 0,
+                score: 0,
+                last_trade_ledger: 0,
+            };
+        }
+
+        let mut total: u32 = 0;
+        let mut completed: u32 = 0;
+        let mut disputed: u32 = 0;
+        let mut volume: i128 = 0;
+        let mut counterparties: Map<Address, bool> = Map::new(&env);
+        let mut last_trade_seq: u32 = 0;
+
+        for idx in 1..=scan_max {
+            let trade_id: Option<BytesN<32>> = call_escrow_get_trade_id(&env, &escrow, idx);
+            let Some(tid) = trade_id else { continue };
+
+            let trade: Option<TradeState> = call_escrow_get_trade(&env, &escrow, &tid);
+            let Some(t) = trade else { continue };
+
+            let is_seller = t.seller == address;
+            let is_buyer = t.buyer == address;
+            if !is_seller && !is_buyer {
+                continue;
+            }
+            if t.seller == t.buyer {
+                continue;
+            }
+
+            total += 1;
+            if t.timeout_ledger > last_trade_seq {
+                last_trade_seq = t.timeout_ledger;
+            }
+            let counterparty = if is_seller {
+                t.buyer.clone()
+            } else {
+                t.seller.clone()
+            };
+            counterparties.set(counterparty, true);
+
+            match t.status {
+                TradeStatus::Released | TradeStatus::Resolved => {
+                    completed += 1;
+                    volume = volume.saturating_add(t.amount);
+                }
+                TradeStatus::Disputed => {
+                    disputed += 1;
+                }
+                _ => {}
+            }
+        }
+
+        let score = compute_score_internal(
+            total,
+            completed,
+            disputed,
+            volume,
+            counterparties.len(),
+            last_trade_seq,
+            &env,
+        );
+
         ScoreBreakdown {
-            total_trades: 0,
-            completed_trades: 0,
-            disputed_trades: 0,
-            total_volume: 0,
-            unique_counterparties: 0,
+            total_trades: total,
+            completed_trades: completed,
+            disputed_trades: disputed,
+            total_volume: volume,
+            unique_counterparties: counterparties.len(),
             score,
-            last_trade_ledger: 0,
+            last_trade_ledger: last_trade_seq,
         }
     }
 }

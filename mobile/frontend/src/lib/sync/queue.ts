@@ -71,12 +71,12 @@ export async function flushQueue(fetchFn: typeof globalThis.fetch, baseUrl: stri
         // 409 Conflict means the operation already succeeded (idempotent).
         await updateOpStatus(op.id, "done");
         succeeded += 1;
-      } else if (response.status >= 400 && response.status < 500) {
-        // Client errors other than 409 are permanent failures.
+      } else if (response.status >= 400 && response.status < 500 && response.status !== 429 && response.status !== 408) {
+        // Permanent client errors (excluding 409, 429 Rate Limit, 408 Timeout)
         await updateOpStatus(op.id, "failed");
         failed += 1;
       } else {
-        // 5xx or network error — retry if under limit.
+        // 5xx, 429, 408, or network error — retry if under limit.
         const newCount = op.retryCount + 1;
         if (newCount >= MAX_RETRIES) {
           await updateOpStatus(op.id, "failed");

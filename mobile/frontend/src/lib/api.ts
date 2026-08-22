@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
 /** Generate a unique idempotency key for offline-safe mutations. */
 function createIdempotencyKey(): string {
@@ -104,13 +104,14 @@ export async function refundCashRequest(id: string): Promise<void> {
 }
 
 export async function releaseCashRequest(id: string, secret: string): Promise<void> {
+  const idempotencyKey = createIdempotencyKey();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/api/v1/cash/request/${id}/release`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-idempotency-key": createIdempotencyKey(),
+        "x-idempotency-key": idempotencyKey,
       },
       body: JSON.stringify({ secret }),
     });
@@ -122,7 +123,7 @@ export async function releaseCashRequest(id: string, secret: string): Promise<vo
         endpoint: `/api/v1/cash/request/${id}/release`,
         method: "POST",
         body: { secret },
-        idempotencyKey: createIdempotencyKey(),
+        idempotencyKey,
       });
     } catch {
       // Silently handle queue failure — will retry on next sync

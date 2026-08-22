@@ -30,7 +30,7 @@ jobs:
 
       - name: Build contract WASM
         working-directory: contracts
-        run: cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
+        run: cargo build --workspace --exclude soroban-lint --exclude invariant-verifier --target wasm32v1-none --release
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@v27.0.0
@@ -38,7 +38,12 @@ jobs:
       - name: Deploy contracts and update registry
         env:
           STELLAR_TESTNET_DEPLOYER_SECRET: ${{ secrets.STELLAR_TESTNET_DEPLOYER_SECRET }}
-        run: bash scripts/deploy-testnet-contracts.sh
+        run: |
+          if [ -z "$STELLAR_TESTNET_DEPLOYER_SECRET" ]; then
+            echo "STELLAR_TESTNET_DEPLOYER_SECRET is not set in repository secrets. Skipping deployment step."
+            exit 0
+          fi
+          bash scripts/deploy-testnet-contracts.sh
 
       - name: Validate recorded addresses
         run: node scripts/update-testnet-contract-addresses.mjs --check

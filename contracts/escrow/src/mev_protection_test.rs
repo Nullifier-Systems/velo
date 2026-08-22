@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::{testutils::Ledger, vec, Address, BytesN, Env};
+use soroban_sdk::{testutils::Ledger, token, vec, Address, BytesN, Env};
 
 /// Test fixture for commit-reveal protocol tests.
 struct CommitRevealFixture {
@@ -25,7 +25,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     let token = token::Client::new(&env, &token_addr);
 
     // Mint to buyer so they can pay collateral + amount
-    token.mint(&buyer, &100_000_000_000); // 1B stroops for testing
+    token::StellarAssetClient::new(&env, &token_addr).mint(&buyer, &100_000_000_000); // 1B stroops for testing
 
     let contract_id = env.register_contract(None, EscrowContract);
     let client = EscrowContractClient::new(&env, &contract_id);
@@ -40,7 +40,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     };
 
     // Initialize escrow
-    client.initialize(&admin, &token_addr, &100); // 1% fee
+    client.initialize(&admin, &token_addr, &100, &arb_set); // 1% fee
 
     CommitRevealFixture {
         env,
@@ -314,8 +314,8 @@ fn salt_collision_produces_different_commitment_hashes() {
         .to_bytes();
 
     // Both commits should succeed (different salts → different hashes)
-    let result1 = f.client.try_commit_escrow(&commitment_hash1, &amount);
-    let result2 = f.client.try_commit_escrow(&commitment_hash2, &amount);
+    let result1 = f.client.try_commit_escrow(&f.buyer, &commitment_hash1, &amount);
+    let result2 = f.client.try_commit_escrow(&f.buyer, &commitment_hash2, &amount);
     assert!(result1.is_ok());
     assert!(result2.is_ok());
 
@@ -331,7 +331,7 @@ fn dynamic_fee_increases_with_locked_liquidity() {
     for i in 0..5 {
         let amount = 1_000_000;
         let commitment_hash = BytesN::from_array(&f.env, &[(i as u8); 32]);
-        let result = f.client.try_commit_escrow(&commitment_hash, &amount);
+        let result = f.client.try_commit_escrow(&f.buyer, &commitment_hash, &amount);
         assert!(result.is_ok());
 
         f.env.ledger().with_mut(|li| li.sequence_number += 200); // Expire each

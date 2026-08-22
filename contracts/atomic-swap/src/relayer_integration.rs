@@ -41,7 +41,7 @@ fn setup_swap(mint_to_buyer: i128) -> SwapScenario {
 
     let contract_id = env.register_contract(None, AtomicSwapContract);
     let client = AtomicSwapContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr).unwrap();
+    client.initialize(&admin, &token_addr);
 
     let secret = BytesN::from_array(&env, &[7u8; 32]);
     let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
@@ -89,16 +89,13 @@ fn relayer_eth_swap_sufficient_finality_happy_path() {
     let evm_reveal_block = 1000u32;
     let evm_current_block = 1100u32; // 100 confirmations
 
-    let extension = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &evm_reveal_block,
-            &1u32, // Ethereum
-            &evm_current_block,
-        )
-        .unwrap();
+    let extension = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &evm_reveal_block,
+        &1u32, // Ethereum
+        &evm_current_block,
+    );
 
     // No extension needed (100 > 64)
     assert_eq!(extension, 0);
@@ -146,36 +143,30 @@ fn relayer_eth_swap_reorg_risk_triggers_timelock_extension() {
     let evm_reveal_block = 1000u32;
     let evm_current_block_early = 1010u32; // Only 10 confirmations (reorg risk!)
 
-    let extension = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &evm_reveal_block,
-            &1u32, // Ethereum
-            &evm_current_block_early,
-        )
-        .unwrap();
+    let extension = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &evm_reveal_block,
+        &1u32, // Ethereum
+        &evm_current_block_early,
+    );
 
     // Extension triggered (10 < 64)
     assert_eq!(extension, 50);
 
     // Relayer should extend timelock on Soroban to protect against race condition
-    let new_timeout = s.client.extend_timelock_for_reorg(&s.trade_id).unwrap();
+    let new_timeout = s.client.extend_timelock_for_reorg(&s.trade_id);
     assert_eq!(new_timeout, original_timeout + 50);
 
     // Simulate waiting for more confirmations (~5 min later in real time)
     let evm_current_block_later = 1100u32; // Now 100 blocks deep
-    let _further_check = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &evm_reveal_block,
-            &1u32,
-            &evm_current_block_later,
-        )
-        .unwrap();
+    let _further_check = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &evm_reveal_block,
+        &1u32,
+        &evm_current_block_later,
+    );
 
     // Now relayer can safely release on Soroban
     s.client.release(&s.trade_id, &s.secret);
@@ -214,32 +205,26 @@ fn relayer_arbitrum_l2_swap_finality_tracking() {
     let arb_reveal_block = 50_000u32;
 
     // Scenario 1: Early observation (only 30 blocks confirmed)
-    let extension_early = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &arb_reveal_block,
-            &42161u32,  // Arbitrum
-            &50_030u32, // 30 blocks (< 100 required)
-        )
-        .unwrap();
+    let extension_early = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &arb_reveal_block,
+        &42161u32,  // Arbitrum
+        &50_030u32, // 30 blocks (< 100 required)
+    );
 
     assert_eq!(extension_early, 50); // Extends timelock
 
-    s.client.extend_timelock_for_reorg(&s.trade_id).unwrap();
+    s.client.extend_timelock_for_reorg(&s.trade_id);
 
     // Scenario 2: Later observation (now 120 blocks confirmed)
-    let _extension_later = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &arb_reveal_block,
-            &42161u32,  // Arbitrum
-            &50_120u32, // 120 blocks (> 100 required)
-        )
-        .unwrap();
+    let _extension_later = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &arb_reveal_block,
+        &42161u32,  // Arbitrum
+        &50_120u32, // 120 blocks (> 100 required)
+    );
     // No extension returned (0), sufficient finality now
 
     // Relayer can release
@@ -271,32 +256,26 @@ fn relayer_polygon_swap_deep_finality_requirement() {
     let polygon_reveal_block = 100_000u32;
 
     // Early observation: only 100 blocks confirmed
-    let extension_early = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &polygon_reveal_block,
-            &137u32,     // Polygon
-            &100_100u32, // 100 blocks (< 256 required)
-        )
-        .unwrap();
+    let extension_early = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &polygon_reveal_block,
+        &137u32,     // Polygon
+        &100_100u32, // 100 blocks (< 256 required)
+    );
 
     assert_eq!(extension_early, 50); // Extends due to insufficient finality
 
-    s.client.extend_timelock_for_reorg(&s.trade_id).unwrap();
+    s.client.extend_timelock_for_reorg(&s.trade_id);
 
     // Final observation: 300 blocks confirmed (well-finalized)
-    let _extension_final = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &polygon_reveal_block,
-            &137u32,
-            &100_300u32, // 300 blocks (> 256 required)
-        )
-        .unwrap();
+    let _extension_final = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &polygon_reveal_block,
+        &137u32,
+        &100_300u32, // 300 blocks (> 256 required)
+    );
 
     s.client.release(&s.trade_id, &s.secret);
 
@@ -326,16 +305,13 @@ fn relayer_optimism_l2_immediate_finality() {
     let evm_tx_hash = BytesN::from_array(&s.env, &[15u8; 32]);
 
     // Even at block 1000 with only 1 confirmation, Optimism is finalized
-    let extension = s
-        .client
-        .record_evm_reveal(
-            &evm_tx_hash,
-            &s.secret,
-            &1000u32, // Block 1000
-            &10u32,   // Optimism
-            &1001u32, // 1 block (= 1 required)
-        )
-        .unwrap();
+    let extension = s.client.record_evm_reveal(
+        &evm_tx_hash,
+        &s.secret,
+        &1000u32, // Block 1000
+        &10u32,   // Optimism
+        &1001u32, // 1 block (= 1 required)
+    );
 
     // No extension needed (1 >= 1)
     assert_eq!(extension, 0);
@@ -368,18 +344,13 @@ fn relayer_error_wrong_secret_release_fails() {
     // Relayer records correct EVM reveal
     let evm_tx_hash = BytesN::from_array(&s.env, &[16u8; 32]);
     s.client
-        .record_evm_reveal(&evm_tx_hash, &s.secret, &1000u32, &1u32, &1100u32)
-        .unwrap();
+        .record_evm_reveal(&evm_tx_hash, &s.secret, &1000u32, &1u32, &1100u32);
 
     // But relayer submits wrong secret to Soroban (failure case)
     let wrong_secret = BytesN::from_array(&s.env, &[8u8; 32]);
 
     // This should panic (per contract design)
-    let result = s.env.try_call_contract::<_, ()>(
-        &s.contract_id,
-        &Symbol::new(&s.env, "release"),
-        (&s.trade_id, &wrong_secret),
-    );
+    let result = s.client.try_release(&s.trade_id, &wrong_secret);
     assert!(result.is_err());
 
     // Funds remain locked (trade still in Locked state)

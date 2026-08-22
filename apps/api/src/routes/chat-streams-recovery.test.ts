@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import Fastify from "fastify";
+import websocket from "@fastify/websocket";
+import WebSocket from "ws";
 import {
   MemoryChatInfrastructure,
   type ChatStreamEntry,
+  activeChatSocketCount,
+  purgeStaleChatSockets,
+  trackChatSocket,
 } from "../lib/chat-infrastructure-streams.js";
 import {
   incrementClock,
@@ -10,6 +16,8 @@ import {
   canDeliver,
 } from "../lib/vector-clock.js";
 import type { VectorClock } from "../lib/vector-clock.js";
+import { chatRoutes } from "./chat.js";
+import { issueChatCapability } from "../lib/chat-capability.js";
 
 const BUYER = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 const SELLER = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -432,5 +440,129 @@ describe("Chat Infrastructure Streams - Message Recovery", () => {
       // Second recovery should be empty (already saw that clock)
       expect(recovered2.length).toBe(0);
     });
+  });
+});
+
+describe("Chat Streams - Connection Lifecycle & Leak Recovery", () => {
+  const BUYER = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+  const SELLER = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const TRADE_ID = "trade-lifecycle-test";
+
+  let infra: MemoryChatInfrastructure;
+  const apps: any[] = [];
+  const sockets: WebSocket[] = [];
+
+  beforeEach(async () => {
+    process.env.CHAT_CAPABILITY_SECRET = "test-chat-capability-secret-at-least-32-bytes";
+    infra = new MemoryChatInfrastructure();
+    await infra.putTrade(TRADE_ID, { buyer: BUYER, seller: SELLER, status: "locked" });
+  });
+
+  afterEach(async () => {
+    delete process.env.CHAT_HEARTBEAT_INTERVAL_MS;
+    delete process.env.CHAT_HEARTBEAT_MISSED_LIMIT;
+    for (const socket of sockets) socket.terminate();
+    sockets.length = 0;
+    purgeStaleChatSockets(0);
+    await Promise.all(apps.map((app) => app.close()));
+    await infra.close();
+  });
+
+  async function server() {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(websocket);
+    await app.register(chatRoutes, { prefix: "/api/v1", infrastructure: infra });
+    await app.listen({ port: 0 });
+    return (app.server.address() as any).port as number;
+  }
+
+  async function connect(port: number, token: string, autoPong = true) {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/api/v1/chat/${TRADE_ID}?token=${encodeURIComponent(token)}`,
+      autoPong ? undefined : { autoPong: false },
+    );
+    sockets.push(socket);
+    return socket;
+  }
+
+  function waitForJoined(socket: WebSocket): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timed out waiting for joined")), 2_000);
+      socket.on("message", (raw) => {
+        const payload = JSON.parse(raw.toString());
+        if (payload.type === "joined") {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      socket.once("error", reject);
+    });
+  }
+
+  function waitForClose(socket: WebSocket): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timed out waiting for close")), 2_000);
+      socket.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.once("error", () => {});
+    });
+  }
+
+  async function eventually(predicate: () => boolean): Promise<void> {
+    const start = Date.now();
+    while (!predicate()) {
+      if (Date.now() - start > 2_000) throw new Error("condition not met in time");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  it("releases Pub/Sub listeners when a socket drops abruptly without a close frame", async () => {
+    const port = await server();
+    const socket = await connect(port, issueChatCapability(TRADE_ID, BUYER));
+    await waitForJoined(socket);
+    expect(infra.activeSubscriptions()).toBe(1);
+
+    socket.terminate();
+    await waitForClose(socket);
+
+    await eventually(() => infra.activeSubscriptions() === 0);
+    expect(activeChatSocketCount()).toBe(0);
+  });
+
+  it("terminates sockets that miss heartbeat pongs and unbinds their subscription", async () => {
+    process.env.CHAT_HEARTBEAT_INTERVAL_MS = "50";
+    process.env.CHAT_HEARTBEAT_MISSED_LIMIT = "2";
+    const port = await server();
+    const socket = await connect(port, issueChatCapability(TRADE_ID, BUYER), false);
+    await waitForJoined(socket);
+    expect(infra.activeSubscriptions()).toBe(1);
+
+    await waitForClose(socket);
+
+    await eventually(() => infra.activeSubscriptions() === 0);
+    expect(activeChatSocketCount()).toBe(0);
+  });
+
+  it("purges inactive sockets from the registry", async () => {
+    const fake = { terminate: () => {} };
+    trackChatSocket(fake as any, TRADE_ID);
+    expect(activeChatSocketCount()).toBe(1);
+
+    // Let a tick pass so the tracked entry is older than the purge cutoff.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const purged = purgeStaleChatSockets(0);
+    expect(purged).toBe(1);
+    expect(activeChatSocketCount()).toBe(0);
+  });
+
+  it("drops the subscription count back to zero when the last participant leaves", async () => {
+    const unsubscribe = await infra.subscribe(TRADE_ID, () => {});
+    expect(infra.activeSubscriptions()).toBe(1);
+
+    await unsubscribe();
+    expect(infra.activeSubscriptions()).toBe(0);
   });
 });

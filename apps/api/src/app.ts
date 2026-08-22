@@ -17,14 +17,44 @@ import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
 import { sessionRoutes } from "./routes/session.js";
+import { sessionRotationRoutes } from "./routes/session-rotation.js";
 import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
 import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
+import { Pool } from "pg";
+import { PostgresEventStore } from "./lib/stellar-event-store.js";
+import { graphqlRoutes } from "./routes/graphql.js";
+import { circuitBreakerRoutes } from "./routes/circuit-breaker.js";
+import { zkSettleRoutes } from "./routes/zk-settle.js";
 
-const usedPayments = new Set<string>();
+const MAX_PAYMENTS_CACHE = 10000;
+const usedPayments = new Map<string, number>();
+
+function isPaymentUsed(payment: string): boolean {
+  return usedPayments.has(payment);
+}
+
+function recordPaymentUsed(payment: string): void {
+  const now = Date.now();
+  if (usedPayments.size >= MAX_PAYMENTS_CACHE) {
+    const oldestKey = usedPayments.keys().next().value;
+    if (oldestKey) usedPayments.delete(oldestKey);
+  }
+  usedPayments.set(payment, now);
+}
+
+function isUsdcAsset(asset: any): boolean {
+  if (!asset) return true;
+  if (typeof asset.isNative === "function" && asset.isNative()) return false;
+  if (asset.code && asset.code !== "USDC") return false;
+  if (process.env.USDC_ISSUER && asset.issuer && asset.issuer !== process.env.USDC_ISSUER) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Request ID correlation — every request gets a stable ID that Fastify
@@ -58,6 +88,14 @@ export const app = Fastify({
     return randomUUID();
   },
 });
+
+export const pgPool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : undefined;
+export const stellarEventStore = pgPool
+  ? new PostgresEventStore(pgPool)
+  : undefined;
+if (pgPool) app.decorate("pg", pgPool);
 
 // Echo the request ID back to the client so a failed call can be traced
 // in the logs — see docs/request-tracing.md.
@@ -237,7 +275,7 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
     return false;
   }
 
-  if (usedPayments.has(payment)) {
+  if (isPaymentUsed(payment)) {
     throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
   }
 
@@ -254,20 +292,27 @@ app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) =
       throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
     }
 
+    // Check operation
     const hasPayment = tx.operations.some(op => {
-      if (op.type === "payment" || op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
-        const dest = (op as any).destination;
-        const amt = (op as any).amount;
-        return dest === merchantAddress && parseFloat(amt) >= parseFloat(priceUsdc);
-      }
-      return false;
+        if (op.type === "payment") {
+            const dest = (op as any).destination;
+            const amt = (op as any).amount;
+            const asset = (op as any).asset;
+            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
+        } else if (op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
+            const dest = (op as any).destination;
+            const amt = (op as any).destAmount ?? (op as any).amount;
+            const asset = (op as any).destAsset ?? (op as any).asset;
+            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
+        }
+        return false;
     });
 
     if (!hasPayment) {
       throw new ApiError(402, "INVALID_PAYMENT_TX", "Transaction does not contain a valid payment");
     }
 
-    usedPayments.add(payment);
+    recordPaymentUsed(payment);
     return true;
   } catch (err) {
     if (err instanceof ApiError) throw err;
@@ -308,5 +353,8 @@ app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
 app.register(sessionRoutes, { prefix: "/api/v1" });
+app.register(sessionRotationRoutes, { prefix: "/api/v1" });
 app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
+app.register(circuitBreakerRoutes, { prefix: "/api/v1" });
+app.register(zkSettleRoutes, { prefix: "/api/v1" });

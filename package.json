@@ -20,9 +20,11 @@
     "dev:frontend": "npm run dev -w mobile/frontend",
     "dev:backend": "npm run dev -w mobile/backend",
     "post-deploy-check": "npm run post-deploy-check -w apps/api",
+    "bot:refund": "tsx scripts/refund-bot.ts",
     "test:load": "node scripts/run-load-test.js"
   },
   "devDependencies": {
+    "tsx": "^4.16.2",
     "typescript": "^5.5.4",
     "turbo": "^2.1.0"
   },

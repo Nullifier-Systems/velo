@@ -1,4 +1,5 @@
 import {
+  Address,
   BASE_FEE,
   FeeBumpTransaction,
   Keypair,
@@ -580,12 +581,45 @@ export interface ResolveDisputeParams {
   tradeId: string;
   buyerShare?: number;
   buyerShareBps?: number;
+  signatures?: Array<{ index: number; signatureHex: string }>;
+}
+
+export interface ChainReleaseToLockParams {
+  contractId: string;
+  releaseTradeId: string;
+  releaseSecretHex: string;
+  newSeller: string;
+  newSecretHashHex: string;
+  newTimeoutLedgers: number;
+  signerPublicKey?: string;
 }
 
 export interface BatchReleaseParams {
   contractId: string;
   trades?: Array<{ tradeId: string; releaseTo: string }>;
   releases?: Array<{ tradeId: string; releaseTo?: string; secretHex?: string }>;
+}
+
+export interface TrancheParam {
+  amountStroops: bigint;
+  secretHashHex: string;
+}
+
+export interface LockWithTranchesParams {
+  contractId: string;
+  tradeId: string;
+  buyer: string;
+  seller: string;
+  amountStroops: bigint;
+  tranches: TrancheParam[];
+  timeoutLedgers: number;
+}
+
+export interface ReleaseTrancheParams {
+  contractId: string;
+  tradeId: string;
+  trancheIndex: number;
+  secretHex: string;
 }
 
 /** Testnet-only: custodial lock (API signs with BUYER_SECRET_KEY). */
@@ -621,7 +655,7 @@ export async function lockEscrow(
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
           nativeToScVal(params.buyer, { type: "address" }),
           nativeToScVal(params.seller, { type: "address" }),
-          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(amount, { type: "i128" }),
           nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
       }),
@@ -703,7 +737,7 @@ export async function buildLockEscrowTransaction(
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
           nativeToScVal(params.buyer, { type: "address" }),
           nativeToScVal(params.seller, { type: "address" }),
-          nativeToScVal(amount, { type: "u128" }),
+          nativeToScVal(amount, { type: "i128" }),
           nativeToScVal(params.timeoutLedgers, { type: "u32" }),
         ],
       }),
@@ -736,6 +770,11 @@ export async function releaseEscrow(
     async () => server.getAccount(signer.publicKey()),
   );
 
+  const secretHex = params.secretHex ?? params.releaseTo;
+  if (!secretHex) {
+    throw new Error("releaseEscrow requires secretHex or releaseTo parameter");
+  }
+
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -746,7 +785,7 @@ export async function releaseEscrow(
         function: "release",
         args: [
           nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
-          nativeToScVal(params.releaseTo, { type: "address" }),
+          nativeToScVal(Buffer.from(secretHex, "hex"), { type: "bytes" }),
         ],
       }),
     )
@@ -789,6 +828,54 @@ export async function releaseEscrow(
   }
 
   return { hash: sendResult.hash };
+}
+
+function trancheItemScVal(amountStroops: bigint, secretHashHex: string) {
+  return nativeToScVal({
+    amount: amountStroops,
+    secret_hash: Buffer.from(secretHashHex, "hex"),
+    released: false,
+  });
+}
+
+export async function lockEscrowWithTranches(
+  params: LockWithTranchesParams,
+): Promise<number> {
+  const signer = loadSignerKeypair();
+  const tranchesScVal = xdr.ScVal.scvVec(
+    params.tranches.map((t) => trancheItemScVal(t.amountStroops, t.secretHashHex)),
+  );
+  await invokeContract(
+    params.contractId,
+    "lock_with_tranches",
+    [
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+      nativeToScVal(params.seller, { type: "address" }),
+      nativeToScVal(params.buyer, { type: "address" }),
+      nativeToScVal(params.amountStroops, { type: "i128" }),
+      tranchesScVal,
+      nativeToScVal(params.timeoutLedgers, { type: "u32" }),
+    ],
+    signer,
+  );
+  return getLatestLedgerSequence();
+}
+
+export async function releaseTrancheEscrow(
+  params: ReleaseTrancheParams,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  await invokeContract(
+    params.contractId,
+    "release_tranche",
+    [
+      nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+      nativeToScVal(params.trancheIndex, { type: "u32" }),
+      nativeToScVal(Buffer.from(params.secretHex, "hex"), { type: "bytes" }),
+    ],
+    signer,
+  );
+  return { hash: "ok" };
 }
 
 /** Testnet-only: custodial refund (API signs). */
@@ -873,16 +960,25 @@ export async function disputeEscrow(params: DisputeParams) {
   );
 }
 
-/** Calls escrow's resolve_dispute(buyer_share). buyer_share is 0-10000 (basis points). */
+/** Calls escrow's resolve_dispute(id, buyer_share_bps, signatures). buyer_share is 0-10000 (basis points). */
 export async function resolveDisputeEscrow(params: ResolveDisputeParams) {
   const signer = loadSignerKeypair();
   const buyerShare = params.buyerShareBps ?? params.buyerShare;
+  const sigsScVal = xdr.ScVal.scvVec(
+    (params.signatures ?? []).map((s) =>
+      xdr.ScVal.scvVec([
+        nativeToScVal(s.index, { type: "u32" }),
+        nativeToScVal(Buffer.from(s.signatureHex, "hex"), { type: "bytes" }),
+      ])
+    )
+  );
   return invokeContract(
     params.contractId,
     "resolve_dispute",
     [
       nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
       nativeToScVal(buyerShare, { type: "u32" }),
+      sigsScVal,
     ],
     signer,
   );
@@ -992,45 +1088,23 @@ function wrapWithFeeBumpIfPossible(
   }
 }
 
-/** Testnet-only: custodial batch release (API signs). */
-export async function batchReleaseEscrow(
-  params: BatchReleaseParams,
-): Promise<string[]> {
-  const signer = loadSignerKeypair();
-  const hashes: string[] = [];
-  const trades = params.trades ?? params.releases ?? [];
-
-  for (const trade of trades) {
-    const result = await invokeContract(
-      params.contractId,
-      "release",
-      [
-        nativeToScVal(Buffer.from(trade.tradeId, "hex"), { type: "bytes" }),
-        nativeToScVal(trade.releaseTo, { type: "address" }),
-      ],
-      signer,
-    );
-    hashes.push((result as { hash: string }).hash);
-  }
-
-  return hashes;
+export interface OnChainTradeState {
+  seller?: string;
+  buyer?: string;
+  amount?: bigint | string | number;
+  amountStroops?: string;
+  secret_hash?: Buffer | string;
+  secretHashHex?: string;
+  timeout_ledger?: number;
+  timeoutLedger?: number;
+  status: string;
 }
 
-/** Testnet-only: custodial batch release (API signs) - alternative name. */
-export async function releaseBatchEscrow(
-  params: BatchReleaseParams,
-  logger: StellarLogger = noopLogger,
-  buildSimTimeoutMs: number = RPC_TIMEOUTS.releaseBuildSim,
-): Promise<{ hash: string }[]> {
-  const hashes = await batchReleaseEscrow(params);
-  return hashes.map((hash) => ({ hash }));
-}
-
-/** Returns the on-chain status of a trade. */
+/** Returns the on-chain status and state of a trade. */
 export async function getTradeOnChain(
   contractId: string,
   tradeId: string,
-): Promise<{ status: string } | null> {
+): Promise<OnChainTradeState | null> {
   try {
     const signer = loadSignerKeypair();
     const account = await server.getAccount(signer.publicKey());
@@ -1057,10 +1131,399 @@ export async function getTradeOnChain(
       throw new Error("No result from simulation");
     }
 
-    const result = scValToNative(sim.result.retval) as { status: string };
+    const result = scValToNative(sim.result.retval) as OnChainTradeState;
     return result;
   } catch (err) {
     console.error("Failed to get trade on-chain:", err);
     return null;
   }
+}
+
+/**
+ * Testnet-only: custodial batch release (API signs). Settles many trades'
+ * payouts in a single Soroban invocation of the escrow contract's
+ * `batch_release()` — the on-chain half of provider payout batching. Each
+ * item is still verified against its own trade's secret hash on-chain, so
+ * this changes nothing about the trust model versus calling `release()`
+ * once per trade — it only reduces how many separate transactions get
+ * submitted. See docs/provider-payout-batching.md.
+ *
+ * Returns the hex trade ids that were actually released (a stale or
+ * already-settled entry is skipped by the contract, not rejected as a
+ * whole batch).
+ */
+function batchReleaseItemScVal(tradeId: string, secretHex: string) {
+  return nativeToScVal({
+    id: Buffer.from(tradeId, "hex"),
+    secret: Buffer.from(secretHex, "hex"),
+  });
+}
+
+export async function batchReleaseEscrow(params: BatchReleaseParams): Promise<string[]> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases?.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex ?? "")) ?? []
+    );
+    const result = await invokeContract(params.contractId, "batch_release", [itemsScVal], signer);
+    const releasedIds = (result as (Uint8Array | Buffer)[] | undefined) ?? [];
+    return releasedIds.map((id) => Buffer.from(id).toString("hex"));
+}
+
+export const releaseBatchEscrow = batchReleaseEscrow;
+
+/**
+ * Testnet-only: custodial ATOMIC batch release (API signs). Invokes the escrow
+ * contract's `release_batch()` — the all-or-nothing sibling of `batch_release()`.
+ *
+ * The contract validates every leg (exists, is Locked, secret matches) in a
+ * first pass and only then settles them; if a single leg is invalid the whole
+ * invocation reverts, so nothing is partially settled and this call throws.
+ * Use it when the caller hands us a specific, fixed set of trades that must
+ * settle together or not at all (see POST /cash/batch-release).
+ *
+ * Contrast with `batchReleaseEscrow()` (`batch_release`), which skips an
+ * invalid leg and settles the rest — the right choice for opportunistic
+ * background batching where a stale trade should simply be retried next tick.
+ */
+export async function releaseBatchAtomic(params: BatchReleaseParams): Promise<void> {
+    const signer = loadSignerKeypair();
+    const itemsScVal = xdr.ScVal.scvVec(
+        params.releases?.map((r) => batchReleaseItemScVal(r.tradeId, r.secretHex ?? "")) ?? []
+    );
+    await invokeContract(params.contractId, "release_batch", [itemsScVal], signer);
+}
+
+
+export interface ResolveParams {
+    contractId: string;
+    tradeId: string;
+    resolveToBuyer: boolean;
+    signers: string[];
+}
+
+/** Calls escrow's resolve(id, resolve_to_buyer, signers). Admin-only. */
+export async function resolveEscrow(params: ResolveParams) {
+    const signer = loadSignerKeypair();
+    return invokeContract(
+        params.contractId,
+        "resolve",
+        [
+            hexToBytesScVal(params.tradeId),
+            nativeToScVal(params.resolveToBuyer),
+            xdr.ScVal.scvVec(
+                params.signers.map((addr) => nativeToScVal(addr, { type: "address" }))
+            ),
+        ],
+        signer
+    );
+}
+
+/** Build an unsigned transaction envelope for escrow-to-escrow chaining. */
+export async function buildChainReleaseToLockTransaction(
+  params: ChainReleaseToLockParams,
+  signerPublicKey?: string,
+): Promise<string> {
+  const pubKey = params.signerPublicKey ?? signerPublicKey ?? loadSignerKeypair().publicKey();
+  const account = await server.getAccount(pubKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "chain_release_to_lock",
+        args: [
+          nativeToScVal(Buffer.from(params.releaseTradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(Buffer.from(params.releaseSecretHex, "hex"), { type: "bytes" }),
+          nativeToScVal(params.newSeller, { type: "address" }),
+          nativeToScVal(Buffer.from(params.newSecretHashHex, "hex"), { type: "bytes" }),
+          nativeToScVal(params.newTimeoutLedgers, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+/** Submit a pre-signed escrow-to-escrow chain transaction. */
+export async function submitChainReleaseToLockTx(
+  signedXdr: string,
+): Promise<{ hash: string; newTradeId: string }> {
+  const result = await submitSignedEnvelope(signedXdr);
+  let newTradeId = "";
+  if ((result as any).returnValue) {
+    try {
+      const nativeVal = scValToNative((result as any).returnValue);
+      if (Buffer.isBuffer(nativeVal)) {
+        newTradeId = nativeVal.toString("hex");
+      } else if (typeof nativeVal === "string") {
+        newTradeId = nativeVal;
+      }
+    } catch (_) {
+      // fallback
+    }
+  }
+  return { hash: result.hash, newTradeId: newTradeId || result.hash };
+}
+
+// ---------------------------------------------------------------------------
+// Automated circuit-breaker arbitration engine (#374)
+// ---------------------------------------------------------------------------
+
+/** Keypair used to sign emergency pause/unpause transactions. */
+export function loadSessionAccountKeypair(): Keypair {
+  const secret =
+    process.env.SESSION_ACCOUNT_SECRET_KEY ??
+    process.env.CIRCUIT_BREAKER_SESSION_KEY ??
+    process.env.BUYER_SECRET_KEY;
+  if (!secret) {
+    throw new Error(
+      "SESSION_ACCOUNT_SECRET_KEY not set — emergency circuit-breaker signing requires a session-account key. " +
+        "Store it in an HSM or secure secret vault; never in the codebase.",
+    );
+  }
+  return Keypair.fromSecret(secret);
+}
+
+export interface CircuitBreakerBroadcastParams {
+  contractId: string;
+  action: "FORCE_PAUSE" | "UNPAUSE";
+  /** Ledger offset allowed before the broadcast must be observable. */
+  pollTimeout?: number;
+}
+
+export interface CircuitBreakerBroadcastResult {
+  hash: string;
+  status: string;
+  ledger: number;
+  fn: string;
+}
+
+/**
+ * Sign and submit the escrow contract's `pause()` / `unpause()` with the
+ * emergency session-account key, then wait for on-chain confirmation.
+ *
+ * In single-admin mode `pause(env, signers)` authenticates the caller as the
+ * admin (`require_multisig` falls through to `admin.require_auth()`), so the
+ * session account — registered as the escrow admin — authorizes the call by
+ * signing the transaction. Multisig deployments pass the session key in the
+ * signers set instead.
+ */
+export async function broadcastCircuitBreakerPause(
+  params: CircuitBreakerBroadcastParams,
+  logger: StellarLogger = noopLogger,
+): Promise<CircuitBreakerBroadcastResult> {
+  const fn = params.action === "FORCE_PAUSE" ? "pause" : "unpause";
+  const signer = loadSessionAccountKeypair();
+  const pollTimeout = params.pollTimeout ?? RPC_TIMEOUTS.genericPoll;
+  const log = logger.child({ contract: params.contractId, fn });
+
+  const account = await rpcTimeout(
+    `${fn}/getAccount`,
+    RPC_TIMEOUTS.genericBuildSim,
+    async () => server.getAccount(signer.publicKey()),
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: fn,
+        args: [xdr.ScVal.scvVec([])],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcTimeout(
+    `${fn}/simulateTransaction`,
+    RPC_TIMEOUTS.genericBuildSim,
+    async () => server.simulateTransaction(tx),
+  );
+  if (Api.isSimulationError(sim)) {
+    log.error({ error: sim.error }, "circuit-breaker simulation failed");
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    log.error({ error: sendResult.errorResult }, "circuit-breaker submission failed");
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  const confirmed = await rpcTimeout(`${fn}/poll`, pollTimeout, async () => {
+    let result = await server.getTransaction(sendResult.hash);
+    while (result.status === Api.GetTransactionStatus.NOT_FOUND) {
+      await new Promise((r) => setTimeout(r, 1000));
+      result = await server.getTransaction(sendResult.hash);
+    }
+    return result;
+  });
+
+  if (confirmed.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${confirmed.status}`);
+  }
+
+  log.info({ hash: sendResult.hash, ledger: confirmed.ledger }, "circuit-breaker tx confirmed");
+  return {
+    hash: sendResult.hash,
+    status: confirmed.status,
+    ledger: confirmed.ledger || 0,
+    fn,
+  };
+}
+
+/**
+ * Read the escrow contract's actual USDC/token balance for the formal
+ * reserve-conservation invariant (#374).
+ *
+ * Soroban token contracts persist holder balances as a ContractData entry
+ * keyed by the holder `Address` (scval) in the token contract's domain.
+ * Returns null when the entry is absent or unreadable so the invariant
+ * pipeline can skip the reconciliation gracefully (see
+ * `StellarIndexerWorker.runInvariantCheck`).
+ */
+export async function readEscrowTokenBalance(
+  escrowContractId: string,
+  tokenContractId: string,
+): Promise<bigint | null> {
+  const holder = new Address(escrowContractId);
+  const key = xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Address(tokenContractId).toScAddress(),
+      key: holder.toScVal(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+  try {
+    const result = await server.getLedgerEntries(key);
+    const entry = result.entries?.[0];
+    if (!entry) return null;
+    const data = entry.val;
+    if (data.switch() !== xdr.LedgerEntryType.contractData()) return null;
+    const native = scValToNative(data.contractData().val());
+    if (typeof native === "bigint") return native;
+    if (typeof native === "number") return BigInt(Math.trunc(native));
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read authoritative trade state from the Soroban contract. */export async function getTradeState(
+  contractId: string,
+  tradeId: string,
+  _caller?: string,
+): Promise<{
+  seller: string;
+  buyer: string;
+  amountStroops: string;
+  secretHashHex: string;
+  timeoutLedger: number;
+  status: string;
+} | null> {
+  const onChain = await getTradeOnChain(contractId, tradeId);
+  if (!onChain) return null;
+  const rawStatus =
+    typeof onChain.status === "object" && onChain.status !== null
+      ? Object.keys(onChain.status)[0]
+      : String(onChain.status ?? "locked");
+  const secretHash = onChain.secret_hash ?? onChain.secretHashHex;
+  const secretHashHex = Buffer.isBuffer(secretHash)
+    ? secretHash.toString("hex")
+    : typeof secretHash === "string"
+    ? secretHash
+    : "";
+  const amount = onChain.amount ?? onChain.amountStroops ?? "0";
+  return {
+    seller: String(onChain.seller ?? ""),
+    buyer: String(onChain.buyer ?? ""),
+    amountStroops: String(amount),
+    secretHashHex,
+    timeoutLedger: Number(onChain.timeout_ledger ?? onChain.timeoutLedger ?? 0),
+    status: rawStatus.toLowerCase(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Session-key multi-sig emergency rotation (#375)
+// ---------------------------------------------------------------------------
+
+export interface ProposeRotationParams {
+  contractId: string;
+  proposer: string;
+  oldKey: string;
+  newKey: string;
+}
+
+export interface ApproveRotationParams {
+  contractId: string;
+  approver: string;
+  proposalId: bigint | number | string;
+}
+
+/** On-chain `RotationProposal` as returned by `get_rotation_proposal`. */
+export interface OnChainRotationProposal {
+  old_key: string;
+  new_key: string;
+  approvals: string[];
+  executed: boolean;
+}
+
+/** `propose_rotation(proposer, old_key, new_key) -> u64` — custodial (testnet). */
+export async function proposeRotation(params: ProposeRotationParams): Promise<bigint> {
+  const signer = loadSignerKeypair();
+  const proposalId = await invokeContract(
+    params.contractId,
+    "propose_rotation",
+    [
+      nativeToScVal(params.proposer, { type: "address" }),
+      nativeToScVal(params.oldKey, { type: "address" }),
+      nativeToScVal(params.newKey, { type: "address" }),
+    ],
+    signer,
+  );
+  return BigInt(proposalId as bigint | number | string);
+}
+
+/** `approve_rotation(approver, proposal_id)` — the 2nd approval executes it. */
+export async function approveRotation(params: ApproveRotationParams): Promise<void> {
+  const signer = loadSignerKeypair();
+  await invokeContract(
+    params.contractId,
+    "approve_rotation",
+    [
+      nativeToScVal(params.approver, { type: "address" }),
+      nativeToScVal(BigInt(params.proposalId), { type: "u64" }),
+    ],
+    signer,
+  );
+}
+
+/** Read-only `get_rotation_proposal(proposal_id)`; null when it is unset. */
+export async function getRotationProposal(
+  contractId: string,
+  proposalId: bigint | number | string,
+): Promise<OnChainRotationProposal | null> {
+  const proposal = await simulateContractRead<OnChainRotationProposal | null>(
+    contractId,
+    "get_rotation_proposal",
+    [nativeToScVal(BigInt(proposalId), { type: "u64" })],
+  );
+  return proposal ?? null;
 }

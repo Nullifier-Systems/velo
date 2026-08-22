@@ -167,7 +167,7 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string }; Headers: EvidenceHeaders }>(
     "/cash/request/:id/evidence",
-    async (request) => {
+    async (request, reply) => {
       const access = participantForTrade(request);
       if ((app as any).pg) {
         const { rows } = await (app as any).pg.query(
@@ -177,9 +177,9 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
            FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
           [access.trade.id],
         );
-        return { data: rows };
+        return reply.send({ data: rows });
       }
-      return { data: getDisputeEvidenceForTrade(access.trade.id).map(metadata) };
+      return reply.send({ data: getDisputeEvidenceForTrade(access.trade.id).map(metadata) });
     },
   );
 

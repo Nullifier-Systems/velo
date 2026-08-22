@@ -65,7 +65,9 @@ impl MaliciousToken {
         env.storage().instance().set(&DataKey::Seller, &seller);
         env.storage().instance().set(&DataKey::Buyer, &buyer);
         env.storage().instance().set(&DataKey::Amount, &amount);
-        env.storage().instance().set(&DataKey::SecretHash, &secret_hash);
+        env.storage()
+            .instance()
+            .set(&DataKey::SecretHash, &secret_hash);
         env.storage()
             .instance()
             .set(&DataKey::TimeoutLedgers, &timeout_ledgers);

@@ -21,7 +21,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus};
+use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
 };
@@ -37,6 +37,8 @@ enum DataKey {
     ProofCache(BytesN<32>), // proof_hash -> true/false
     /// Cross-chain state: EVM tx hash -> (secret, block_height, revealed_at_ledger)
     CrossChainState(BytesN<32>), // evm_tx_hash -> CrossChainTxInfo
+    /// Track if timelock was extended for a trade
+    TimelockExtended(BytesN<32>),
 }
 
 #[contracterror]
@@ -75,6 +77,11 @@ pub struct CrossChainTxInfo {
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledger, sanity cap
+
+/// TTL extension (in ledgers) for persistent storage entries — ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key
+/// so the entry remains observable until settlement completes.
+const TTL_EXTEND: u32 = 100_000;
 
 /// Cross-chain reorg protection: finality depth per EVM chain
 /// These are chain_id -> k_confirmations mappings
@@ -214,6 +221,7 @@ impl AtomicSwapContract {
 
     /// Cross-chain: Extend a trade's timelock to account for EVM reorg risk.
     /// Only called if record_evm_reveal() detected insufficient finality.
+    /// Prevents double-extension for the same trade to protect against DoS attacks.
     pub fn extend_timelock_for_reorg(env: Env, trade_id: BytesN<32>) -> Result<u32, Error> {
         let key = DataKey::Trade(trade_id.clone());
         let mut state: TradeState = env
@@ -226,6 +234,11 @@ impl AtomicSwapContract {
             return Err(Error::TradeNotFound);
         }
 
+        let ext_key = DataKey::TimelockExtended(trade_id.clone());
+        if env.storage().persistent().has(&ext_key) {
+            return Err(Error::TimelockAlreadyExtended);
+        }
+
         let _current_ledger = env.ledger().sequence();
         let old_timeout = state.timeout_ledger;
 
@@ -233,6 +246,15 @@ impl AtomicSwapContract {
         state.timeout_ledger = old_timeout.saturating_add(MAX_REORG_WINDOW_LEDGERS);
 
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+
+        env.storage().persistent().set(&ext_key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&ext_key, TTL_EXTEND, TTL_EXTEND);
+
         env.events().publish(
             (Symbol::new(&env, "timelock_extended"), trade_id),
             (old_timeout, state.timeout_ledger),
@@ -317,10 +339,18 @@ impl Htlc for AtomicSwapContract {
 
         let timeout_ledger = env.ledger().sequence() + timeout_ledgers;
 
+        let mut tranches = soroban_sdk::Vec::new(&env);
+        tranches.push_back(Tranche {
+            amount,
+            secret_hash: secret_hash.clone(),
+            released: false,
+        });
+
         let state = TradeState {
             seller,
             buyer,
             amount,
+            tranches,
             secret_hash,
             timeout_ledger,
             status: TradeStatus::Locked,
@@ -362,6 +392,9 @@ impl Htlc for AtomicSwapContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
@@ -396,6 +429,9 @@ impl Htlc for AtomicSwapContract {
         // CEI pattern: update state before external calls
         state.status = TradeStatus::Refunded;
         env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);

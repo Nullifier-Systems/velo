@@ -12,6 +12,7 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger},
     Address, BytesN, Env,
 };
+use std::{println, vec, vec::Vec};
 
 /// Benchmark: SHA256 hash computation (used for proof verification)
 ///
@@ -29,14 +30,15 @@ fn bench_sha256_hash_computation() {
     let end = env.ledger().sequence();
 
     // Verify hash was computed correctly
-    assert_eq!(computed, data);
+    assert_eq!(computed.to_array().len(), 32);
+    assert_ne!(computed, data);
     println!(
         "SHA256 hash computation completed in {} ledger sequences",
         end - start
     );
 }
 
-/// Benchmark: Multiple proof verifications in sequence
+/// Benchmark: Batch verification of 10 Merkle proofs
 ///
 /// Simulates batch verification of multiple Merkle proofs:
 /// - 10 proofs verification loop
@@ -45,12 +47,13 @@ fn bench_sha256_hash_computation() {
 #[test]
 fn bench_batch_proof_verification() {
     let env = Env::default();
+    env.mock_all_auths();
     let admin = Address::generate(&env);
     let token_addr = Address::generate(&env);
 
     let contract_id = env.register_contract(None, AtomicSwapContract);
     let client = AtomicSwapContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr).unwrap();
+    client.initialize(&admin, &token_addr);
 
     // Generate 10 distinct proofs
     let mut proofs = Vec::new();
@@ -66,7 +69,7 @@ fn bench_batch_proof_verification() {
 
     // Verify all proofs
     for (proof_hash, log_data) in proofs.iter() {
-        let _result = client.verify_merkle_proof(proof_hash, log_data).unwrap();
+        let _result = client.verify_merkle_proof(proof_hash, log_data);
     }
 
     let end = env.ledger().sequence();
@@ -87,12 +90,13 @@ fn bench_batch_proof_verification() {
 #[test]
 fn bench_multi_chain_finality_tracking() {
     let env = Env::default();
+    env.mock_all_auths();
     let admin = Address::generate(&env);
     let token_addr = Address::generate(&env);
 
     let contract_id = env.register_contract(None, AtomicSwapContract);
     let client = AtomicSwapContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr).unwrap();
+    client.initialize(&admin, &token_addr);
 
     let secret = BytesN::from_array(&env, &[7u8; 32]);
 
@@ -111,9 +115,8 @@ fn bench_multi_chain_finality_tracking() {
             let mut arr = [idx as u8; 32];
             BytesN::from_array(&env, &arr)
         };
-        let _extension = client
-            .record_evm_reveal(&tx_hash, &secret, &evm_block, chain_id, &evm_current)
-            .unwrap();
+        let _extension =
+            client.record_evm_reveal(&tx_hash, &secret, &evm_block, chain_id, &evm_current);
     }
 
     let end = env.ledger().sequence();
@@ -148,7 +151,7 @@ fn bench_timelock_extension_batch() {
 
     let contract_id = env.register_contract(None, AtomicSwapContract);
     let client = AtomicSwapContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr).unwrap();
+    client.initialize(&admin, &token_addr);
 
     // Create 10 trades
     let mut trade_ids = Vec::new();
@@ -168,7 +171,7 @@ fn bench_timelock_extension_batch() {
 
     // Extend timelock for all trades
     for id in trade_ids.iter() {
-        let _new_timeout = client.extend_timelock_for_reorg(id).unwrap();
+        let _new_timeout = client.extend_timelock_for_reorg(id);
     }
 
     let end = env.ledger().sequence();
@@ -205,7 +208,7 @@ fn bench_worst_case_reorg_scenario() {
 
     let contract_id = env.register_contract(None, AtomicSwapContract);
     let client = AtomicSwapContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr).unwrap();
+    client.initialize(&admin, &token_addr);
 
     let start = env.ledger().sequence();
 
@@ -229,22 +232,20 @@ fn bench_worst_case_reorg_scenario() {
         let evm_block_reveal = 1000u32 + (i as u32 * 100);
         let evm_current_block = evm_block_reveal + 10; // Only 10 confirmations < 64
 
-        let _extension = client
-            .record_evm_reveal(
-                &tx_hash,
-                &secret,
-                &evm_block_reveal,
-                &1u32,
-                &evm_current_block,
-            )
-            .unwrap();
+        let _extension = client.record_evm_reveal(
+            &tx_hash,
+            &secret,
+            &evm_block_reveal,
+            &1u32,
+            &evm_current_block,
+        );
 
         // Verify proof
         let proof_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
-        let _is_valid = client.verify_merkle_proof(&proof_hash, &secret).unwrap();
+        let _is_valid = client.verify_merkle_proof(&proof_hash, &secret);
 
         // Extend timelock
-        let _new_timeout = client.extend_timelock_for_reorg(&id).unwrap();
+        let _new_timeout = client.extend_timelock_for_reorg(&id);
     }
 
     let end = env.ledger().sequence();

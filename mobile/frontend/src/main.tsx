@@ -11,6 +11,7 @@ import Status from "./pages/Status.js";
 import Chat from "./pages/Chat.js";
 import MerchantScan from "./pages/MerchantScan.js";
 import AdminDashboard from "./pages/AdminDashboard.js";
+import AdminCircuitBreakerDashboard from "./pages/AdminCircuitBreakerDashboard.js";
 
 import NotFound from "./pages/NotFound.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -36,6 +37,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/chat/:tradeId" element={<Chat />} />
           <Route path="/merchant/scan" element={<MerchantScan />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/circuit-breaker" element={<AdminCircuitBreakerDashboard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

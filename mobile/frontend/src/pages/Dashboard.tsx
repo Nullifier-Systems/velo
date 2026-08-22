@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
 
+const STROOPS_PER_USDC = 10_000_000;
+
 interface Trade {
   id: string;
   buyer: string;
@@ -35,7 +37,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/dashboard`, {
         headers: {
           'x-provider-address': providerAddress
@@ -58,7 +60,7 @@ export default function Dashboard() {
 
   const exportData = async (format: 'csv' | 'json') => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const res = await fetch(`${apiUrl}/api/v1/provider/export?format=${format}`, {
         headers: {
           'x-provider-address': address
@@ -209,7 +211,7 @@ export default function Dashboard() {
                       </div>
                       <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
                         <p>
-                          {t("dashboard.amount", { amount: (Number(trade.amount_stroops) / 10000000).toFixed(2) })}
+                          {t("dashboard.amount", { amount: (Number(trade.amount_stroops) / STROOPS_PER_USDC).toFixed(2) })}
                         </p>
                         <p className="ml-4">
                           {new Date(trade.created_at).toLocaleString()}

@@ -6,6 +6,8 @@ members = [
     "atomic-swap",
     "soroban-lint",
     "invariant-verifier",
+    "session-account",
+    "zk-credential",
 ]
 
 [workspace.dependencies]

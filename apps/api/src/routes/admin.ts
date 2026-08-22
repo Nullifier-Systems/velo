@@ -12,6 +12,14 @@ import { disputeEvidenceMetadata } from "./dispute-evidence.js";
 import { getProviderVerificationDocument, getProviderVerificationDocuments } from "../lib/provider-verification-store.js";
 import { issueGrantToken } from "../lib/crypto/grant-token.js";
 
+import { timingSafeEqual } from "node:crypto";
+
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
 // Basic schema for body validation
 interface FlagRequestBody {
   suspicious: boolean;
@@ -32,7 +40,7 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: "Admin environment configuration error." });
     }
 
-    if (!adminKey || adminKey !== expectedKey) {
+    if (!adminKey || typeof adminKey !== "string" || !safeCompare(adminKey, expectedKey)) {
       return reply.status(401).send({ error: "Unauthorized access to internal ops endpoints." });
     }
   });
@@ -127,9 +135,9 @@ export async function adminRoutes(app: FastifyInstance) {
          FROM dispute_evidence WHERE trade_id = $1 ORDER BY created_at`,
         [req.params.id],
       );
-      return { data: rows };
+      return reply.send({ data: rows });
     }
-    return { data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) };
+    return reply.send({ data: getDisputeEvidenceForTrade(req.params.id).map(disputeEvidenceMetadata) });
   });
 
   app.get<{ Params: { id: string; evidenceId: string } }>(

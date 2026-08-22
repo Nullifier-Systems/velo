@@ -47,3 +47,98 @@ export interface CashRequest {
   qr_payload: string;
   status: "pending" | "locked" | "released" | "refunded";
 }
+
+/* ------------------------------------------------------------------ */
+/*  Real-time ledger indexer & circuit breaker (#374)                 */
+/* ------------------------------------------------------------------ */
+
+/** Formal invariant verdict emitted by the checker every closed ledger. */
+export type InvariantCheckStatus = "HEALTHY" | "WARNING" | "VIOLATED" | "HALTED";
+
+/** What the automated arbitration engine decided to do with a violation. */
+export type CircuitBreakerAction =
+  | "NO_ACTION"
+  | "PAUSE_SINGLE_ESCROW"
+  | "GLOBAL_SYSTEM_PAUSE";
+
+/** Manual admin override actions accepted by POST /admin/circuit-breaker/override. */
+export type CircuitBreakerOverrideAction = "FORCE_PAUSE" | "UNPAUSE";
+
+/**
+ * Shared constants for the real-time indexer + circuit-breaker stack.
+ * Single source of truth so the migration SQL, worker, API routes, and
+ * frontend can never drift apart.
+ */
+export const CIRCUIT_BREAKER = {
+  /** Postgres advisory lock ID used for single-leader indexer election. */
+  ADVISORY_LOCK_ID: 889001,
+  /** How often a standby worker retries for leader election (ms). */
+  LEADER_ELECTION_POLL_MS: 5_000,
+  /** SLA: emergency on-chain pause must be submitted within 1000ms of a violation. */
+  PAUSE_TRIGGER_DEADLINE_MS: 1_000,
+  /** Soroban RPC ledger-stream endpoint (testnet by default). */
+  LEDGER_STREAM_URL: process.env.SOROBAN_LEDGER_STREAM_URL ?? "wss://soroban-testnet.stellar.org",
+  /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
+  DLQ_CHANNEL: "velo:indexer-dlq",
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Nullifier Escrow Settlement (#371)                              */
+/* ------------------------------------------------------------------ */
+
+export type ZkNullifierStatus = "PENDING" | "SETTLED" | "REJECTED";
+
+export interface ZkSettleRequest {
+  proof: string;
+  nullifierHash: string;
+  commitment: string;
+  credentialSecret?: string;
+}
+
+export interface ZkSettleResponse {
+  message: string;
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+}
+
+export interface ZkSettleStatusResponse {
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+  txHash?: string | null;
+  errorMessage?: string | null;
+}
+
+export const ZK_SETTLEMENT = {
+  STREAM_KEY: "velo:zk-settlement-queue",
+  GROUP_NAME: "zk-settlement-group",
+  DLQ_KEY: "velo:zk-settlement-dlq",
+  MAX_RETRIES: 5,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Session-key multi-sig emergency rotation (#375)                   */
+/* ------------------------------------------------------------------ */
+
+/** Lifecycle of a delegated session key in `session_key_registry`. */
+export type SessionKeyStatus = "ACTIVE" | "ROTATING" | "REVOKED";
+
+/** Row shape of `session_key_rotation_proposals` (2-of-3 admin threshold). */
+export interface SessionKeyRotationProposal {
+  proposalId: string;
+  oldPubkey: string;
+  newPubkey: string;
+  signaturesCollected: number;
+  requiredSignatures: number;
+  signer1: string;
+  signer2: string | null;
+  executed: boolean;
+  createdAt?: string;
+  executedAt?: string | null;
+}
+
+/** Redis stream the API enqueues accepted rotation proposals onto. */
+export const SESSION_ROTATION_QUEUE = "velo:session-rotation-queue";
+/** Dead-letter stream for proposals that exhausted every confirmation retry. */
+export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
+/** Consumer group the rotation worker reads the queue with. */
+export const SESSION_ROTATION_GROUP = "rotation-group";

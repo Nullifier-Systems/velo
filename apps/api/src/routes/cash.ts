@@ -3,7 +3,9 @@ import { z } from "zod";
 import { CONTRACTS } from "@velo/shared";
 import {
   lockEscrow,
+  lockEscrowWithTranches,
   releaseEscrow,
+  releaseTrancheEscrow,
   refundEscrow,
   disputeEscrow,
   buildLockEscrowTransaction,
@@ -14,8 +16,7 @@ import {
   submitChainReleaseToLockTx,
   getTradeState,
   getEscrowPauseState,
-  batchReleaseEscrow,
-  releaseBatchEscrow,
+  releaseBatchAtomic,
   NETWORK_PASSPHRASE,
   getLatestLedgerSequence,
   getTradeOnChain,
@@ -415,7 +416,16 @@ export async function cashRoutes(app: FastifyInstance) {
     }
 
     const searchRadiusKm = radius && radius > 0 ? radius : 5.0;
-    const amount = BigInt(amount_stroops ?? "100000000"); // Default 10 USDC
+    let amount: bigint;
+    if (amount_stroops !== undefined && amount_stroops !== null && amount_stroops !== "") {
+      const rawStr = String(amount_stroops).trim();
+      if (!/^\d+$/.test(rawStr)) {
+        throw new ApiError(400, "INVALID_AMOUNT", "amount_stroops must be a positive integer string");
+      }
+      amount = BigInt(rawStr);
+    } else {
+      amount = BigInt("100000000"); // Default 10 USDC
+    }
 
     // 1. Uber H3 Hierarchical Spatial Indexing O(1) query with boundary hex crossings
     const h3Candidates = globalH3SpatialIndex.findProvidersInRadius(
@@ -483,6 +493,11 @@ export async function cashRoutes(app: FastifyInstance) {
       .regex(/^[0-9a-fA-F]+$/),
   });
 
+  const trancheSchema = z.object({
+    amount_stroops: z.string().trim().min(1).regex(/^\d+$/),
+    secret_hash: z.string().trim().length(64).regex(/^[0-9a-fA-F]+$/),
+  });
+
   const prepareLockSchema = z.object({
     seller: z
       .string()
@@ -500,6 +515,7 @@ export async function cashRoutes(app: FastifyInstance) {
       .trim()
       .length(64)
       .regex(/^[0-9a-fA-F]+$/),
+    tranches: z.array(trancheSchema).optional(),
     // Validated manually below (rather than via z.enum) so we can return the
     // specific "mode must be either..." error message callers depend on.
     mode: z.string().trim().optional(),
@@ -528,10 +544,27 @@ export async function cashRoutes(app: FastifyInstance) {
         buyer,
         amount_stroops,
         secret_hash,
+        tranches: rawTranches,
         mode: rawMode,
         notification_type,
         contact_info,
       } = body;
+
+      if (rawTranches && rawTranches.length > 0) {
+        const sum = rawTranches.reduce(
+          (acc, t) => acc + BigInt(t.amount_stroops),
+          0n,
+        );
+        if (sum !== BigInt(amount_stroops)) {
+          throw new ApiError(
+            400,
+            "TRANCHE_SUM_MISMATCH",
+            "Sum of tranche amounts must equal total amount_stroops",
+          );
+          return;
+        }
+      }
+
       const mode = rawMode ?? "custodial";
       if (mode !== "custodial" && mode !== "non_custodial") {
         throw new ApiError(
@@ -582,18 +615,38 @@ export async function cashRoutes(app: FastifyInstance) {
       if (mode === "custodial") {
         let lockedAtLedger: number;
         try {
+          // Both the tranche and single-secret lock paths go through the
+          // shared RPC timeout wrapper so a slow/hanging Horizon call
+          // surfaces as a 504 with a proper incident log instead of hanging
+          // the request indefinitely.
           lockedAtLedger = await withRequestTimeout(
             "POST /cash/request/prepare (custodial lock)",
-            () => lockEscrow({
-              contractId: ESCROW_CONTRACT_ID,
-              tradeId,
-              seller,
-              buyer,
-              amountStroops: BigInt(amount_stroops),
-              secretHashHex: secret_hash,
-              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-            }),
-            req
+            () => {
+              if (rawTranches && rawTranches.length > 0) {
+                return lockEscrowWithTranches({
+                  contractId: ESCROW_CONTRACT_ID,
+                  tradeId,
+                  seller,
+                  buyer,
+                  amountStroops: BigInt(amount_stroops),
+                  tranches: rawTranches.map((t) => ({
+                    amountStroops: BigInt(t.amount_stroops),
+                    secretHashHex: t.secret_hash,
+                  })),
+                  timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+                });
+              }
+              return lockEscrow({
+                contractId: ESCROW_CONTRACT_ID,
+                tradeId,
+                seller,
+                buyer,
+                amountStroops: BigInt(amount_stroops),
+                secretHashHex: secret_hash,
+                timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+              });
+            },
+            req,
           );
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
@@ -614,6 +667,14 @@ export async function cashRoutes(app: FastifyInstance) {
           });
         }
 
+        const tranchesRecord = rawTranches
+          ? rawTranches.map((t) => ({
+              amountStroops: t.amount_stroops,
+              secretHashHex: t.secret_hash,
+              released: false,
+            }))
+          : undefined;
+
         saveCashRequest({
           id: tradeId,
           contractId: ESCROW_CONTRACT_ID,
@@ -628,6 +689,9 @@ export async function cashRoutes(app: FastifyInstance) {
           createdAt: new Date().toISOString(),
           notificationType: notification_type,
           contactInfo: contact_info,
+          tranches: tranchesRecord,
+          releasedTranchesCount: tranchesRecord ? 0 : undefined,
+          releasedAmountStroops: tranchesRecord ? "0" : undefined,
         });
         await registerTradeForChat(getCashRequest(tradeId)!);
 
@@ -1117,6 +1181,101 @@ export async function cashRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Params: { id: string } }>(
+    "/cash/request/:id/release-tranche",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+      },
+    },
+    async (req, reply) => {
+      const record = getCashRequest(req.params.id);
+      if (!record) {
+        throw new ApiError(404, "TRADE_NOT_FOUND", "request not found");
+        return;
+      }
+      if (record.status !== "locked") {
+        reply.code(409).send({ error: `request is already ${record.status}` });
+        return;
+      }
+      if (!record.tranches || record.tranches.length === 0) {
+        throw new ApiError(400, "NO_TRANCHES", "This request was not created with tranches");
+        return;
+      }
+
+      const releaseBody = parseBody(
+        z.object({
+          tranche_index: z.number().int().min(0),
+          secret: z.string().trim().min(1),
+        }),
+        req.body,
+        reply,
+      );
+      if (!releaseBody) return;
+
+      const { tranche_index, secret } = releaseBody;
+      if (tranche_index >= record.tranches.length) {
+        throw new ApiError(400, "INVALID_TRANCHE_INDEX", "tranche_index out of bounds");
+        return;
+      }
+
+      const tranche = record.tranches[tranche_index];
+      if (tranche.released) {
+        reply.code(409).send({ error: "tranche already released" });
+        return;
+      }
+
+      try {
+        await releaseTrancheEscrow({
+          contractId: record.contractId,
+          tradeId: record.id,
+          trancheIndex: tranche_index,
+          secretHex: secret,
+        });
+      } catch (err) {
+        req.log.error(err, "releaseTrancheEscrow failed");
+        if (err instanceof RpcTimeoutError) {
+          reply.code(504).send({
+            error: "rpc_timeout",
+            detail: err.message,
+            operation: err.operation,
+            elapsed_ms: err.elapsedMs,
+          });
+        } else {
+          reply
+            .code(502)
+            .send({ error: "tranche release failed", detail: String(err) });
+        }
+        return;
+      }
+
+      tranche.released = true;
+      const releasedCount = record.tranches.filter((t) => t.released).length;
+      record.releasedTranchesCount = releasedCount;
+      const releasedAmountStroops = record.tranches
+        .filter((t) => t.released)
+        .reduce((acc, t) => acc + BigInt(t.amountStroops), 0n)
+        .toString();
+      record.releasedAmountStroops = releasedAmountStroops;
+
+      if (releasedCount === record.tranches.length) {
+        updateStatus(record.id, "released");
+        await notifyTradeStatus(record.id, "released");
+        await sendNotification(record, "released", (req as any).locale ?? "en");
+      } else {
+        await notifyTradeStatus(record.id, "locked");
+      }
+
+      return {
+        id: record.id,
+        status: record.status,
+        releasedTranchesCount: releasedCount,
+        totalTranchesCount: record.tranches.length,
+        releasedAmountStroops,
+      };
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: { signed_xdr?: string } }>(
     "/cash/request/:id/refund",
     {
@@ -1350,7 +1509,9 @@ export async function cashRoutes(app: FastifyInstance) {
    * POST /api/v1/cash/batch-release — Atomically release a batch of pending trades.
    *
    * Provider provides a list of trade IDs they want to release together.
-   * The contract validates ALL trades, then releases ALL or NONE (atomic).
+   * This maps to the escrow contract's atomic `release_batch()` entrypoint,
+   * which releases ALL or NONE — distinct from `batch_release()`, which skips
+   * invalid legs and is used by the background payout batcher.
    *
    * Contract behavior:
    * - Validates ALL trades exist, are Locked, and have valid secrets BEFORE any changes
@@ -1358,10 +1519,15 @@ export async function cashRoutes(app: FastifyInstance) {
    * - Aggregates fees across all trades and pays them once
    * - All succeed together or all fail together (true atomicity)
    *
+   * Because settlement is all-or-nothing, off-chain records are only marked
+   * `released` after the contract call succeeds. If it reverts, every trade is
+   * left in `pending_batch` untouched, so a single bad leg never leaves the
+   * batch half-settled.
+   *
    * Request body: { trade_ids: string[] }  — array of hex trade IDs to release
    *
-   * Returns: { released_count: number, total_payout: string, total_fees: string }
-   * On error: { error: string, detail: string } + 400/502/504 status
+   * Returns: { released_count: number, trade_ids: string[], total_amount: string }
+   * On error: { error, code, statusCode } (validation) or { error, detail } (502/504)
    */
   app.post<{ Body: { trade_ids?: string[] } }>(
     "/cash/batch-release",
@@ -1460,13 +1626,14 @@ export async function cashRoutes(app: FastifyInstance) {
 
       try {
         // Call the atomic release_batch() function on the contract.
-        // If ANY trade fails validation, the entire batch reverts.
-        await releaseBatchEscrow({
+        // If ANY trade fails validation, the entire batch reverts and this
+        // throws, so no trade below is marked released (clean rollback).
+        await releaseBatchAtomic({
           contractId,
           releases,
         });
       } catch (err) {
-        req.log.error(err, "releaseBatchEscrow failed");
+        req.log.error(err, "releaseBatchAtomic failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
             error: "rpc_timeout",
@@ -1483,14 +1650,12 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      // On success, mark all trades as released and notify.
+      // The atomic release_batch() succeeded, so every leg settled on-chain.
+      // Mark them all released and notify.
       let totalPayout = 0n;
-      let totalFees = 0n;
 
       for (const record of records) {
         const amount = BigInt(record.amountStroops);
-        // Fee calculation matches contract: fee = (amount * fee_bps) / 10_000
-        // We don't have fee_bps here, but the contract applied it, so we just track totals.
         updateStatus(record.id, "released");
         await notifyTradeStatus(record.id, "released");
         await sendNotification(record, "released", (req as any).locale ?? "en");
@@ -1555,7 +1720,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (!body) return;
 
       const { release_secret, new_seller, new_secret_hash, new_timeout_ledgers, signed_xdr } = body;
-      const timeoutLedgers = new_timeout_ledgers ?? DEFAULT_TIMEOUT_LEDGERS;
+      const timeoutLedgers = new_timeout_ledgers ?? CASH_DEFAULT_TIMEOUT_LEDGERS;
 
       if (!signed_xdr) {
         try {

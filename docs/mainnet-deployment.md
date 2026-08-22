@@ -76,7 +76,7 @@ EVM_HTLC_ADDRESS=0x...DEPLOYED_HTLC_CONTRACT
 cd contracts
 
 # 1. Build release WASM for both contracts
-cargo build --workspace --exclude soroban-lint --target wasm32v1-none --release
+cargo build --workspace --exclude soroban-lint --exclude invariant-verifier --target wasm32v1-none --release
 
 # 2. Deploy escrow contract
 soroban contract deploy \

@@ -1,96 +1,107 @@
 {
-  "timestamp": "2026-07-27T14:00:06.361Z",
+  "timestamp": "2026-07-30T01:57:49.773Z",
   "baseUrl": "http://localhost:3000",
   "results": [
     {
-      "tier": "1 VU Baseline",
+      "tier": "1 VU Baseline Load",
       "vus": 1,
-      "durationSec": 4.173,
-      "totalRequests": 29,
-      "rps": 6.95,
-      "errorRatePct": 0,
+      "durationSec": 4.005,
+      "totalRequests": 1306,
+      "rps": 326.09,
+      "errorRatePct": 100,
       "latenciesMs": {
         "p50": 2,
-        "p90": 541,
-        "p95": 554,
-        "p99": 1598
+        "p90": 6,
+        "p95": 7,
+        "p99": 19
       },
       "statusCodes": {
-        "200": 17,
-        "402": 12
+        "0": 1306
       }
     },
     {
-      "tier": "10 VUs Low Concurrency",
+      "tier": "10 VUs Ramp-Up (Low)",
       "vus": 10,
-      "durationSec": 6.003,
-      "totalRequests": 4359,
-      "rps": 726.14,
-      "errorRatePct": 65.89,
+      "durationSec": 6.009,
+      "totalRequests": 4421,
+      "rps": 735.73,
+      "errorRatePct": 100,
       "latenciesMs": {
-        "p50": 4,
-        "p90": 10,
-        "p95": 15,
-        "p99": 504
+        "p50": 12,
+        "p90": 18,
+        "p95": 23,
+        "p99": 51
       },
       "statusCodes": {
-        "200": 1439,
-        "402": 48,
-        "500": 2872
+        "0": 4421
       }
     },
     {
-      "tier": "50 VUs Medium Concurrency",
+      "tier": "50 VUs Ramp-Up (Medium)",
       "vus": 50,
-      "durationSec": 8.017,
-      "totalRequests": 21389,
-      "rps": 2667.96,
-      "errorRatePct": 70.88,
+      "durationSec": 8.062,
+      "totalRequests": 5573,
+      "rps": 691.27,
+      "errorRatePct": 100,
       "latenciesMs": {
-        "p50": 17,
-        "p90": 28,
-        "p95": 33,
-        "p99": 54
+        "p50": 63,
+        "p90": 100,
+        "p95": 136,
+        "p99": 195
       },
       "statusCodes": {
-        "200": 6229,
-        "500": 15160
+        "0": 5573
+      }
+    },
+    {
+      "tier": "50 VUs Sustained Load (Soak Test)",
+      "vus": 50,
+      "durationSec": 15.116,
+      "totalRequests": 7074,
+      "rps": 467.98,
+      "errorRatePct": 100,
+      "latenciesMs": {
+        "p50": 98,
+        "p90": 171,
+        "p95": 194,
+        "p99": 273
+      },
+      "statusCodes": {
+        "0": 7074
       }
     },
     {
       "tier": "100 VUs High Concurrency",
       "vus": 100,
-      "durationSec": 10.035,
-      "totalRequests": 29525,
-      "rps": 2942.2,
-      "errorRatePct": 70.35,
+      "durationSec": 10.21,
+      "totalRequests": 3000,
+      "rps": 293.83,
+      "errorRatePct": 100,
       "latenciesMs": {
-        "p50": 30,
-        "p90": 47,
-        "p95": 57,
-        "p99": 125
+        "p50": 282,
+        "p90": 587,
+        "p95": 729,
+        "p99": 830
       },
       "statusCodes": {
-        "200": 8755,
-        "500": 20770
+        "0": 3000
       }
     },
     {
-      "tier": "250 VUs Peak Concurrency",
+      "tier": "250 VUs Peak Spike Test",
       "vus": 250,
-      "durationSec": 10.324,
-      "totalRequests": 26005,
-      "rps": 2518.89,
-      "errorRatePct": 69.79,
+      "durationSec": 10.541,
+      "totalRequests": 3746,
+      "rps": 355.37,
+      "errorRatePct": 100,
       "latenciesMs": {
-        "p50": 84,
-        "p90": 158,
-        "p95": 198,
-        "p99": 315
+        "p50": 684,
+        "p90": 828,
+        "p95": 877,
+        "p99": 919
       },
       "statusCodes": {
-        "200": 7857,
-        "500": 18148
+        "0": 3746
       }
     }
   ]

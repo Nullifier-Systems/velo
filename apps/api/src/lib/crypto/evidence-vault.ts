@@ -20,7 +20,7 @@ const TAG_BYTES = 16;          // GCM auth tag
 const CHUNK_SIZE = 65536;      // 64KB Merkle chunks
 const HKDF_INFO = "velo-evidence-v1";
 const HKDF_HASH = "sha256";
-const PEpper = "velo-evidence-blinding";
+const PEPPER = "velo-evidence-blinding";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -70,7 +70,7 @@ export function deriveKEK(tradeSecretHex: string, tradeId: string): Buffer {
  */
 export function blindSecret(tradeSecretHex: string): Buffer {
   const secret = Buffer.from(tradeSecretHex, "hex");
-  return Buffer.from(crypto.hkdfSync(HKDF_HASH, secret, Buffer.from("blinding"), PEpper, KEY_BYTES));
+  return Buffer.from(crypto.hkdfSync(HKDF_HASH, secret, Buffer.from("blinding"), PEPPER, KEY_BYTES));
 }
 
 /* ------------------------------------------------------------------ */

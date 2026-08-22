@@ -55,6 +55,11 @@
   background: rgba(92, 107, 95, 0.08);
 }
 
+.chat-status--reconnecting {
+  color: #9a6b1f;
+  background: rgba(154, 107, 31, 0.12);
+}
+
 .chat-encryption-bar {
   display: flex;
   align-items: center;

@@ -1,10 +1,20 @@
 use crate::spec::{InvariantItem, InvariantSpec};
-use escrow::{EscrowContract, EscrowContractClient, Error as EscrowError};
+use escrow::{Error as EscrowError, EscrowContract, EscrowContractClient};
 use htlc_core::{TradeState, TradeStatus};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, BytesN, Env, Vec as SorobanVec,
 };
+
+fn empty_arb_set(env: &Env) -> escrow::ArbitratorSet {
+    escrow::ArbitratorSet {
+        keys: soroban_sdk::Vec::new(env),
+        threshold_epoch1: 0,
+        threshold_epoch2: 0,
+        t1_ledgers: 100,
+        t2_ledgers: 200,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
@@ -33,6 +43,7 @@ impl InvariantChecker {
                 "INV-04" => self.check_inv04_secret_hash_correctness(inv),
                 "INV-05" => self.check_inv05_fee_math_bounds(inv),
                 "INV-06" => self.check_inv06_authorization_governance(inv),
+                "INV-07" => self.check_inv07_reserve_conservation(inv),
                 _ => VerificationResult {
                     invariant_id: inv.id.clone(),
                     name: inv.name.clone(),
@@ -61,7 +72,10 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        if client.try_initialize(&admin, &asset.address(), &fee_bps).is_err() {
+        if client
+            .try_initialize(&admin, &asset.address(), &fee_bps, &empty_arb_set(&env))
+            .is_err()
+        {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
@@ -77,7 +91,14 @@ impl InvariantChecker {
         let timeout_ledgers: u32 = 100;
 
         // Lock funds
-        client.lock(&trade_id, &seller, &buyer, &lock_amount, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &lock_amount,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         let buyer_bal = token_client.balance(&buyer);
         let seller_bal = token_client.balance(&seller);
@@ -162,7 +183,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[2u8; 32]);
         let secret = BytesN::from_array(&env, &[8u8; 32]);
@@ -229,14 +250,21 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[3u8; 32]);
         let secret = BytesN::from_array(&env, &[9u8; 32]);
         let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
         let timeout_ledgers: u32 = 100;
 
-        client.lock(&trade_id, &seller, &buyer, &50_000, &secret_hash, &timeout_ledgers);
+        client.lock(
+            &trade_id,
+            &seller,
+            &buyer,
+            &50_000,
+            &secret_hash,
+            &timeout_ledgers,
+        );
 
         // Attempt refund before timeout (ledger sequence < timeout_ledger)
         let premature_refund = client.try_refund(&trade_id);
@@ -250,7 +278,8 @@ impl InvariantChecker {
         }
 
         // Advance ledger past timeout
-        env.ledger().with_mut(|li| li.sequence_number += timeout_ledgers + 1);
+        env.ledger()
+            .with_mut(|li| li.sequence_number += timeout_ledgers + 1);
 
         // Dispute after timeout must fail with TimeoutReached
         let late_dispute = client.try_dispute(&buyer, &trade_id);
@@ -294,7 +323,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[4u8; 32]);
         let secret = BytesN::from_array(&env, &[10u8; 32]);
@@ -321,7 +350,9 @@ impl InvariantChecker {
                 invariant_id: inv.id.clone(),
                 name: inv.name.clone(),
                 passed: false,
-                error_message: Some("Trade status changed after failed secret release attempt".into()),
+                error_message: Some(
+                    "Trade status changed after failed secret release attempt".into(),
+                ),
             };
         }
 
@@ -358,7 +389,8 @@ impl InvariantChecker {
         let client = EscrowContractClient::new(&env, &contract_id);
 
         // Fee BPS > 10,000 must be rejected
-        let invalid_init = client.try_initialize(&admin, &asset.address(), &10_001);
+        let invalid_init =
+            client.try_initialize(&admin, &asset.address(), &10_001, &empty_arb_set(&env));
         if invalid_init.is_ok() {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
@@ -369,7 +401,7 @@ impl InvariantChecker {
         }
 
         // Valid fee initialization (500 bps = 5%)
-        client.initialize(&admin, &asset.address(), &500);
+        client.initialize(&admin, &asset.address(), &500, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[5u8; 32]);
         let secret = BytesN::from_array(&env, &[11u8; 32]);
@@ -428,7 +460,7 @@ impl InvariantChecker {
 
         let contract_id = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(&env, &contract_id);
-        client.initialize(&admin, &asset.address(), &100);
+        client.initialize(&admin, &asset.address(), &100, &empty_arb_set(&env));
 
         let trade_id = BytesN::from_array(&env, &[6u8; 32]);
         let secret = BytesN::from_array(&env, &[12u8; 32]);
@@ -450,9 +482,12 @@ impl InvariantChecker {
         // Valid dispute by buyer
         client.dispute(&buyer, &trade_id);
 
-        // Resolve call with non-admin signer in multisig when single admin expected or empty signers
-        let empty_signers = SorobanVec::new(&env);
-        let valid_resolve = client.try_resolve(&trade_id, &true, &empty_signers);
+        // Set arbitrator so single-arbitrator fallback works on resolution
+        let no_signatures: SorobanVec<(u32, BytesN<64>)> = SorobanVec::new(&env);
+        client.set_arbitrator(&admin, &SorobanVec::new(&env));
+
+        // Resolve call with single arbitrator
+        let valid_resolve = client.try_resolve_dispute(&trade_id, &5000u32, &no_signatures);
         if valid_resolve.is_err() {
             return VerificationResult {
                 invariant_id: inv.id.clone(),
@@ -469,4 +504,231 @@ impl InvariantChecker {
             error_message: None,
         }
     }
+
+    /// INV-07 — Reserve Conservation & Circuit-Breaker Pause (#374).
+    ///
+    /// 1. After locking several trades, the contract's token balance MUST
+    ///    equal the sum of non-terminal trade amounts (reserve conservation).
+    /// 2. Disputing or releasing a trade MUST move exactly that trade's
+    ///    amount in/out of the reserve — never more.
+    /// 3. Arming the emergency pause takes effect after PAUSE_DELAY_LEDGERS:
+    ///    new `lock()` calls fail with `ContractPaused` while existing
+    ///    reserves stay untouched; `unpause()` restores locking.
+    fn check_inv07_reserve_conservation(&self, inv: &InvariantItem) -> VerificationResult {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let asset = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_client = token::Client::new(&env, &asset.address());
+        token::StellarAssetClient::new(&env, &asset.address()).mint(&buyer, &2_000_000);
+
+        let contract_id = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &contract_id);
+        // fee 0 isolates reserve accounting from fee sweeps
+        client.initialize(&admin, &asset.address(), &0, &empty_arb_set(&env));
+
+        let amounts: [i128; 3] = [60_000, 90_000, 150_000];
+        let mut trades: Vec<BytesN<32>> = Vec::new();
+        let mut secrets: Vec<BytesN<32>> = Vec::new();
+        for (i, amount) in amounts.iter().enumerate() {
+            let trade_id = BytesN::from_array(&env, &[21 + i as u8; 32]);
+            let secret = BytesN::from_array(&env, &[101 + i as u8; 32]);
+            let secret_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
+            client.lock(&trade_id, &seller, &buyer, amount, &secret_hash, &100);
+            trades.push(trade_id);
+            secrets.push(secret);
+        }
+
+        // Reserve == sum of all locked amounts
+        let contract_bal = token_client.balance(&contract_id);
+        if contract_bal != amounts.iter().sum::<i128>() {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some(format!(
+                    "Reserve mismatch after lock! Expected {}, contract holds {}",
+                    amounts.iter().sum::<i128>(),
+                    contract_bal
+                )),
+            };
+        }
+
+        // Disputing a trade keeps its funds in the reserve
+        client.dispute(&buyer, &trades[1]);
+        let reserve = active_reserve(&client, &trades);
+        if reserve != token_client.balance(&contract_id) {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some(format!(
+                    "Reserve drifted after dispute! active {}, contract holds {}",
+                    reserve,
+                    token_client.balance(&contract_id)
+                )),
+            };
+        }
+
+        // Releasing a trade drains exactly its amount from the reserve
+        client.release(&trades[0], &secrets[0]);
+        let reserve_after_release = active_reserve(&client, &trades);
+        let expected_after_release = amounts[1] + amounts[2];
+        if reserve_after_release != expected_after_release {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some(format!(
+                    "Reserve did not drop by exactly the released amount! expected {}, got {}",
+                    expected_after_release, reserve_after_release
+                )),
+            };
+        }
+        if token_client.balance(&contract_id) != reserve_after_release {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some(format!(
+                    "Contract balance diverged from active reserve! active {}, contract holds {}",
+                    reserve_after_release,
+                    token_client.balance(&contract_id)
+                )),
+            };
+        }
+
+        // Circuit-breaker pause: arming takes effect after PAUSE_DELAY_LEDGERS
+        let signers: SorobanVec<Address> = SorobanVec::new(&env);
+        if client.try_pause(&signers).is_err() {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Pause arm failed under valid admin auth!".into()),
+            };
+        }
+        let effective = match client.pause_effective_ledger() {
+            Some(e) => e,
+            None => {
+                return VerificationResult {
+                    invariant_id: inv.id.clone(),
+                    name: inv.name.clone(),
+                    passed: false,
+                    error_message: Some("Pause was not armed after pause()!".into()),
+                }
+            }
+        };
+
+        // Reserve must be untouched while paused
+        if token_client.balance(&contract_id) != reserve_after_release {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Pause moved reserves!".into()),
+            };
+        }
+
+        // Advance past the delay so the pause becomes effective
+        env.ledger().with_mut(|li| {
+            if li.sequence_number < effective {
+                li.sequence_number = effective;
+            }
+        });
+        if !client.is_paused() {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Pause was not effective after delay elapsed!".into()),
+            };
+        }
+
+        // New lock while the circuit breaker is effectively paused must fail
+        let blocked_trade = BytesN::from_array(&env, &[99u8; 32]);
+        let blocked_secret = BytesN::from_array(&env, &[199u8; 32]);
+        let blocked_hash = env
+            .crypto()
+            .sha256(&blocked_secret.clone().into())
+            .to_bytes();
+        if client
+            .try_lock(
+                &blocked_trade,
+                &seller,
+                &buyer,
+                &10_000,
+                &blocked_hash,
+                &100,
+            )
+            .is_ok()
+        {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some(
+                    "Lock succeeded while circuit breaker was effectively paused!".into(),
+                ),
+            };
+        }
+
+        // Existing reserves still intact after the rejected lock
+        if token_client.balance(&contract_id) != reserve_after_release {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Reserves changed after rejected paused lock!".into()),
+            };
+        }
+
+        // Unpause restores lock operation
+        if client.try_unpause(&signers).is_err() {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Unpause failed under valid admin auth!".into()),
+            };
+        }
+        if client.is_paused() {
+            return VerificationResult {
+                invariant_id: inv.id.clone(),
+                name: inv.name.clone(),
+                passed: false,
+                error_message: Some("Paused flag still set after unpause()!".into()),
+            };
+        }
+        client.lock(
+            &blocked_trade,
+            &seller,
+            &buyer,
+            &10_000,
+            &blocked_hash,
+            &100,
+        );
+
+        VerificationResult {
+            invariant_id: inv.id.clone(),
+            name: inv.name.clone(),
+            passed: true,
+            error_message: None,
+        }
+    }
+}
+
+fn active_reserve(client: &EscrowContractClient, trades: &[BytesN<32>]) -> i128 {
+    let mut sum = 0;
+    for id in trades {
+        if let Some(state) = client.get_trade(id) {
+            if matches!(state.status, TradeStatus::Locked | TradeStatus::Disputed) {
+                sum += state.amount;
+            }
+        }
+    }
+    sum
 }

@@ -9,13 +9,20 @@
 
 #![no_std]
 
+pub mod tree;
+pub use tree::{IncrementalMerkleTree, TreeConfig};
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
     BytesN, Env,
 };
 
-const TREE_DEPTH: u32 = 8;
-const MAX_LEAVES: u32 = 256; // 2^TREE_DEPTH
+const DEFAULT_TREE_DEPTH: u32 = 20;
+const DEFAULT_MAX_LEAVES: u32 = 1_048_576; // 2^20
+
+/// TTL extension (in ledgers) for persistent storage entries. ~5.8 days at
+/// ~5s/ledger. Applied on every active interaction that writes a persistent key.
+const TTL_EXTEND: u32 = 100_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -28,6 +35,9 @@ pub enum DataKey {
     Leaf(u32),
     KnownRoots(BytesN<32>),
     Nullifier(BytesN<32>),
+    TreeConfig,
+    SubTree(u32),
+    Node(u32, u32),
 }
 
 #[contracterror]
@@ -40,6 +50,8 @@ pub enum Error {
     RootNotFound = 5,
     InvalidProof = 6,
     TreeFull = 7,
+    Unauthorized = 8,
+    InvalidConfig = 9,
 }
 
 #[contract]
@@ -60,19 +72,64 @@ impl ZkCredentialContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Price, &price);
+
+        let config = TreeConfig {
+            max_leaves: DEFAULT_MAX_LEAVES,
+            depth: DEFAULT_TREE_DEPTH,
+            next_index: 0,
+        };
+        env.storage().instance().set(&DataKey::TreeConfig, &config);
         env.storage()
             .instance()
             .set(&DataKey::CommitmentCount, &0u32);
 
         // Initialize empty tree root
-        let initial_root = Self::compute_tree_root(&env, 0);
+        let initial_root = IncrementalMerkleTree::empty_root(&env, config.depth);
         env.storage()
             .instance()
             .set(&DataKey::MerkleRoot, &initial_root);
         env.storage()
             .persistent()
             .set(&DataKey::KnownRoots(initial_root.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::KnownRoots(initial_root),
+            TTL_EXTEND,
+            TTL_EXTEND,
+        );
 
+        Ok(())
+    }
+
+    /// Admin method to set tree config with validation (max_leaves power of 2, depth <= 24).
+    pub fn set_tree_config(env: Env, max_leaves: u32, depth: u32) -> Result<(), Error> {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if !max_leaves.is_power_of_two() || depth > 24 || (1u32 << depth) != max_leaves {
+            return Err(Error::InvalidConfig);
+        }
+
+        let mut config: TreeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::TreeConfig)
+            .unwrap_or(TreeConfig {
+                max_leaves: DEFAULT_MAX_LEAVES,
+                depth: DEFAULT_TREE_DEPTH,
+                next_index: 0,
+            });
+
+        if config.next_index > max_leaves {
+            return Err(Error::InvalidConfig);
+        }
+
+        config.max_leaves = max_leaves;
+        config.depth = depth;
+
+        env.storage().instance().set(&DataKey::TreeConfig, &config);
         Ok(())
     }
 
@@ -87,14 +144,38 @@ impl ZkCredentialContract {
         }
         buyer.require_auth();
 
-        let count: u32 = env
+        let mut config: TreeConfig = env
             .storage()
             .instance()
-            .get(&DataKey::CommitmentCount)
-            .unwrap();
-        if count >= MAX_LEAVES {
+            .get(&DataKey::TreeConfig)
+            .unwrap_or(TreeConfig {
+                max_leaves: DEFAULT_MAX_LEAVES,
+                depth: DEFAULT_TREE_DEPTH,
+                next_index: 0,
+            });
+
+        if config.next_index >= config.max_leaves {
             return Err(Error::TreeFull);
         }
+
+        let (leaf_idx, new_root) = IncrementalMerkleTree::append(&env, &mut config, &commitment);
+
+        env.storage().instance().set(&DataKey::TreeConfig, &config);
+        env.storage()
+            .instance()
+            .set(&DataKey::CommitmentCount, &config.next_index);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &new_root);
+        env.storage()
+            .persistent()
+            .set(&DataKey::KnownRoots(new_root.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::KnownRoots(new_root.clone()),
+            TTL_EXTEND,
+            TTL_EXTEND,
+        );
 
         // Collect payment if price > 0
         let price: i128 = env.storage().instance().get(&DataKey::Price).unwrap();
@@ -104,31 +185,13 @@ impl ZkCredentialContract {
             client.transfer(&buyer, &env.current_contract_address(), &price);
         }
 
-        // Store leaf commitment
-        env.storage()
-            .persistent()
-            .set(&DataKey::Leaf(count), &commitment);
-        let new_count = count + 1;
-        env.storage()
-            .instance()
-            .set(&DataKey::CommitmentCount, &new_count);
-
-        // Recompute Merkle root and record in valid roots
-        let new_root = Self::compute_tree_root(&env, new_count);
-        env.storage()
-            .instance()
-            .set(&DataKey::MerkleRoot, &new_root);
-        env.storage()
-            .persistent()
-            .set(&DataKey::KnownRoots(new_root.clone()), &true);
-
         // Emit buy event
         env.events().publish(
             (symbol_short!("buy"), buyer),
-            (count, commitment, new_root.clone()),
+            (leaf_idx, commitment, new_root.clone()),
         );
 
-        Ok((count, new_root))
+        Ok((leaf_idx, new_root))
     }
 
     /// Spends a credential using a zero-knowledge proof.
@@ -163,8 +226,18 @@ impl ZkCredentialContract {
             return Err(Error::NullifierAlreadySpent);
         }
 
-        // 3. Verify zero-knowledge proof payload
-        if !Self::verify_zk_proof(&env, &root, &nullifier_hash, &proof) {
+        let config: TreeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::TreeConfig)
+            .unwrap_or(TreeConfig {
+                max_leaves: DEFAULT_MAX_LEAVES,
+                depth: DEFAULT_TREE_DEPTH,
+                next_index: 0,
+            });
+
+        // 3. Verify zero-knowledge proof payload and Merkle path
+        if !Self::verify_zk_proof(&env, &root, &nullifier_hash, &proof, config.depth) {
             return Err(Error::InvalidProof);
         }
 
@@ -172,6 +245,11 @@ impl ZkCredentialContract {
         env.storage()
             .persistent()
             .set(&DataKey::Nullifier(nullifier_hash.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Nullifier(nullifier_hash.clone()),
+            TTL_EXTEND,
+            TTL_EXTEND,
+        );
 
         // Emit spend event
         env.events()
@@ -199,50 +277,52 @@ impl ZkCredentialContract {
 
     /// Returns total number of purchased commitments.
     pub fn get_commitment_count(env: Env) -> u32 {
+        Self::tree_size(env)
+    }
+
+    /// Returns total leaves in the tree.
+    pub fn tree_size(env: Env) -> u32 {
+        let config: Option<TreeConfig> = env.storage().instance().get(&DataKey::TreeConfig);
+        match config {
+            Some(c) => c.next_index,
+            None => env
+                .storage()
+                .instance()
+                .get(&DataKey::CommitmentCount)
+                .unwrap_or(0),
+        }
+    }
+
+    /// Returns whether the Merkle tree has reached capacity.
+    pub fn is_full(env: Env) -> bool {
+        let config: Option<TreeConfig> = env.storage().instance().get(&DataKey::TreeConfig);
+        match config {
+            Some(c) => c.next_index >= c.max_leaves,
+            None => false,
+        }
+    }
+
+    /// Gets a stored leaf commitment at given index.
+    pub fn get_leaf(env: Env, index: u32) -> Option<BytesN<32>> {
+        env.storage().persistent().get(&DataKey::Leaf(index))
+    }
+
+    /// Gets active tree configuration.
+    pub fn get_tree_config(env: Env) -> TreeConfig {
         env.storage()
             .instance()
-            .get(&DataKey::CommitmentCount)
-            .unwrap_or(0)
+            .get(&DataKey::TreeConfig)
+            .unwrap_or(TreeConfig {
+                max_leaves: DEFAULT_MAX_LEAVES,
+                depth: DEFAULT_TREE_DEPTH,
+                next_index: 0,
+            })
     }
 
-    /// Helper to recompute Merkle root over registered leaves.
-    fn compute_tree_root(env: &Env, count: u32) -> BytesN<32> {
-        let empty_leaf = BytesN::from_array(env, &[0u8; 32]);
-        let mut level: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(env);
-
-        for i in 0..MAX_LEAVES {
-            if i < count {
-                let leaf: BytesN<32> = env.storage().persistent().get(&DataKey::Leaf(i)).unwrap();
-                level.push_back(leaf);
-            } else {
-                level.push_back(empty_leaf.clone());
-            }
-        }
-
-        for _d in 0..TREE_DEPTH {
-            let mut next_level: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(env);
-            let len = level.len();
-            let mut i = 0;
-            while i < len {
-                let left = level.get(i).unwrap();
-                let right = level.get(i + 1).unwrap();
-
-                let combined = Self::hash_pair(env, &left, &right);
-                next_level.push_back(combined);
-                i += 2;
-            }
-            level = next_level;
-        }
-
-        level.get(0).unwrap()
-    }
-
-    /// Hash pair helper (SHA-256 node combination)
-    fn hash_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
-        let mut input = Bytes::new(env);
-        input.append(&left.clone().into());
-        input.append(&right.clone().into());
-        env.crypto().sha256(&input).into()
+    /// Gets Merkle path (sibling hashes) for leaf index.
+    pub fn get_merkle_path(env: Env, index: u32) -> soroban_sdk::Vec<BytesN<32>> {
+        let config = Self::get_tree_config(env.clone());
+        IncrementalMerkleTree::get_merkle_path(&env, index, config.depth)
     }
 
     /// ZK proof verifier engine
@@ -251,13 +331,13 @@ impl ZkCredentialContract {
         root: &BytesN<32>,
         nullifier_hash: &BytesN<32>,
         proof: &Bytes,
+        depth: u32,
     ) -> bool {
         if proof.len() < 32 {
             return false;
         }
 
         // Proof commitment payload check for Soroban verification:
-        // Verification asserts proof signature matches SHA256(root || nullifier_hash || prefix_tag)
         let mut expected = Bytes::new(env);
         expected.append(&root.clone().into());
         expected.append(&nullifier_hash.clone().into());
@@ -269,9 +349,43 @@ impl ZkCredentialContract {
 
         // The first 32 bytes of a valid proof must match expected_hash digest
         let proof_prefix = proof.slice(0..32);
-        proof_prefix == expected_hash.into()
+        if proof_prefix != expected_hash.into() {
+            return false;
+        }
+
+        // Optional/Full Merkle path verification when included in proof:
+        let expected_path_len = 32 + 4 + 32 + (depth * 32);
+        if proof.len() >= expected_path_len {
+            let mut leaf_idx_bytes = [0u8; 4];
+            proof.slice(32..36).copy_into_slice(&mut leaf_idx_bytes);
+            let leaf_index = u32::from_be_bytes(leaf_idx_bytes);
+
+            let leaf_commitment: BytesN<32> = proof.slice(36..68).try_into().unwrap();
+
+            let mut curr_hash = leaf_commitment;
+            let mut offset = 68;
+
+            for level in 0..depth {
+                let sibling: BytesN<32> = proof.slice(offset..offset + 32).try_into().unwrap();
+                offset += 32;
+
+                if (leaf_index >> level) & 1 == 0 {
+                    curr_hash = IncrementalMerkleTree::hash_pair(env, &curr_hash, &sibling);
+                } else {
+                    curr_hash = IncrementalMerkleTree::hash_pair(env, &sibling, &curr_hash);
+                }
+            }
+
+            if curr_hash != *root {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod tree_test;
