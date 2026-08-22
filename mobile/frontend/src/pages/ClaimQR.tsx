@@ -264,7 +264,7 @@ export default function ClaimQR() {
         <div className="claim-ticket claim-ticket--timeout-error">
           <div className="claim-ticket__header">
             <span className="claim-ticket__brand">{t("claim.brand")}</span>
-            <span className="claim-ticket__stamp claim-ticket__stamp--error" aria-label="Timeout Error">
+            <span className="claim-ticket__stamp claim-ticket__stamp--error" aria-label={t("claim.timeoutError")}>
               ⚠️
             </span>
           </div>
@@ -275,13 +275,13 @@ export default function ClaimQR() {
                 <line x1="12" y1="8" x2="12" y2="12"></line>
                 <line x1="12" y1="16" x2="12.01" y2="16"></line>
               </svg>
-              <h3 style={{margin: 0, fontSize: "1.2rem", fontWeight: 600}}>Request Timed Out</h3>
+              <h3 style={{margin: 0, fontSize: "1.2rem", fontWeight: 600}}>{t("claim.requestTimedOut")}</h3>
               <p style={{margin: "8px 0 0 0", color: "#666"}}>
                 {timeoutError.message || "The payment network request timed out. Please retry your operation."}
               </p>
               {timeoutError.elapsedMs && (
                 <p style={{margin: "4px 0 0 0", fontSize: "0.9rem", color: "#999"}}>
-                  Request took {Math.round(timeoutError.elapsedMs / 1000)}s
+                  {t("claim.requestTook")} {Math.round(timeoutError.elapsedMs / 1000)}{t("claim.seconds")}
                 </p>
               )}
             </div>
@@ -302,7 +302,7 @@ export default function ClaimQR() {
                   marginTop: 16,
                 }}
               >
-                {retryDisabled ? "Retrying..." : "Retry Claim"}
+                {retryDisabled ? t("claim.retrying") : t("claim.retryClaim")}
               </button>
               <a
                 href="https://t.me/nullifiersystem"
@@ -316,7 +316,7 @@ export default function ClaimQR() {
                   textDecoration: "none",
                 }}
               >
-                Contact Support
+                {t("claim.contactSupport")}
               </a>
             </div>
           </div>

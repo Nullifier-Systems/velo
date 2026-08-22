@@ -77,7 +77,14 @@
     "waitCheckBack": "This is taking unusually long. You can safely close this page and check back in a few minutes — if the transaction landed, the status will update automatically.",
     "waitElapsed": "{{seconds}}s elapsed",
     "trancheProgress": "{{released}} of {{total}} installments released",
-    "trancheReleased": "released"
+    "trancheReleased": "released",
+    "timeoutError": "Timeout Error",
+    "requestTimedOut": "Request Timed Out",
+    "requestTook": "Request took",
+    "seconds": "s",
+    "retrying": "Retrying...",
+    "retryClaim": "Retry Claim",
+    "contactSupport": "Contact Support"
   },
   "chat": {
     "noTradeId": "No trade ID specified.",

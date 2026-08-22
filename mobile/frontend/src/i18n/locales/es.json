@@ -77,7 +77,14 @@
     "waitCheckBack": "Esto está tardando más de lo esperado. Puedes cerrar esta página con seguridad y volver en unos minutos — si la transacción se confirmó, el estado se actualizará automáticamente.",
     "waitElapsed": "{{seconds}}s transcurridos",
     "trancheProgress": "{{released}} de {{total}} cuotas liberadas",
-    "trancheReleased": "liberado"
+    "trancheReleased": "liberado",
+    "timeoutError": "Error de tiempo de espera",
+    "requestTimedOut": "Solicitud agotó el tiempo",
+    "requestTook": "La solicitud tomó",
+    "seconds": "s",
+    "retrying": "Reintentando...",
+    "retryClaim": "Reintentar reclamo",
+    "contactSupport": "Contactar soporte"
   },
   "chat": {
     "noTradeId": "No se especificó un ID de comercio.",
