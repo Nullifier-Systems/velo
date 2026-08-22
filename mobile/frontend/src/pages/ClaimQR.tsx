@@ -16,6 +16,7 @@ import {
   type GatewayTimeoutError,
 } from '../lib/api';
 import './ClaimQR.css';
+import { TrancheCountdownBanner } from '../components/TrancheCountdownBanner';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -399,27 +400,13 @@ export default function ClaimQR() {
                 {t("claim.theyScanIt")}
               </p>
               {status.tranches && status.tranches.length > 1 && (
-                <div className="claim-ticket__tranche-progress" aria-live="polite">
-                  <p className="claim-ticket__tranche-label">
-                    {t("claim.trancheProgress", { 
-                      released: status.releasedTranchesCount || 0, 
-                      total: status.tranches.length 
-                    })}
-                  </p>
-                  <div className="claim-ticket__tranche-bar">
-                    <div 
-                      className="claim-ticket__tranche-bar-fill"
-                      style={{ 
-                        width: `${((status.releasedTranchesCount || 0) / status.tranches.length) * 100}%` 
-                      }}
-                    />
-                  </div>
-                  {status.releasedAmount && (
-                    <p className="claim-ticket__tranche-amount">
-                      {formatStroops(status.releasedAmount)} / {formatStroops(status.amountStroops)} {t("claim.trancheReleased")}
-                    </p>
-                  )}
-                </div>
+                <TrancheCountdownBanner
+                  totalTranches={status.tranches.length}
+                  unreleasedTranches={status.tranches.length - (status.releasedTranchesCount || 0)}
+                  ledgersRemaining={status.ledgersUntilRefund ?? 0}
+                  estimatedMinutes={Math.max(1, Math.round((status.estimatedSecondsUntilRefund ?? 0) / 60))}
+                  status={status.status === 'refunded' ? 'REFUND_EXECUTED' : 'PENDING'}
+                />
               )}
             </>
           ) : status.status === 'released' ? (

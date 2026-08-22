@@ -2073,7 +2073,7 @@ impl Htlc for EscrowContract {
         }
     }
 
-    fn refund(env: Env, id: BytesN<32>) {
+    fn refund(env: Env, id: BytesN<32>) -> i128 {
         // Issue #266: intentionally does NOT call check_not_paused — same
         // reasoning as `release`: already-locked funds must never be trapped
         // by the circuit breaker.
@@ -2120,6 +2120,8 @@ impl Htlc for EscrowContract {
 
         env.events()
             .publish((symbol_short(&env, "refunded"), id), refund_amount);
+
+        refund_amount
     }
 }
 
