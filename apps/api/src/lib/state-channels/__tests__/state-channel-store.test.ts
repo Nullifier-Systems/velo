@@ -119,8 +119,8 @@ describe("StateChannelStore", () => {
     it("creates a new channel with initial state", async () => {
       const channel = await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
@@ -136,8 +136,8 @@ describe("StateChannelStore", () => {
       // Create first
       await store!.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
@@ -159,15 +159,15 @@ describe("StateChannelStore", () => {
       // Create channel first
       await store!.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
       const commit = await store!.recordCommit(
         "test-channel",
         1n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -183,8 +183,8 @@ describe("StateChannelStore", () => {
       // Create channel
       await store!.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
@@ -192,7 +192,7 @@ describe("StateChannelStore", () => {
       await store!.recordCommit(
         "test-channel",
         1n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -205,7 +205,7 @@ describe("StateChannelStore", () => {
         store!.recordCommit(
           "test-channel",
           1n, // Same sequence
-          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
           "root123",
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -219,8 +219,8 @@ describe("StateChannelStore", () => {
       // Create channel
       await store!.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
@@ -228,7 +228,7 @@ describe("StateChannelStore", () => {
       await store!.recordCommit(
         "test-channel",
         5n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
         "root123",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -241,7 +241,7 @@ describe("StateChannelStore", () => {
         store!.recordCommit(
           "test-channel",
           3n, // Lower than 5
-          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
           "root123",
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -258,7 +258,7 @@ describe("StateChannelStore", () => {
         "message",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" +
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
       );
       expect(result).toBe(true);
     });
@@ -267,7 +267,7 @@ describe("StateChannelStore", () => {
       const result = await store!["verifySignature"](
         "message",
         "invalid-signature",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
       );
       expect(result).toBe(false);
     });
@@ -288,15 +288,15 @@ describe("StateChannelStore", () => {
       // Create channel first
       await store.createChannel(
         "test-channel",
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+        "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
         1000000000n,
       );
 
       const settlement = await store.recordSettlement(
         "test-channel",
         100n,
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
         500000000n,
         500000000n,
         "0xabcd",

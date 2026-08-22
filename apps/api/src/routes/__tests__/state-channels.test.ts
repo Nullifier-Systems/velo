@@ -29,6 +29,7 @@ describe("State Channels API", () => {
   function createMockDb() {
     let channels: any[] = [];
     let commits: any[] = [];
+    let settlements: any[] = [];
 
     // Create a function that works as a template tag
     const db = async function (strings: any[], ...values: any[]) {
@@ -69,6 +70,25 @@ describe("State Channels API", () => {
         return [commit];
       }
 
+      if (query.includes("INSERT INTO state_channel_settlements")) {
+        const settlement = {
+          settlement_id: `settlement-${settlements.length + 1}`,
+          channel_id: values[0],
+          final_sequence_number: values[1].toString(),
+          initiator: values[2],
+          party_a_final_balance: values[3].toString(),
+          party_b_final_balance: values[4].toString(),
+          merkle_root: values[5],
+          submitted_txn_hash: null,
+          status: "PENDING",
+          settled_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        settlements.push(settlement);
+        return [settlement];
+      }
+
       return [];
     };
 
@@ -82,9 +102,8 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
+          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
           totalDepositStroops: "1000000000",
         },
       });
@@ -101,10 +120,8 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
-          partyB:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+          partyB: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
           totalDepositStroops: "1000000000",
         },
       });
@@ -120,9 +137,8 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKXNJ5",
-          partyB:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH7YAQ",
+          partyA: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
+          partyB: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
           totalDepositStroops: "1000000000",
         },
       });
@@ -141,8 +157,8 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
           totalDepositStroops: "1000000000",
         },
       });
@@ -179,8 +195,8 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels",
         payload: {
           channelId: "test-channel-1",
-          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
-          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBH5NCA2",
+          partyA: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
+          partyB: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3FBT",
           totalDepositStroops: "1000000000",
         },
       });
@@ -191,8 +207,7 @@ describe("State Channels API", () => {
         url: "/api/v1/state-channels/test-channel-1/settle",
         payload: {
           finalSequenceNumber: "100",
-          initiator:
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHESFC7",
+          initiator: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHNRG",
           partyAFinalBalance: "500000000",
           partyBFinalBalance: "500000000",
           merkleRoot:
