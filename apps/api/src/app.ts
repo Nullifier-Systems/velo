@@ -29,6 +29,9 @@ import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
 import { circuitBreakerRoutes } from "./routes/circuit-breaker.js";
 import { zkSettleRoutes } from "./routes/zk-settle.js";
+import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
+import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
+import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -358,3 +361,6 @@ app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
 app.register(circuitBreakerRoutes, { prefix: "/api/v1" });
 app.register(zkSettleRoutes, { prefix: "/api/v1" });
+app.register(enterpriseOrgsRoutes, { prefix: "/api/v1" });
+app.register(enterprisePoliciesRoutes, { prefix: "/api/v1" });
+app.register(enterpriseApprovalsRoutes, { prefix: "/api/v1" });
