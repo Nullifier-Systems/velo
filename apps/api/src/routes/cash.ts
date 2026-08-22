@@ -39,6 +39,7 @@ import {
   getProviderByAddress,
   enqueueForBatch,
   getPendingBatchesByProvider,
+  logTimeoutIncident,
 } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
@@ -66,6 +67,42 @@ const ESCROW_CONTRACT_ID =
 
 const PAUSED_NEW_TRADE_MESSAGE =
   "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
+
+const REQUEST_TIMEOUT_MS = 10_000; // 10 second timeout for downstream RPC calls
+
+/**
+ * Wraps an async operation with a strict timeout. If the operation exceeds
+ * REQUEST_TIMEOUT_MS, it throws an RpcTimeoutError and logs the incident.
+ */
+async function withRequestTimeout<T>(
+  operation: string,
+  fn: () => Promise<T>,
+  req: { log: { error: (err: unknown, msg: string) => void }; headers?: { 'user-agent'?: string } }
+): Promise<T> {
+  const start = Date.now();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const elapsed = Date.now() - start;
+      logTimeoutIncident(
+        operation,
+        req.headers?.['user-agent'],
+        elapsed
+      );
+      reject(new RpcTimeoutError(operation, elapsed));
+    }, REQUEST_TIMEOUT_MS);
+
+    fn().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 /** Reject new locks when the on-chain circuit breaker is effective (issue #266). */
 async function rejectIfEscrowPaused(
@@ -545,22 +582,32 @@ export async function cashRoutes(app: FastifyInstance) {
       if (mode === "custodial") {
         let lockedAtLedger: number;
         try {
-          lockedAtLedger = await lockEscrow({
-            contractId: ESCROW_CONTRACT_ID,
-            tradeId,
-            seller,
-            buyer,
-            amountStroops: BigInt(amount_stroops),
-            secretHashHex: secret_hash,
-            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-          });
+          lockedAtLedger = await withRequestTimeout(
+            "POST /cash/request/prepare (custodial lock)",
+            () => lockEscrow({
+              contractId: ESCROW_CONTRACT_ID,
+              tradeId,
+              seller,
+              buyer,
+              amountStroops: BigInt(amount_stroops),
+              secretHashHex: secret_hash,
+              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+            }),
+            req
+          );
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
           if (err instanceof RpcTimeoutError) {
-            throw new ApiError(504, "RPC_TIMEOUT", "RPC timeout", {
-              extra: { operation: err.operation, elapsed_ms: err.elapsedMs },
-              detail: err.message,
+            reply.code(504).send({
+              error: {
+                code: "GATEWAY_TIMEOUT",
+                message: "The payment network request timed out. Please retry your operation.",
+                requestId: `req-tout-504-${tradeId}`,
+                operation: err.operation,
+                elapsed_ms: err.elapsedMs,
+              }
             });
+            return;
           }
           throw new ApiError(502, "ESCROW_LOCK_FAILED", "Escrow lock failed", {
             detail: String(err),
@@ -709,24 +756,32 @@ export async function cashRoutes(app: FastifyInstance) {
       let lockedAtLedger: number;
 
       try {
-        lockedAtLedger = await lockEscrow({
-          contractId: ESCROW_CONTRACT_ID,
-          tradeId,
-          seller,
-          buyer,
-          amountStroops: BigInt(amount_stroops),
-          secretHashHex: secret_hash,
-          timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-        });
+        lockedAtLedger = await withRequestTimeout(
+          "POST /cash/request (custodial lock)",
+          () => lockEscrow({
+            contractId: ESCROW_CONTRACT_ID,
+            tradeId,
+            seller,
+            buyer,
+            amountStroops: BigInt(amount_stroops),
+            secretHashHex: secret_hash,
+            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+          }),
+          req
+        );
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
-            error: "rpc_timeout",
-            detail: err.message,
-            operation: err.operation,
-            elapsed_ms: err.elapsedMs,
+            error: {
+              code: "GATEWAY_TIMEOUT",
+              message: "The payment network request timed out. Please retry your operation.",
+              requestId: `req-tout-504-${tradeId}`,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            }
           });
+          return;
         } else {
           reply.code(502).send({
             error: "escrow lock failed",
