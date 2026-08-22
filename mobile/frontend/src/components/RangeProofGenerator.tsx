@@ -5,12 +5,16 @@
  */
 
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PedersenCommitment } from "@velo/shared";
 import { RANGE_PROOF_PARAMS } from "@velo/shared";
 
 interface RangeProofGeneratorProps {
   commitment: PedersenCommitment;
-  onProofGenerated: (proofHex: string, generationTimeMs: number) => Promise<void>;
+  onProofGenerated: (
+    proofHex: string,
+    generationTimeMs: number,
+  ) => Promise<void>;
   isGenerating: boolean;
   generationTime: number | null;
 }
@@ -21,6 +25,7 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
   isGenerating,
   generationTime,
 }) => {
+  const { t } = useTranslation();
   const [rangeMin, setRangeMin] = useState<string>("700");
   const [rangeMax, setRangeMax] = useState<string>("850");
   const [secret, setSecret] = useState<string>("");
@@ -44,8 +49,10 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
         throw new Error("Secret value must be within the range bounds");
       }
 
-      if (secretValue < RANGE_PROOF_PARAMS.MIN_VALUE ||
-          secretValue > RANGE_PROOF_PARAMS.MAX_VALUE) {
+      if (
+        secretValue < RANGE_PROOF_PARAMS.MIN_VALUE ||
+        secretValue > RANGE_PROOF_PARAMS.MAX_VALUE
+      ) {
         throw new Error(
           `Secret must be between ${RANGE_PROOF_PARAMS.MIN_VALUE} and ${RANGE_PROOF_PARAMS.MAX_VALUE}`,
         );
@@ -83,13 +90,10 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
       setIsSubmitting(true);
 
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => {
-            reject(new Error("Proof generation timeout"));
-            worker.terminate();
-          },
-          RANGE_PROOF_PARAMS.TIMEOUT_MS,
-        );
+        const timeout = setTimeout(() => {
+          reject(new Error("Proof generation timeout"));
+          worker.terminate();
+        }, RANGE_PROOF_PARAMS.TIMEOUT_MS);
 
         worker.onmessage = async (event) => {
           clearTimeout(timeout);
@@ -110,9 +114,9 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
           }
         };
 
-        worker.onerror = (err) => {
+        worker.onerror = (err: ErrorEvent) => {
           clearTimeout(timeout);
-          reject(err);
+          reject(new Error(err.message || "Worker error"));
         };
       });
     } catch (err) {
@@ -124,18 +128,18 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
 
   return (
     <div className="range-proof-generator">
-      <h4>Generate Range Proof</h4>
+      <h4>{t("zk.generateRangeProof")}</h4>
 
       {error && <div className="error-message">{error}</div>}
 
       <div className="form-group">
-        <label htmlFor="secret">Secret Value:</label>
+        <label htmlFor="secret">{t("zk.secretValue")}</label>
         <input
           id="secret"
           type="number"
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
-          placeholder="Enter your secret value"
+          placeholder={t("zk.enterSecretValue")}
           disabled={isGenerating || isSubmitting}
           min={String(RANGE_PROOF_PARAMS.MIN_VALUE)}
           max={String(RANGE_PROOF_PARAMS.MAX_VALUE)}
@@ -144,7 +148,7 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
 
       <div className="form-row">
         <div className="form-group">
-          <label htmlFor="range-min">Range Min:</label>
+          <label htmlFor="range-min">{t("zk.rangeMin")}</label>
           <input
             id="range-min"
             type="number"
@@ -155,7 +159,7 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
         </div>
 
         <div className="form-group">
-          <label htmlFor="range-max">Range Max:</label>
+          <label htmlFor="range-max">{t("zk.rangeMax")}</label>
           <input
             id="range-max"
             type="number"
@@ -168,9 +172,12 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
 
       {generationTime && (
         <div className="generation-time">
-          <p>Generation time: {generationTime.toFixed(0)}ms</p>
+          <p>
+            {t("zk.generationTime")} {generationTime.toFixed(0)}
+            {t("zk.ms")}
+          </p>
           {generationTime > 1500 && (
-            <p className="warning">Proof generation exceeded 1.5 seconds</p>
+            <p className="warning">{t("zk.generationExceeded")}</p>
           )}
         </div>
       )}
@@ -181,8 +188,8 @@ export const RangeProofGenerator: React.FC<RangeProofGeneratorProps> = ({
         disabled={isGenerating || isSubmitting || !secret}
       >
         {isGenerating || isSubmitting
-          ? "Generating..."
-          : "Generate & Verify Proof"}
+          ? t("zk.generating")
+          : t("zk.generateAndVerifyProof")}
       </button>
     </div>
   );

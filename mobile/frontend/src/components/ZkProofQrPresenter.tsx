@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { ZkAttestation } from "@velo/shared";
 
 interface ZkProofQrPresenterProps {
@@ -13,6 +14,7 @@ interface ZkProofQrPresenterProps {
 export const ZkProofQrPresenter: React.FC<ZkProofQrPresenterProps> = ({
   attestation,
 }) => {
+  const { t } = useTranslation();
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -84,7 +86,10 @@ export const ZkProofQrPresenter: React.FC<ZkProofQrPresenterProps> = ({
       "href",
       `data:text/plain;charset=utf-8,${encodeURIComponent(attestationJson)}`,
     );
-    element.setAttribute("download", `attestation-${attestation.attestationId}.json`);
+    element.setAttribute(
+      "download",
+      `attestation-${attestation.attestationId}.json`,
+    );
     element.style.display = "none";
     document.body.appendChild(element);
     element.click();
@@ -98,15 +103,17 @@ export const ZkProofQrPresenter: React.FC<ZkProofQrPresenterProps> = ({
       <div className="qr-display">
         {qrCode ? (
           <div className="qr-container">
-            <img src={qrCode} alt="Attestation QR Code" />
-            <p className="qr-label">Scan to verify credential</p>
+            <img src={qrCode} alt={t("zk.attestationQRCode")} />
+            <p className="qr-label">{t("zk.scanToVerify")}</p>
           </div>
         ) : (
-          <div className="qr-placeholder">Generating QR code...</div>
+          <div className="qr-placeholder">{t("zk.generatingQRCode")}</div>
         )}
       </div>
 
-      {isExpired && <div className="expiration-warning">This attestation has expired</div>}
+      {isExpired && (
+        <div className="expiration-warning">{t("zk.attestationExpired")}</div>
+      )}
 
       <div className="attestation-actions">
         <button
@@ -114,7 +121,7 @@ export const ZkProofQrPresenter: React.FC<ZkProofQrPresenterProps> = ({
           onClick={handleCopyAttestation}
           disabled={isExpired}
         >
-          {isCopied ? "Copied!" : "Copy Attestation"}
+          {isCopied ? t("zk.copied") : t("zk.copyAttestation")}
         </button>
 
         <button
@@ -122,21 +129,21 @@ export const ZkProofQrPresenter: React.FC<ZkProofQrPresenterProps> = ({
           onClick={handleDownloadAttestation}
           disabled={isExpired}
         >
-          Download
+          {t("zk.download")}
         </button>
       </div>
 
       <div className="attestation-meta">
         <p>
-          <strong>ID:</strong>
+          <strong>{t("zk.id")}</strong>
           <code>{attestation.attestationId.slice(0, 12)}...</code>
         </p>
         <p>
-          <strong>Issuer:</strong>
+          <strong>{t("zk.issuer")}</strong>
           <code>{attestation.issuerPublicKey.slice(0, 16)}...</code>
         </p>
         <p>
-          <strong>Expires:</strong>
+          <strong>{t("zk.expires")}</strong>
           {new Date(attestation.expiresAt).toLocaleString()}
         </p>
       </div>

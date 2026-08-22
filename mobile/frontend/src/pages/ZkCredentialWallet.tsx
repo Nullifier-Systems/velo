@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   PedersenCommitment,
   ZkAttestation,
@@ -28,6 +29,7 @@ interface ZkCredentialWalletProps {
 export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
   userId,
 }) => {
+  const { t } = useTranslation();
   const [commitments, setCommitments] = useState<PedersenCommitment[]>([]);
   const [attestations, setAttestations] = useState<ZkAttestation[]>([]);
   const [isLoadingCommitments, setIsLoadingCommitments] = useState(true);
@@ -199,18 +201,18 @@ export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
 
   return (
     <div className="zk-credential-wallet">
-      <h1>ZK Credential Wallet</h1>
+      <h1>{t("zk.credentialWallet")}</h1>
 
       {error && <div className="error-message">{error}</div>}
 
       {/* Commitments Section */}
       <section className="commitments-section">
-        <h2>Your Credentials</h2>
+        <h2>{t("zk.yourCredentials")}</h2>
 
         {isLoadingCommitments ? (
-          <p>Loading commitments...</p>
+          <p>{t("zk.loadingCommitments")}</p>
         ) : commitments.length === 0 ? (
-          <p>No credentials yet. Issue a commitment to get started.</p>
+          <p>{t("zk.noCredentialsYet")}</p>
         ) : (
           <div className="commitments-list">
             {commitments.map((commitment) => (
@@ -224,11 +226,11 @@ export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
 
                 <div className="commitment-details">
                   <p>
-                    <strong>Commitment:</strong>
+                    <strong>{t("zk.commitment")}</strong>
                     <code>{commitment.commitmentHex.slice(0, 16)}...</code>
                   </p>
                   <p>
-                    <strong>Expires:</strong>
+                    <strong>{t("zk.expires")}</strong>
                     {new Date(commitment.expiresAt || "").toLocaleDateString()}
                   </p>
                 </div>
@@ -249,7 +251,7 @@ export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
                     }}
                     disabled={isGeneratingProof}
                   >
-                    Generate Range Proof
+                    {t("zk.generateRangeProof")}
                   </button>
                 )}
               </div>
@@ -260,18 +262,18 @@ export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
 
       {/* Attestations Section */}
       <section className="attestations-section">
-        <h2>Verified Attestations</h2>
+        <h2>{t("zk.verifiedAttestations")}</h2>
 
         {isLoadingAttestations ? (
-          <p>Loading attestations...</p>
+          <p>{t("zk.loadingAttestations")}</p>
         ) : attestations.length === 0 ? (
-          <p>No verified attestations yet. Generate and verify a proof.</p>
+          <p>{t("zk.noAttestationsYet")}</p>
         ) : (
           <div className="attestations-list">
             {attestations.map((attestation) => (
               <div key={attestation.attestationId} className="attestation-card">
                 <div className="attestation-header">
-                  <h3>Verified</h3>
+                  <h3>{t("zk.verified")}</h3>
                   <span className="attestation-id">
                     {attestation.attestationId.slice(0, 8)}...
                   </span>
@@ -279,11 +281,11 @@ export const ZkCredentialWallet: React.FC<ZkCredentialWalletProps> = ({
 
                 <div className="attestation-details">
                   <p>
-                    <strong>Issuer:</strong>
+                    <strong>{t("zk.issuer")}</strong>
                     <code>{attestation.issuerPublicKey.slice(0, 16)}...</code>
                   </p>
                   <p>
-                    <strong>Expires:</strong>
+                    <strong>{t("zk.expires")}</strong>
                     {new Date(attestation.expiresAt).toLocaleDateString()}
                   </p>
                 </div>
