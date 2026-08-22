@@ -81,3 +81,64 @@ export const CIRCUIT_BREAKER = {
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
   DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Nullifier Escrow Settlement (#371)                              */
+/* ------------------------------------------------------------------ */
+
+export type ZkNullifierStatus = "PENDING" | "SETTLED" | "REJECTED";
+
+export interface ZkSettleRequest {
+  proof: string;
+  nullifierHash: string;
+  commitment: string;
+  credentialSecret?: string;
+}
+
+export interface ZkSettleResponse {
+  message: string;
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+}
+
+export interface ZkSettleStatusResponse {
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+  txHash?: string | null;
+  errorMessage?: string | null;
+}
+
+export const ZK_SETTLEMENT = {
+  STREAM_KEY: "velo:zk-settlement-queue",
+  GROUP_NAME: "zk-settlement-group",
+  DLQ_KEY: "velo:zk-settlement-dlq",
+  MAX_RETRIES: 5,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Session-key multi-sig emergency rotation (#375)                   */
+/* ------------------------------------------------------------------ */
+
+/** Lifecycle of a delegated session key in `session_key_registry`. */
+export type SessionKeyStatus = "ACTIVE" | "ROTATING" | "REVOKED";
+
+/** Row shape of `session_key_rotation_proposals` (2-of-3 admin threshold). */
+export interface SessionKeyRotationProposal {
+  proposalId: string;
+  oldPubkey: string;
+  newPubkey: string;
+  signaturesCollected: number;
+  requiredSignatures: number;
+  signer1: string;
+  signer2: string | null;
+  executed: boolean;
+  createdAt?: string;
+  executedAt?: string | null;
+}
+
+/** Redis stream the API enqueues accepted rotation proposals onto. */
+export const SESSION_ROTATION_QUEUE = "velo:session-rotation-queue";
+/** Dead-letter stream for proposals that exhausted every confirmation retry. */
+export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
+/** Consumer group the rotation worker reads the queue with. */
+export const SESSION_ROTATION_GROUP = "rotation-group";
