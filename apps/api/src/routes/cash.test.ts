@@ -980,9 +980,13 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
 
     expect(res.statusCode).toBe(504);
     expect(res.json()).toMatchObject({
-      error: "rpc_timeout",
-      operation: "lock/buildSim",
-      elapsed_ms: 15_003,
+      error: {
+        code: "GATEWAY_TIMEOUT",
+        message: "The payment network request timed out. Please retry your operation.",
+        requestId: expect.stringMatching(/^req-tout-504-/),
+        operation: "lock/buildSim",
+        elapsed_ms: 15_003,
+      },
     });
   });
 
@@ -1005,7 +1009,15 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
     });
 
     expect(res.statusCode).toBe(504);
-    expect(res.json()).toMatchObject({ code: "RPC_TIMEOUT", statusCode: 504 });
+    expect(res.json()).toMatchObject({
+      error: {
+        code: "GATEWAY_TIMEOUT",
+        message: "The payment network request timed out. Please retry your operation.",
+        requestId: expect.stringMatching(/^req-tout-504-/),
+        operation: "lock/poll",
+        elapsed_ms: 45_001,
+      },
+    });
   });
 
   it("POST /cash/request/:id/release returns 504 when releaseEscrow times out", async () => {

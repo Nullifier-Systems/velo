@@ -79,7 +79,14 @@
     "waitCheckBack": "Esto está tardando más de lo esperado. Puedes cerrar esta página con seguridad y volver en unos minutos — si la transacción se confirmó, el estado se actualizará automáticamente.",
     "waitElapsed": "{{seconds}}s transcurridos",
     "trancheProgress": "{{released}} de {{total}} cuotas liberadas",
-    "trancheReleased": "liberado"
+    "trancheReleased": "liberado",
+    "timeoutError": "Error de tiempo de espera",
+    "requestTimedOut": "Solicitud agotó el tiempo",
+    "requestTook": "La solicitud tomó",
+    "seconds": "s",
+    "retrying": "Reintentando...",
+    "retryClaim": "Reintentar reclamo",
+    "contactSupport": "Contactar soporte"
   },
   "chat": {
     "noTradeId": "No se especificó un ID de comercio.",
@@ -254,5 +261,30 @@
     "anchored": "Clave revocada y nueva clave activada en la cadena",
     "failed": "Error de rotación: las firmas no coinciden",
     "retry": "Reintentar la propuesta"
+  },
+  "stateChannels": {
+    "title": "Panel de micropagos",
+    "connecting": "Conectando...",
+    "connected": "Conectado",
+    "disconnected": "Desconectado",
+    "dismiss": "Descartar",
+    "throughput": "Rendimiento",
+    "txSec": "tx/s",
+    "targetTps": "Objetivo: 500 tx/s",
+    "totalTransactions": "Transacciones totales",
+    "offChainCommits": "compromisos fuera de la cadena",
+    "sequenceNumber": "Número de secuencia",
+    "vectorClockPosition": "posición del reloj vectorial",
+    "channelCapacity": "Capacidad del canal",
+    "capacityUsed": "% utilizado",
+    "currentBalance": "Saldo actual",
+    "yourBalance": "Tu saldo",
+    "usdc": "USDC",
+    "counterpartyBalance": "Saldo de la contraparte",
+    "noBalanceData": "Sin datos de saldo aún",
+    "settlement": "Liquidación",
+    "settlementInfo": "Cuando esté listo, liquida este canal en la cadena con una sola transacción. Ambas partes deben haber firmado el estado final.",
+    "settling": "Liquidando...",
+    "settleButton": "Cerrar y liquidar canal"
   }
 }

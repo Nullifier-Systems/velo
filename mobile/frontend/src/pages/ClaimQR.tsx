@@ -12,6 +12,8 @@ import {
   formatRefundCountdown,
   shortAddress,
   type CashRequestStatus,
+  isGatewayTimeoutError,
+  type GatewayTimeoutError,
 } from '../lib/api';
 import './ClaimQR.css';
 
@@ -93,8 +95,10 @@ export default function ClaimQR() {
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feeError, setFeeError] = useState(false);
+  const [timeoutError, setTimeoutError] = useState<GatewayTimeoutError | null>(null);
   const [releasing, setReleasing] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  const [retryDisabled, setRetryDisabled] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [escrowPaused, setEscrowPaused] = useState(false);
   const [releaseElapsed, setReleaseElapsed] = useState(0);
@@ -144,11 +148,26 @@ export default function ClaimQR() {
         setCountdownSeconds(null);
       }
       setError(null);
+      setError(null);
       setFeeError(false);
+      setTimeoutError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("claim.somethingWentWrong"));
+      if (isGatewayTimeoutError(err)) {
+        setTimeoutError(err);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : t("claim.somethingWentWrong"));
+        setTimeoutError(null);
+      }
     }
   }, [id, t]);
+
+  const handleRetry = useCallback(async () => {
+    setRetryDisabled(true);
+    setTimeoutError(null);
+    await load();
+    setTimeout(() => setRetryDisabled(false), 3000); // 3-second throttle
+  }, [load]);
 
   const loadPauseState = useCallback(async () => {
     try {
@@ -250,6 +269,75 @@ export default function ClaimQR() {
         <p className="claim-page__state claim-page__state--error">
           {t("claim.loadError")}
         </p>
+      </div>
+    );
+  }
+
+  if (timeoutError) {
+    return (
+      <div className="claim-page">
+        <LanguageSwitcher />
+        {renderThemeToggle()}
+        <div className="claim-ticket claim-ticket--timeout-error">
+          <div className="claim-ticket__header">
+            <span className="claim-ticket__brand">{t("claim.brand")}</span>
+            <span className="claim-ticket__stamp claim-ticket__stamp--error" aria-label={t("claim.timeoutError")}>
+              ⚠️
+            </span>
+          </div>
+          <div className="claim-ticket__qr-window">
+            <div className="claim-ticket__timeout-message" role="alert" aria-live="polite">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 16}}>
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <h3 style={{margin: 0, fontSize: "1.2rem", fontWeight: 600}}>{t("claim.requestTimedOut")}</h3>
+              <p style={{margin: "8px 0 0 0", color: "#666"}}>
+                {timeoutError.message || "The payment network request timed out. Please retry your operation."}
+              </p>
+              {timeoutError.elapsedMs && (
+                <p style={{margin: "4px 0 0 0", fontSize: "0.9rem", color: "#999"}}>
+                  {t("claim.requestTook")} {Math.round(timeoutError.elapsedMs / 1000)}{t("claim.seconds")}
+                </p>
+              )}
+            </div>
+            <div className="claim-ticket__timeout-actions">
+              <button
+                className="claim-ticket__retry-button"
+                onClick={handleRetry}
+                disabled={retryDisabled}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  backgroundColor: retryDisabled ? "#ccc" : "#007AFF",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: retryDisabled ? "not-allowed" : "pointer",
+                  marginTop: 16,
+                }}
+              >
+                {retryDisabled ? t("claim.retrying") : t("claim.retryClaim")}
+              </button>
+              <a
+                href="https://t.me/nullifiersystem"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-block",
+                  marginTop: 12,
+                  fontSize: "0.9rem",
+                  color: "#007AFF",
+                  textDecoration: "none",
+                }}
+              >
+                {t("claim.contactSupport")}
+              </a>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
