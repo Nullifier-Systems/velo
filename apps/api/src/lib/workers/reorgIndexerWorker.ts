@@ -141,9 +141,9 @@ export class ReorgIndexerWorker {
       return;
     }
 
-    // Extract hash and previous hash from ledger header XDR
-    const blockHash = ledger.headerXdr.hash().toString("hex");
-    const actualParentHash = ledger.headerXdr.previousLedgerHash().toString("hex");
+    // Extract hash and previous hash from ledger header XDR (LedgerHeaderHistoryEntry -> header -> LedgerHeader)
+    const blockHash = ledger.headerXdr.header().hash().toString("hex");
+    const actualParentHash = ledger.headerXdr.header().previousLedgerHash().toString("hex");
     const ledgerSequence = ledger.sequence;
 
     // Check for reorg

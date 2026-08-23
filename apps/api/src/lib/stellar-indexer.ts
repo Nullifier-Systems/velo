@@ -183,8 +183,8 @@ export class StellarEscrowIndexer {
           });
 
       const ledger = ledgerHeaderResponse.ledgers[0];
-      // Extract previous hash from ledger header XDR
-      const previousHash = ledger.headerXdr.previousLedgerHash().toString("hex");
+      // Extract previous hash from ledger header XDR (LedgerHeaderHistoryEntry -> header -> previousLedgerHash)
+      const previousHash = ledger.headerXdr.header().previousLedgerHash().toString("hex");
       
       if (ledger && previousHash !== expectedParentHash) {
         this.logger.warn(
