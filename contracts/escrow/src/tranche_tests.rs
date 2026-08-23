@@ -401,14 +401,8 @@ fn test_release_max_lockable_amount_does_not_overflow() {
         released: false,
     });
 
-    f.client.lock_with_tranches(
-        &f.id,
-        &f.seller,
-        &f.buyer,
-        &max_amount,
-        &tranches,
-        &100,
-    );
+    f.client
+        .lock_with_tranches(&f.id, &f.seller, &f.buyer, &max_amount, &tranches, &100);
 
     // At a 100% fee everything goes to the platform; payout is 0 but the
     // release itself must succeed without any arithmetic panic.
@@ -429,10 +423,7 @@ fn test_fee_helpers_reject_overflow_instead_of_panicking() {
     // Directly exercise the shared checked-math helpers at values the
     // public entry points refuse at lock time — proving the math itself
     // can never panic if a future code path reaches it with such input.
-    assert_eq!(
-        calculate_fee(i128::MAX, 2),
-        Err(FeeMathError::Overflow)
-    );
+    assert_eq!(calculate_fee(i128::MAX, 2), Err(FeeMathError::Overflow));
     assert_eq!(
         calculate_fee(i128::MAX, u32::MAX),
         Err(FeeMathError::Overflow)
@@ -454,9 +445,7 @@ fn test_set_platform_fee_rejects_above_max_bps() {
     // reject them with InvalidFee, matching initialize().
     let f = setup(1_000, 100);
 
-    let result = f
-        .client
-        .try_set_platform_fee(&10_001, &Vec::new(&f.env));
+    let result = f.client.try_set_platform_fee(&10_001, &Vec::new(&f.env));
     assert_eq!(result.unwrap_err().unwrap(), Error::InvalidFee);
 
     // The boundary value itself remains legal.

@@ -184,10 +184,7 @@ mod fee_math_tests {
         // The largest amount lock() accepts times the largest legal fee
         // config lands just under i128::MAX — must not report overflow.
         let max_lockable = i128::MAX / BPS_DENOMINATOR;
-        assert_eq!(
-            calculate_fee(max_lockable, MAX_FEE_BPS),
-            Ok(max_lockable)
-        );
+        assert_eq!(calculate_fee(max_lockable, MAX_FEE_BPS), Ok(max_lockable));
         assert_eq!(apply_bps(max_lockable, MAX_FEE_BPS), Ok(max_lockable));
     }
 

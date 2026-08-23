@@ -960,14 +960,12 @@ impl EscrowContract {
         // platform fee exactly like release() does. All split math is
         // checked (issue #381) — a dispute on a max-size trade must
         // resolve or fail with an error, never panic mid-payout.
-        let buyer_amount = apply_bps(state.amount, buyer_share_bps)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
-        let seller_gross = net_of(state.amount, buyer_amount)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
-        let fee = calculate_fee(seller_gross, fee_bps)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
-        let seller_payout = net_of(seller_gross, fee)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let buyer_amount =
+            apply_bps(state.amount, buyer_share_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_gross =
+            net_of(state.amount, buyer_amount).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let fee = calculate_fee(seller_gross, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_payout = net_of(seller_gross, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Resolved;
         env.storage().persistent().set(&key, &state);
@@ -1272,10 +1270,9 @@ impl EscrowContract {
             }
 
             // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
-            let fee = calculate_fee(state.amount, fee_bps)
-                .map_err(|_| Error::FeeArithmeticOverflow)?;
-            let payout =
-                net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern, same as release(): update state before external calls.
             state.status = TradeStatus::Released;
@@ -1372,8 +1369,7 @@ impl EscrowContract {
         // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
         let fee = calculate_fee(release_state.amount, fee_bps)
             .map_err(|_| Error::FeeArithmeticOverflow)?;
-        let payout = net_of(release_state.amount, fee)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(release_state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
         if payout <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -1496,10 +1492,9 @@ impl EscrowContract {
             let mut state: TradeState = env.storage().persistent().get(&key).unwrap();
 
             // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
-            let fee = calculate_fee(state.amount, fee_bps)
-                .map_err(|_| Error::FeeArithmeticOverflow)?;
-            let payout =
-                net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern: update state before external calls.
             state.status = TradeStatus::Released;
@@ -1669,8 +1664,8 @@ impl EscrowContract {
         }
 
         // Verify revealed parameters match commitment
-        let expected_collateral = apply_bps(amount, COMMIT_COLLATERAL_RATE_FP)
-            .map_err(|_| Error::InvalidAmount)?;
+        let expected_collateral =
+            apply_bps(amount, COMMIT_COLLATERAL_RATE_FP).map_err(|_| Error::InvalidAmount)?;
         if commitment_state.amount != amount
             || commitment_state.buyer != buyer
             || commitment_state.collateral != expected_collateral
@@ -1832,8 +1827,7 @@ impl EscrowContract {
             .ok_or(Error::NotInitialized)?;
 
         // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
-        let fee = calculate_fee(state.amount, fee_bps)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let fee = calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
         let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Released;
@@ -2323,10 +2317,9 @@ impl EscrowContract {
         // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
         // This is the tranche-settlement path the issue targets: a 1-bps fee
         // on a tiny tranche must round UP to 1 stroop, never truncate to 0.
-        let fee = calculate_fee(tranche.amount, fee_bps)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
-        let payout = net_of(tranche.amount, fee)
-            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let fee =
+            calculate_fee(tranche.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(tranche.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         // Mark this tranche as released
         tranche.released = true;
