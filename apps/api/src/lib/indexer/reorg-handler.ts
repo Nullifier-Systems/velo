@@ -173,7 +173,7 @@ export class ReorgHandler {
          RETURNING id`,
         [forkLedger, rollbackDepth, "Parent hash mismatch detected"],
       );
-      reorgEventId = reorgEventResult.rows[0]?.id || `reorg-${Date.now()}`;
+      reorgEventId = (reorgEventResult.rows[0]?.id as string) || `reorg-${Date.now()}`;
 
       await client.query("COMMIT");
 
