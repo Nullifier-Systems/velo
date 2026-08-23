@@ -309,5 +309,31 @@
     "detectedAt": "Detected at",
     "additionalReorgEvents": "additional recent reorg event(s)",
     "dismiss": "Dismiss"
+  },
+  "stateChannels": {
+    "title": "Micropayment Dashboard",
+    "connecting": "Connecting...",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "dismiss": "Dismiss",
+    "throughput": "Throughput",
+    "txSec": "tx/s",
+    "targetTps": "Target: 500 tx/s",
+    "totalTransactions": "Total Transactions",
+    "offChainCommits": "off-chain commits",
+    "sequenceNumber": "Sequence Number",
+    "vectorClockPosition": "vector clock position",
+    "channelCapacity": "Channel Capacity",
+    "capacityUsed": "% used",
+    "currentBalance": "Current Balance",
+    "yourBalance": "Your Balance",
+    "usdc": "USDC",
+    "counterpartyBalance": "Counterparty Balance",
+    "noBalanceData": "No balance data yet",
+    "settlement": "Settlement",
+    "settlementInfo": "When ready, settle this channel on-chain with a single transaction. Both parties must have signed the final state.",
+    "settling": "Settling...",
+    "settleButton": "Close & Settle Channel"
+>>>>>>> 44af4a40324f22655df50d5cd0f7a89d94c1553e
   }
 }
