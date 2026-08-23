@@ -1,4 +1,5 @@
-import { Server, xdr } from "@stellar/stellar-sdk/rpc";
+import { Server } from "@stellar/stellar-sdk/rpc";
+import { xdr } from "@stellar/stellar-sdk";
 import type { FastifyBaseLogger } from "fastify";
 import { decodeEscrowEvent, type IndexedEscrowEvent } from "./escrow-events.js";
 import { escrowDeltaFeed } from "./escrow-deltas.js";
@@ -183,7 +184,7 @@ export class StellarEscrowIndexer {
 
       const ledger = ledgerHeaderResponse.ledgers[0];
       // Extract previous hash from ledger header XDR
-      const previousHash = ledger.headerXdr.hash().toString("hex");
+      const previousHash = ledger.headerXdr.previousLedgerHash().toString("hex");
       
       if (ledger && previousHash !== expectedParentHash) {
         this.logger.warn(

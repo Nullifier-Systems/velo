@@ -165,12 +165,13 @@ export class ReorgHandler {
       );
 
       // Record the reorg event
+      const forkLedger = reorgDetection.fork_ledger ?? targetLedger;
       const reorgEventResult = await client.query(
         `INSERT INTO indexer_reorg_events 
            (detected_at, fork_ledger, rollback_depth, reason)
          VALUES (NOW(), $1, $2, $3)
          RETURNING id`,
-        [reorgDetection.fork_ledger, rollbackDepth, "Parent hash mismatch detected"],
+        [forkLedger, rollbackDepth, "Parent hash mismatch detected"],
       );
       reorgEventId = reorgEventResult.rows[0].id;
 
@@ -184,7 +185,7 @@ export class ReorgHandler {
       return {
         id: reorgEventId,
         detected_at: new Date().toISOString(),
-        fork_ledger: reorgDetection.fork_ledger ?? targetLedger,
+        fork_ledger: forkLedger,
         rollback_depth: rollbackDepth,
         reason: "Parent hash mismatch detected",
       };

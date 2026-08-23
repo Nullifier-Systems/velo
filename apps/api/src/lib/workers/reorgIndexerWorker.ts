@@ -1,4 +1,5 @@
-import { Server, xdr } from "@stellar/stellar-sdk/rpc";
+import { Server } from "@stellar/stellar-sdk/rpc";
+import { xdr } from "@stellar/stellar-sdk";
 import type { Pool } from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { REORG_RESILIENT_INDEXER } from "@velo/shared";
@@ -142,7 +143,7 @@ export class ReorgIndexerWorker {
 
     // Extract hash and previous hash from ledger header XDR
     const blockHash = ledger.headerXdr.hash().toString("hex");
-    const actualParentHash = ledger.headerXdr.prevHash().toString("hex");
+    const actualParentHash = ledger.headerXdr.previousLedgerHash().toString("hex");
     const ledgerSequence = ledger.sequence;
 
     // Check for reorg
