@@ -5,6 +5,7 @@ import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
+import { startBatchAuctionWorker } from "./lib/workers/batchAuctionWorker.js";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
@@ -18,6 +19,7 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
+    startBatchAuctionWorker();
 
     if (stellarEventStore && pgPool) {
       const contractId = process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
