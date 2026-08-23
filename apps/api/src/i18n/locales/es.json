@@ -53,5 +53,36 @@
   },
   "discovery": {
     "noProvidersNearby": "Velo aún no está disponible en esta zona porque no hay proveedores de efectivo aprobados cerca. Vuelve a intentarlo más tarde."
+  },
+  "zk": {
+    "credentialWallet": "Cartera de Credenciales ZK",
+    "yourCredentials": "Tus Credenciales",
+    "loadingCommitments": "Cargando compromisos...",
+    "noCredentialsYet": "Sin credenciales aún. Emite un compromiso para comenzar.",
+    "commitment": "Compromiso:",
+    "expires": "Expira:",
+    "generateRangeProof": "Generar Prueba de Rango",
+    "verifiedAttestations": "Atestaciones Verificadas",
+    "loadingAttestations": "Cargando atestaciones...",
+    "noAttestationsYet": "Sin atestaciones verificadas aún. Genera y verifica una prueba.",
+    "verified": "Verificado",
+    "issuer": "Emisor:",
+    "secretValue": "Valor Secreto:",
+    "enterSecretValue": "Ingresa tu valor secreto",
+    "rangeMin": "Mínimo de Rango:",
+    "rangeMax": "Máximo de Rango:",
+    "generationTime": "Tiempo de generación:",
+    "ms": "ms",
+    "generationExceeded": "La generación de prueba excedió 1.5 segundos",
+    "generating": "Generando...",
+    "generateAndVerifyProof": "Generar y Verificar Prueba",
+    "attestationQRCode": "Código QR de Atestación",
+    "scanToVerify": "Escanea para verificar credencial",
+    "generatingQRCode": "Generando código QR...",
+    "attestationExpired": "Esta atestación ha expirado",
+    "copied": "¡Copiado!",
+    "copyAttestation": "Copiar Atestación",
+    "download": "Descargar",
+    "id": "ID:"
   }
 }

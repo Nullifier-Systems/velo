@@ -16,8 +16,7 @@ import {
   submitChainReleaseToLockTx,
   getTradeState,
   getEscrowPauseState,
-  batchReleaseEscrow,
-  releaseBatchEscrow,
+  releaseBatchAtomic,
   NETWORK_PASSPHRASE,
   getLatestLedgerSequence,
   getTradeOnChain,
@@ -41,6 +40,7 @@ import {
   getProviderByAddress,
   enqueueForBatch,
   getPendingBatchesByProvider,
+  logTimeoutIncident,
 } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
@@ -68,6 +68,42 @@ const ESCROW_CONTRACT_ID =
 
 const PAUSED_NEW_TRADE_MESSAGE =
   "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
+
+const REQUEST_TIMEOUT_MS = 10_000; // 10 second timeout for downstream RPC calls
+
+/**
+ * Wraps an async operation with a strict timeout. If the operation exceeds
+ * REQUEST_TIMEOUT_MS, it throws an RpcTimeoutError and logs the incident.
+ */
+async function withRequestTimeout<T>(
+  operation: string,
+  fn: () => Promise<T>,
+  req: { log: { error: (err: unknown, msg: string) => void }; headers?: { 'user-agent'?: string } }
+): Promise<T> {
+  const start = Date.now();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const elapsed = Date.now() - start;
+      logTimeoutIncident(
+        operation,
+        req.headers?.['user-agent'],
+        elapsed
+      );
+      reject(new RpcTimeoutError(operation, elapsed));
+    }, REQUEST_TIMEOUT_MS);
+
+    fn().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 /** Reject new locks when the on-chain circuit breaker is effective (issue #266). */
 async function rejectIfEscrowPaused(
@@ -579,37 +615,52 @@ export async function cashRoutes(app: FastifyInstance) {
       if (mode === "custodial") {
         let lockedAtLedger: number;
         try {
-          if (rawTranches && rawTranches.length > 0) {
-            lockedAtLedger = await lockEscrowWithTranches({
-              contractId: ESCROW_CONTRACT_ID,
-              tradeId,
-              seller,
-              buyer,
-              amountStroops: BigInt(amount_stroops),
-              tranches: rawTranches.map((t) => ({
-                amountStroops: BigInt(t.amount_stroops),
-                secretHashHex: t.secret_hash,
-              })),
-              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-            });
-          } else {
-            lockedAtLedger = await lockEscrow({
-              contractId: ESCROW_CONTRACT_ID,
-              tradeId,
-              seller,
-              buyer,
-              amountStroops: BigInt(amount_stroops),
-              secretHashHex: secret_hash,
-              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-            });
-          }
+          // Both the tranche and single-secret lock paths go through the
+          // shared RPC timeout wrapper so a slow/hanging Horizon call
+          // surfaces as a 504 with a proper incident log instead of hanging
+          // the request indefinitely.
+          lockedAtLedger = await withRequestTimeout(
+            "POST /cash/request/prepare (custodial lock)",
+            () => {
+              if (rawTranches && rawTranches.length > 0) {
+                return lockEscrowWithTranches({
+                  contractId: ESCROW_CONTRACT_ID,
+                  tradeId,
+                  seller,
+                  buyer,
+                  amountStroops: BigInt(amount_stroops),
+                  tranches: rawTranches.map((t) => ({
+                    amountStroops: BigInt(t.amount_stroops),
+                    secretHashHex: t.secret_hash,
+                  })),
+                  timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+                });
+              }
+              return lockEscrow({
+                contractId: ESCROW_CONTRACT_ID,
+                tradeId,
+                seller,
+                buyer,
+                amountStroops: BigInt(amount_stroops),
+                secretHashHex: secret_hash,
+                timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+              });
+            },
+            req,
+          );
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
           if (err instanceof RpcTimeoutError) {
-            throw new ApiError(504, "RPC_TIMEOUT", "RPC timeout", {
-              extra: { operation: err.operation, elapsed_ms: err.elapsedMs },
-              detail: err.message,
+            reply.code(504).send({
+              error: {
+                code: "GATEWAY_TIMEOUT",
+                message: "The payment network request timed out. Please retry your operation.",
+                requestId: `req-tout-504-${tradeId}`,
+                operation: err.operation,
+                elapsed_ms: err.elapsedMs,
+              }
             });
+            return;
           }
           throw new ApiError(502, "ESCROW_LOCK_FAILED", "Escrow lock failed", {
             detail: String(err),
@@ -769,24 +820,32 @@ export async function cashRoutes(app: FastifyInstance) {
       let lockedAtLedger: number;
 
       try {
-        lockedAtLedger = await lockEscrow({
-          contractId: ESCROW_CONTRACT_ID,
-          tradeId,
-          seller,
-          buyer,
-          amountStroops: BigInt(amount_stroops),
-          secretHashHex: secret_hash,
-          timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-        });
+        lockedAtLedger = await withRequestTimeout(
+          "POST /cash/request (custodial lock)",
+          () => lockEscrow({
+            contractId: ESCROW_CONTRACT_ID,
+            tradeId,
+            seller,
+            buyer,
+            amountStroops: BigInt(amount_stroops),
+            secretHashHex: secret_hash,
+            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+          }),
+          req
+        );
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
-            error: "rpc_timeout",
-            detail: err.message,
-            operation: err.operation,
-            elapsed_ms: err.elapsedMs,
+            error: {
+              code: "GATEWAY_TIMEOUT",
+              message: "The payment network request timed out. Please retry your operation.",
+              requestId: `req-tout-504-${tradeId}`,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            }
           });
+          return;
         } else {
           reply.code(502).send({
             error: "escrow lock failed",
@@ -1450,7 +1509,9 @@ export async function cashRoutes(app: FastifyInstance) {
    * POST /api/v1/cash/batch-release — Atomically release a batch of pending trades.
    *
    * Provider provides a list of trade IDs they want to release together.
-   * The contract validates ALL trades, then releases ALL or NONE (atomic).
+   * This maps to the escrow contract's atomic `release_batch()` entrypoint,
+   * which releases ALL or NONE — distinct from `batch_release()`, which skips
+   * invalid legs and is used by the background payout batcher.
    *
    * Contract behavior:
    * - Validates ALL trades exist, are Locked, and have valid secrets BEFORE any changes
@@ -1458,10 +1519,15 @@ export async function cashRoutes(app: FastifyInstance) {
    * - Aggregates fees across all trades and pays them once
    * - All succeed together or all fail together (true atomicity)
    *
+   * Because settlement is all-or-nothing, off-chain records are only marked
+   * `released` after the contract call succeeds. If it reverts, every trade is
+   * left in `pending_batch` untouched, so a single bad leg never leaves the
+   * batch half-settled.
+   *
    * Request body: { trade_ids: string[] }  — array of hex trade IDs to release
    *
-   * Returns: { released_count: number, total_payout: string, total_fees: string }
-   * On error: { error: string, detail: string } + 400/502/504 status
+   * Returns: { released_count: number, trade_ids: string[], total_amount: string }
+   * On error: { error, code, statusCode } (validation) or { error, detail } (502/504)
    */
   app.post<{ Body: { trade_ids?: string[] } }>(
     "/cash/batch-release",
@@ -1560,13 +1626,14 @@ export async function cashRoutes(app: FastifyInstance) {
 
       try {
         // Call the atomic release_batch() function on the contract.
-        // If ANY trade fails validation, the entire batch reverts.
-        await releaseBatchEscrow({
+        // If ANY trade fails validation, the entire batch reverts and this
+        // throws, so no trade below is marked released (clean rollback).
+        await releaseBatchAtomic({
           contractId,
           releases,
         });
       } catch (err) {
-        req.log.error(err, "releaseBatchEscrow failed");
+        req.log.error(err, "releaseBatchAtomic failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
             error: "rpc_timeout",
@@ -1583,14 +1650,12 @@ export async function cashRoutes(app: FastifyInstance) {
         return;
       }
 
-      // On success, mark all trades as released and notify.
+      // The atomic release_batch() succeeded, so every leg settled on-chain.
+      // Mark them all released and notify.
       let totalPayout = 0n;
-      let totalFees = 0n;
 
       for (const record of records) {
         const amount = BigInt(record.amountStroops);
-        // Fee calculation matches contract: fee = (amount * fee_bps) / 10_000
-        // We don't have fee_bps here, but the contract applied it, so we just track totals.
         updateStatus(record.id, "released");
         await notifyTradeStatus(record.id, "released");
         await sendNotification(record, "released", (req as any).locale ?? "en");

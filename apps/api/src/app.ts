@@ -17,17 +17,28 @@ import { servicesRoutes } from "./routes/services.js";
 import { providerRoutes } from "./routes/provider.js";
 import { adminRoutes } from "./routes/admin.js";
 import { sessionRoutes } from "./routes/session.js";
+import { sessionRotationRoutes } from "./routes/session-rotation.js";
 import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
-import { TransactionBuilder, Transaction, FeeBumpTransaction } from "@stellar/stellar-sdk";
+import {
+  TransactionBuilder,
+  Transaction,
+  FeeBumpTransaction,
+} from "@stellar/stellar-sdk";
 import { recordRateLimitViolation } from "./lib/rate-limit-violations.js";
 import { Pool } from "pg";
 import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
 import { circuitBreakerRoutes } from "./routes/circuit-breaker.js";
 import { batchAuctionRoutes } from "./routes/batch-auctions.js";
+import { zkSettleRoutes } from "./routes/zk-settle.js";
+import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
+import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
+import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
+import { stateChannelRoutes } from "./routes/state-channels.js";
+import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -49,7 +60,11 @@ function isUsdcAsset(asset: any): boolean {
   if (!asset) return true;
   if (typeof asset.isNative === "function" && asset.isNative()) return false;
   if (asset.code && asset.code !== "USDC") return false;
-  if (process.env.USDC_ISSUER && asset.issuer && asset.issuer !== process.env.USDC_ISSUER) {
+  if (
+    process.env.USDC_ISSUER &&
+    asset.issuer &&
+    asset.issuer !== process.env.USDC_ISSUER
+  ) {
     return false;
   }
   return true;
@@ -69,7 +84,9 @@ function isUsdcAsset(asset: any): boolean {
  */
 const REQUEST_ID_MAX_LENGTH = 128;
 
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+function firstHeaderValue(
+  value: string | string[] | undefined,
+): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
@@ -81,7 +98,11 @@ export const app = Fastify({
       firstHeaderValue(req.headers["x-vercel-id"]);
     // Reject oversized inbound IDs so a hostile header can't bloat every
     // log line for the request.
-    if (inbound && inbound.length > 0 && inbound.length <= REQUEST_ID_MAX_LENGTH) {
+    if (
+      inbound &&
+      inbound.length > 0 &&
+      inbound.length <= REQUEST_ID_MAX_LENGTH
+    ) {
       return inbound;
     }
     return randomUUID();
@@ -110,9 +131,7 @@ app.addHook("onRequest", async (req, reply) => {
 app.decorateRequest("locale", "");
 app.addHook("onRequest", async (req) => {
   const raw = req.headers["accept-language"];
-  const locale = resolveLocale(
-    Array.isArray(raw) ? raw[0] : raw
-  );
+  const locale = resolveLocale(Array.isArray(raw) ? raw[0] : raw);
   (req as any).locale = locale;
 });
 
@@ -260,65 +279,97 @@ app.setErrorHandler((error: any, request, reply) => {
  * where. This is the entire "auth" system: payment IS authentication,
  * there are no API keys or accounts.
  */
-app.decorate("requirePayment", async (req: any, reply: any, priceUsdc: string) => {
-  const payment = req.headers["x-payment"];
-  const merchantAddress = process.env.MERCHANT_ADDRESS ?? "G...SET_ME";
-  if (!payment || typeof payment !== "string") {
-    reply.code(402).send({
-      challenge: {
-        amount_usdc: priceUsdc,
-        pay_to: merchantAddress,
-        memo: "velo:request",
-      },
-    });
-    return false;
-  }
-
-  if (isPaymentUsed(payment)) {
-    throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
-  }
-
-  try {
-    const txResponse = await server.getTransaction(payment);
-    if (txResponse.status !== "SUCCESS") {
-      throw new ApiError(402, "PAYMENT_NOT_SUCCESSFUL", "Payment transaction not successful");
+app.decorate(
+  "requirePayment",
+  async (req: any, reply: any, priceUsdc: string) => {
+    const payment = req.headers["x-payment"];
+    const merchantAddress = process.env.MERCHANT_ADDRESS ?? "G...SET_ME";
+    if (!payment || typeof payment !== "string") {
+      reply.code(402).send({
+        challenge: {
+          amount_usdc: priceUsdc,
+          pay_to: merchantAddress,
+          memo: "velo:request",
+        },
+      });
+      return false;
     }
 
-    const parsedTx = TransactionBuilder.fromXDR(txResponse.envelopeXdr, NETWORK_PASSPHRASE);
-    const tx = "innerTransaction" in parsedTx ? (parsedTx as FeeBumpTransaction).innerTransaction : (parsedTx as Transaction);
-
-    if (tx.memo.value?.toString() !== "velo:request") {
-      throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
+    if (isPaymentUsed(payment)) {
+      throw new ApiError(402, "PAYMENT_ALREADY_USED", "Payment already used");
     }
 
-    // Check operation
-    const hasPayment = tx.operations.some(op => {
+    try {
+      const txResponse = await server.getTransaction(payment);
+      if (txResponse.status !== "SUCCESS") {
+        throw new ApiError(
+          402,
+          "PAYMENT_NOT_SUCCESSFUL",
+          "Payment transaction not successful",
+        );
+      }
+
+      const parsedTx = TransactionBuilder.fromXDR(
+        txResponse.envelopeXdr,
+        NETWORK_PASSPHRASE,
+      );
+      const tx =
+        "innerTransaction" in parsedTx
+          ? (parsedTx as FeeBumpTransaction).innerTransaction
+          : (parsedTx as Transaction);
+
+      if (tx.memo.value?.toString() !== "velo:request") {
+        throw new ApiError(402, "INVALID_PAYMENT_MEMO", "Invalid payment memo");
+      }
+
+      // Check operation
+      const hasPayment = tx.operations.some((op) => {
         if (op.type === "payment") {
-            const dest = (op as any).destination;
-            const amt = (op as any).amount;
-            const asset = (op as any).asset;
-            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
-        } else if (op.type === "pathPaymentStrictReceive" || op.type === "pathPaymentStrictSend") {
-            const dest = (op as any).destination;
-            const amt = (op as any).destAmount ?? (op as any).amount;
-            const asset = (op as any).destAsset ?? (op as any).asset;
-            return dest === merchantAddress && isUsdcAsset(asset) && parseFloat(amt) >= parseFloat(priceUsdc);
+          const dest = (op as any).destination;
+          const amt = (op as any).amount;
+          const asset = (op as any).asset;
+          return (
+            dest === merchantAddress &&
+            isUsdcAsset(asset) &&
+            parseFloat(amt) >= parseFloat(priceUsdc)
+          );
+        } else if (
+          op.type === "pathPaymentStrictReceive" ||
+          op.type === "pathPaymentStrictSend"
+        ) {
+          const dest = (op as any).destination;
+          const amt = (op as any).destAmount ?? (op as any).amount;
+          const asset = (op as any).destAsset ?? (op as any).asset;
+          return (
+            dest === merchantAddress &&
+            isUsdcAsset(asset) &&
+            parseFloat(amt) >= parseFloat(priceUsdc)
+          );
         }
         return false;
-    });
+      });
 
-    if (!hasPayment) {
-      throw new ApiError(402, "INVALID_PAYMENT_TX", "Transaction does not contain a valid payment");
+      if (!hasPayment) {
+        throw new ApiError(
+          402,
+          "INVALID_PAYMENT_TX",
+          "Transaction does not contain a valid payment",
+        );
+      }
+
+      recordPaymentUsed(payment);
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      req.log.error(err, "payment verification failed");
+      throw new ApiError(
+        402,
+        "INVALID_PAYMENT_TX",
+        "Invalid payment transaction",
+      );
     }
-
-    recordPaymentUsed(payment);
-    return true;
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    req.log.error(err, "payment verification failed");
-    throw new ApiError(402, "INVALID_PAYMENT_TX", "Invalid payment transaction");
-  }
-});
+  },
+);
 
 app.get(
   "/health",
@@ -327,7 +378,7 @@ app.get(
       rateLimit: { max: 100, timeWindow: "1 minute" },
     },
   },
-  async () => ({ ok: true })
+  async () => ({ ok: true }),
 );
 
 app.get(
@@ -340,7 +391,7 @@ app.get(
   async () => ({
     commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
     timestamp: process.env.DEPLOY_TIMESTAMP || "unknown",
-  })
+  }),
 );
 
 app.register(openapiRoutes, { prefix: "/api/v1" });
@@ -352,7 +403,17 @@ app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
 app.register(sessionRoutes, { prefix: "/api/v1" });
+app.register(sessionRotationRoutes, { prefix: "/api/v1" });
 app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
 app.register(circuitBreakerRoutes, { prefix: "/api/v1" });
 app.register(batchAuctionRoutes, { prefix: "/api/v1" });
+app.register(zkSettleRoutes, { prefix: "/api/v1" });
+app.register(enterpriseOrgsRoutes, { prefix: "/api/v1" });
+app.register(enterprisePoliciesRoutes, { prefix: "/api/v1" });
+app.register(enterpriseApprovalsRoutes, { prefix: "/api/v1" });
+app.register(stateChannelRoutes, {
+  prefix: "/api/v1",
+  db: pgPool,
+  redis: undefined,
+});

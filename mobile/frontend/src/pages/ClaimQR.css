@@ -550,3 +550,42 @@ html.dark .claim-ticket__tranche-progress {
   margin: 6px 0 0 0;
   text-align: center;
 }
+
+/* Timeout error state */
+.claim-ticket--timeout-error {
+  border: 2px solid var(--stamp-amber);
+}
+
+.claim-ticket__stamp--error {
+  color: var(--stamp-amber);
+}
+
+.claim-ticket__timeout-message {
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.claim-ticket__timeout-message h3 {
+  margin: 0 0 8px 0;
+  color: var(--ink);
+}
+
+.claim-ticket__timeout-message p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.claim-ticket__timeout-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 24px 24px;
+}
+
+.claim-ticket__retry-button {
+  transition: all 0.2s ease;
+}
+
+.claim-ticket__retry-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
