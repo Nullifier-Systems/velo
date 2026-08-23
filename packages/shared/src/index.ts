@@ -142,3 +142,70 @@ export const SESSION_ROTATION_QUEUE = "velo:session-rotation-queue";
 export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
 /** Consumer group the rotation worker reads the queue with. */
 export const SESSION_ROTATION_GROUP = "rotation-group";
+
+/* ------------------------------------------------------------------ */
+/*  Reorg-Resilient Event Indexer & Snapshot Engine                  */
+/* ------------------------------------------------------------------ */
+
+export interface IndexerBlockHeader {
+  ledger_sequence: number;
+  block_hash: string;
+  parent_hash: string;
+  created_at: string;
+}
+
+export interface IndexerUndoLog {
+  id: string;
+  ledger_sequence: number;
+  table_name: string;
+  previous_row_data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface IndexerReorgEvent {
+  id: string;
+  detected_at: string;
+  fork_ledger: number;
+  rollback_depth: number;
+  reason: string;
+  resolved_at?: string;
+  resolution_details?: Record<string, unknown>;
+}
+
+export interface IndexerRpcNodeHealth {
+  id: string;
+  rpc_url: string;
+  is_healthy: boolean;
+  last_check: string;
+  consecutive_failures: number;
+  last_failure_reason?: string;
+  last_success_at?: string;
+}
+
+export interface ReorgDetectionResult {
+  detected: boolean;
+  fork_ledger?: number;
+  expected_parent_hash?: string;
+  actual_parent_hash?: string;
+  rollback_depth?: number;
+}
+
+export interface SnapshotCheckpoint {
+  ledger_sequence: number;
+  block_hash: string;
+  created_at: string;
+  tables_snapshot: Record<string, unknown>;
+}
+
+export const REORG_RESILIENT_INDEXER = {
+  /** Maximum ledger depth to roll back during automatic reorg recovery */
+  MAX_ROLLBACK_DEPTH: 10,
+  /** Number of ledger confirmations required before marking trades as finalized */
+  FINALITY_CONFIRMATIONS: 6,
+  /** RPC failover timeout in milliseconds */
+  RPC_FAILOVER_TIMEOUT_MS: 500,
+  /** Interval for checking ledger header DAG continuity (ms) */
+  DAG_CONTINUITY_CHECK_MS: 1000,
+  /** Maximum consecutive RPC failures before marking node as unhealthy */
+  MAX_CONSECUTIVE_RPC_FAILURES: 3,
+} as const;
