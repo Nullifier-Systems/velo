@@ -334,6 +334,5 @@
     "settlementInfo": "Cuando esté listo, liquida este canal en la cadena con una sola transacción. Ambas partes deben haber firmado el estado final.",
     "settling": "Liquidando...",
     "settleButton": "Cerrar y liquidar canal"
->>>>>>> 44af4a40324f22655df50d5cd0f7a89d94c1553e
   }
 }

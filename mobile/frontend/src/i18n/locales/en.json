@@ -334,6 +334,5 @@
     "settlementInfo": "When ready, settle this channel on-chain with a single transaction. Both parties must have signed the final state.",
     "settling": "Settling...",
     "settleButton": "Close & Settle Channel"
->>>>>>> 44af4a40324f22655df50d5cd0f7a89d94c1553e
   }
 }
