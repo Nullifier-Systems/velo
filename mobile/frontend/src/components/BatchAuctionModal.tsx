@@ -102,7 +102,7 @@ export default function BatchAuctionModal({
             <p className="batch-auction-modal-phase">
               {t("batchAuction.phase", "Phase")}: <strong>{state.phase}</strong>
               {remaining !== null && state.phase !== "SETTLE" && state.phase !== "CLOSED" && (
-                <span> ({remaining}s)</span>
+                <span> {t("batchAuction.secondsRemaining", "({{seconds}}s)", { seconds: remaining })}</span>
               )}
             </p>
 
@@ -117,7 +117,11 @@ export default function BatchAuctionModal({
                 <h3>{t("batchAuction.history", "Recent clearing prices")}</h3>
                 <ul>
                   {history.map((h) => (
-                    <li key={h.roundId}>{h.clearingPriceStroops} stroops</li>
+                    <li key={h.roundId}>
+                      {t("batchAuction.clearingPriceStroops", "{{amount}} stroops", {
+                        amount: h.clearingPriceStroops,
+                      })}
+                    </li>
                   ))}
                 </ul>
               </div>

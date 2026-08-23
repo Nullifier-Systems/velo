@@ -230,6 +230,15 @@
     "reasonPlaceholder": "Mínimo 10 caracteres…",
     "broadcasting": "Transmitiendo…"
   },
+  "batchAuction": {
+    "title": "Subasta por lotes",
+    "phase": "Fase",
+    "secondsRemaining": "({{seconds}}s)",
+    "submitted": "Tu orden está cifrada y comprometida en esta ronda.",
+    "notSubmitted": "Aún no se ha enviado ninguna orden para esta ronda.",
+    "history": "Precios de cierre recientes",
+    "clearingPriceStroops": "{{amount}} stroops"
+  },
   "zkSettle": {
     "modalTitle": "Liquidación Zero-Knowledge",
     "nullifierSpent": "Nullifier ya utilizado",

@@ -230,6 +230,15 @@
     "reasonPlaceholder": "Minimum 10 characters…",
     "broadcasting": "Broadcasting…"
   },
+  "batchAuction": {
+    "title": "Batch Auction",
+    "phase": "Phase",
+    "secondsRemaining": "({{seconds}}s)",
+    "submitted": "Your order is encrypted and committed to this round.",
+    "notSubmitted": "No order submitted for this round yet.",
+    "history": "Recent clearing prices",
+    "clearingPriceStroops": "{{amount}} stroops"
+  },
   "zkSettle": {
     "modalTitle": "Zero-Knowledge Settlement",
     "nullifierSpent": "Nullifier already spent",
