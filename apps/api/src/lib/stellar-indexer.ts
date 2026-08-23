@@ -1,4 +1,4 @@
-import type { Server } from "@stellar/stellar-sdk/rpc";
+import { Server } from "@stellar/stellar-sdk/rpc";
 import type { FastifyBaseLogger } from "fastify";
 import { decodeEscrowEvent, type IndexedEscrowEvent } from "./escrow-events.js";
 import { escrowDeltaFeed } from "./escrow-deltas.js";
@@ -123,7 +123,7 @@ export class StellarEscrowIndexer {
     } else if (this.options.startLedger !== undefined) {
       startLedger = this.options.startLedger;
     } else {
-      const initial = await this.rpcFailover 
+      const initial = this.rpcFailover 
         ? await this.rpcFailover.executeWithFailover(
             (server) => server.getLatestLedger(),
             "getLatestLedger",
@@ -148,7 +148,7 @@ export class StellarEscrowIndexer {
     // Get expected parent hash if reorg resilience is enabled
     let expectedParentHash: string | undefined;
     if (this.blockDAG) {
-      expectedParentHash = await this.blockDAG.getExpectedParentHash(startLedger);
+      expectedParentHash = await this.blockDAG.getExpectedParentHash(startLedger) ?? undefined;
     }
 
     this.trace("get_events_request_started");
@@ -182,22 +182,22 @@ export class StellarEscrowIndexer {
           });
 
       const ledger = ledgerHeaderResponse.ledgers[0];
-      if (ledger && ledger.prevHash !== expectedParentHash) {
+      if (ledger && ledger.previousLedgerHash !== expectedParentHash) {
         this.logger.warn(
           {
             ledger: throughLedger,
             expectedParentHash,
-            actualParentHash: ledger.prevHash,
+            actualParentHash: ledger.previousLedgerHash,
           },
           "Parent hash mismatch detected - triggering reorg handling",
         );
-        await this.handleReorg(throughLedger, expectedParentHash, ledger.prevHash);
+        await this.handleReorg(throughLedger, expectedParentHash, ledger.previousLedgerHash);
         return 0;
       }
 
       // Add block header to DAG
       if (ledger) {
-        await this.blockDAG.addBlockHeader(throughLedger, ledgerHash, ledger.prevHash);
+        await this.blockDAG.addBlockHeader(throughLedger, ledgerHash, ledger.previousLedgerHash);
       }
     }
 

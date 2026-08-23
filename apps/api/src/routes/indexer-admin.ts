@@ -5,6 +5,13 @@ import { ReorgHandler } from "../lib/indexer/reorg-handler.js";
 import { SnapshotEngine } from "../lib/indexer/snapshot-engine.js";
 import { RpcFailover } from "../lib/indexer/rpc-failover.js";
 import { Server } from "@stellar/stellar-sdk/rpc";
+import type { Pool } from "pg";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    pg: Pool;
+  }
+}
 
 function safeCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -86,7 +93,6 @@ export async function indexerAdminRoutes(fastify: FastifyInstance) {
           detected: true,
           fork_ledger: targetLedger,
           rollback_depth: rollbackDepth,
-          reason,
         });
 
         // Delete block headers after target
@@ -300,7 +306,7 @@ export async function indexerAdminRoutes(fastify: FastifyInstance) {
           currentRpcUrl: rpcFailover.getCurrentRpcUrl(),
         });
       } catch (error) {
-        fastify.log.error({ err: error, rpcUrl }, "Failed to switch RPC node");
+        fastify.log.error({ err: error }, "Failed to switch RPC node");
         return reply.status(500).send({
           error: "Failed to switch RPC node",
           code: "RPC_SWITCH_FAILED",

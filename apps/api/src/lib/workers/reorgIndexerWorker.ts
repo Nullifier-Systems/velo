@@ -1,4 +1,4 @@
-import type { Server } from "@stellar/stellar-sdk/rpc";
+import { Server } from "@stellar/stellar-sdk/rpc";
 import type { Pool } from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { REORG_RESILIENT_INDEXER } from "@velo/shared";
@@ -140,7 +140,7 @@ export class ReorgIndexerWorker {
       return;
     }
 
-    const actualParentHash = ledger.prevHash;
+    const actualParentHash = ledger.previousLedgerHash;
     const blockHash = ledger.hash;
     const ledgerSequence = ledger.sequence;
 

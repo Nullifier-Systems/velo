@@ -48,7 +48,7 @@ describe("indexerAdminRoutes", () => {
         BlockDAG: vi.fn().mockImplementation(() => ({
           getLatestBlockHeader: vi.fn().mockResolvedValue(null),
           getBlockHeadersInRange: vi.fn().mockResolvedValue([]),
-          deleteBlockHeadersAfter: vi.fn().mockResolvedValue(),
+          deleteBlockHeadersAfter: vi.fn().mockResolvedValue(undefined),
         })),
       }));
 
@@ -56,11 +56,11 @@ describe("indexerAdminRoutes", () => {
         ReorgHandler: vi.fn().mockImplementation(() => ({
           getRecentReorgEvents: vi.fn().mockResolvedValue([]),
           executeRollback: vi.fn().mockResolvedValue({
-            id: "test-reorg",
+            detected: true,
             fork_ledger: 12345,
             rollback_depth: 1,
           }),
-          markReorgResolved: vi.fn().mockResolvedValue(),
+          markReorgResolved: vi.fn().mockResolvedValue(undefined),
         })),
       }));
 
@@ -68,7 +68,7 @@ describe("indexerAdminRoutes", () => {
         SnapshotEngine: vi.fn().mockImplementation(() => ({
           getAllSnapshots: vi.fn().mockResolvedValue([]),
           getLatestSnapshot: vi.fn().mockResolvedValue(null),
-          restoreFromSnapshot: vi.fn().mockResolvedValue(),
+          restoreFromSnapshot: vi.fn().mockResolvedValue(undefined),
         })),
       }));
 

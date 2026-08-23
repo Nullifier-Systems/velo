@@ -42,7 +42,7 @@ export class ReorgHandler {
         [ledgerSequence, tableName, JSON.stringify(previousRowData)],
       );
       
-      this.logger.debug(
+      this.logger.info(
         { ledgerSequence, tableName },
         "Undo log recorded",
       );
@@ -184,7 +184,7 @@ export class ReorgHandler {
       return {
         id: reorgEventId,
         detected_at: new Date().toISOString(),
-        fork_ledger: reorgDetection.fork_ledger ?? targetLedger,
+        fork_ledger: reorgDetection.fork_ledger || targetLedger,
         rollback_depth: rollbackDepth,
         reason: "Parent hash mismatch detected",
       };
@@ -255,7 +255,7 @@ export class ReorgHandler {
       [...values, ...pkValues],
     );
 
-    this.logger.debug(
+    this.logger.info(
       { tableName: table_name, ledgerSequence: undoLog.ledger_sequence },
       "Applied undo log",
     );
