@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface BlockHeader {
@@ -25,6 +26,7 @@ export function LedgerDagViewer({
   refreshInterval = 5000,
   height = 400,
 }: LedgerDagViewerProps) {
+  const { t } = useTranslation();
   const [blockHeaders, setBlockHeaders] = useState<BlockHeader[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +82,9 @@ export function LedgerDagViewer({
   if (loading && blockHeaders.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Ledger DAG Visualization</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('indexer.dagVisualization')}</h3>
         <div className="flex items-center justify-center" style={{ height }}>
-          <div className="text-gray-500">Loading ledger headers...</div>
+          <div className="text-gray-500">{t('indexer.loadingLedgerHeaders')}</div>
         </div>
       </div>
     );
@@ -92,12 +94,12 @@ export function LedgerDagViewer({
     return (
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Ledger DAG Visualization</h3>
+          <h3 className="text-lg font-semibold">{t('indexer.dagVisualization')}</h3>
           <button
             onClick={handleRefresh}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-            Retry
+            {t('indexer.retry')}
           </button>
         </div>
         <div className="flex items-center justify-center" style={{ height }}>
@@ -110,9 +112,9 @@ export function LedgerDagViewer({
   if (blockHeaders.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Ledger DAG Visualization</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('indexer.dagVisualization')}</h3>
         <div className="flex items-center justify-center" style={{ height }}>
-          <div className="text-gray-500">No block headers available</div>
+          <div className="text-gray-500">{t('indexer.noBlockHeadersAvailable')}</div>
         </div>
       </div>
     );
@@ -124,13 +126,13 @@ export function LedgerDagViewer({
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">Ledger DAG Visualization</h3>
+        <h3 className="text-lg font-semibold">{t('indexer.dagVisualization')}</h3>
         <button
           onClick={handleRefresh}
           className="text-blue-600 hover:text-blue-800 text-sm"
           disabled={loading}
         >
-          {loading ? "Refreshing..." : "Refresh"}
+          {loading ? t('indexer.refreshing') : t('indexer.refresh')}
         </button>
       </div>
 
@@ -203,22 +205,22 @@ export function LedgerDagViewer({
       {/* Selected block details */}
       {selectedLedger && (
         <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-          <h4 className="font-medium mb-2">Block Details</h4>
+          <h4 className="font-medium mb-2">{t('indexer.blockDetails')}</h4>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
-              <span className="text-gray-600">Ledger Sequence:</span>
+              <span className="text-gray-600">{t('indexer.ledgerSequence')}</span>
               <span className="ml-2 font-mono">{selectedLedger.ledger_sequence}</span>
             </div>
             <div>
-              <span className="text-gray-600">Created:</span>
+              <span className="text-gray-600">{t('indexer.created')}</span>
               <span className="ml-2">{new Date(selectedLedger.created_at).toLocaleString()}</span>
             </div>
             <div className="col-span-2">
-              <span className="text-gray-600">Block Hash:</span>
+              <span className="text-gray-600">{t('indexer.blockHash')}</span>
               <span className="ml-2 font-mono text-xs break-all">{selectedLedger.block_hash}</span>
             </div>
             <div className="col-span-2">
-              <span className="text-gray-600">Parent Hash:</span>
+              <span className="text-gray-600">{t('indexer.parentHash')}</span>
               <span className="ml-2 font-mono text-xs break-all">{selectedLedger.parent_hash}</span>
             </div>
           </div>
@@ -226,7 +228,7 @@ export function LedgerDagViewer({
             onClick={() => setSelectedLedger(null)}
             className="mt-2 text-sm text-blue-600 hover:text-blue-800"
           >
-            Close details
+            {t('indexer.closeDetails')}
           </button>
         </div>
       )}
@@ -235,15 +237,15 @@ export function LedgerDagViewer({
       <div className="mt-4 flex items-center gap-4 text-sm text-gray-600">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded-full bg-blue-500" />
-          <span>Selected</span>
+          <span>{t('indexer.selected')}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-gray-400" />
-          <span>Normal</span>
+          <span>{t('indexer.normal')}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 h-0.5 bg-gray-400" />
-          <span>Parent-child link</span>
+          <span>{t('indexer.parentChildLink')}</span>
         </div>
       </div>
 
@@ -251,7 +253,7 @@ export function LedgerDagViewer({
       <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
         <div className="text-center">
           <div className="font-semibold">{sortedHeaders.length}</div>
-          <div className="text-gray-600">Blocks</div>
+          <div className="text-gray-600">{t('indexer.blocks')}</div>
         </div>
         <div className="text-center">
           <div className="font-semibold">
@@ -259,11 +261,11 @@ export function LedgerDagViewer({
               ? sortedHeaders[sortedHeaders.length - 1].ledger_sequence - sortedHeaders[0].ledger_sequence + 1
               : 0}
           </div>
-          <div className="text-gray-600">Ledger Range</div>
+          <div className="text-gray-600">{t('indexer.ledgerRange')}</div>
         </div>
         <div className="text-center">
           <div className="font-semibold">{limit}</div>
-          <div className="text-gray-600">Display Limit</div>
+          <div className="text-gray-600">{t('indexer.displayLimit')}</div>
         </div>
       </div>
     </div>

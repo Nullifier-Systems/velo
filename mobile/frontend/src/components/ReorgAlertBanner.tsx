@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface ReorgEvent {
@@ -27,6 +28,7 @@ export function ReorgAlertBanner({
   onReorgDetected,
   onDismiss,
 }: ReorgAlertBannerProps) {
+  const { t } = useTranslation();
   const [recentReorgs, setRecentReorgs] = useState<ReorgEvent[]>([]);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,25 +102,25 @@ export function ReorgAlertBanner({
         </div>
         <div className="ml-3 flex-1">
           <h3 className="text-sm font-medium text-red-800">
-            Blockchain Reorganization Detected
+            {t('indexer.reorgDetected')}
           </h3>
           <div className="mt-2 text-sm text-red-700">
             <p>
-              <strong>Fork Ledger:</strong> {latestReorg.fork_ledger}
+              <strong>{t('indexer.forkLedger')}</strong> {latestReorg.fork_ledger}
             </p>
             <p>
-              <strong>Rollback Depth:</strong> {latestReorg.rollback_depth} ledgers
+              <strong>{t('indexer.rollbackDepthLabel')}</strong> {latestReorg.rollback_depth} {t('indexer.ledgers')}
             </p>
             <p className="text-xs text-red-600 mt-1">
               {latestReorg.reason}
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Detected at {new Date(latestReorg.detected_at).toLocaleString()}
+              {t('indexer.detectedAt')} {new Date(latestReorg.detected_at).toLocaleString()}
             </p>
           </div>
           {recentReorgs.length > 1 && (
             <p className="text-xs text-gray-500 mt-2">
-              +{recentReorgs.length - 1} additional recent reorg event(s)
+              +{recentReorgs.length - 1} {t('indexer.additionalReorgEvents')}
             </p>
           )}
         </div>
@@ -126,7 +128,7 @@ export function ReorgAlertBanner({
           <button
             onClick={handleDismiss}
             className="text-red-400 hover:text-red-600"
-            aria-label="Dismiss"
+            aria-label={t('indexer.dismiss')}
           >
             <svg
               className="h-5 w-5"

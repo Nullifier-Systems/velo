@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface IndexerStatus {
@@ -36,6 +37,7 @@ interface IndexerStatus {
 }
 
 export function IndexerMonitorDashboard() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<IndexerStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,39 +91,39 @@ export function IndexerMonitorDashboard() {
   };
 
   if (loading) {
-    return <div className="p-4">Loading indexer status...</div>;
+    return <div className="p-4">{t('indexer.loadingStatus')}</div>;
   }
 
   if (error) {
-    return <div className="p-4 text-red-500">Error: {error}</div>;
+    return <div className="p-4 text-red-500">{t('indexer.error')} {error}</div>;
   }
 
   if (!status) {
-    return <div className="p-4">No status available</div>;
+    return <div className="p-4">{t('indexer.noStatusAvailable')}</div>;
   }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Indexer Monitor Dashboard</h1>
+      <h1 className="text-2xl font-bold mb-6">{t('indexer.monitorDashboard')}</h1>
 
       {/* Current Status */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Current Status</h2>
+        <h2 className="text-lg font-semibold mb-4">{t('indexer.currentStatus')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <p className="text-sm text-gray-600">Latest Ledger</p>
+            <p className="text-sm text-gray-600">{t('indexer.latestLedger')}</p>
             <p className="text-2xl font-bold">
               {status.latestBlockHeader?.ledger_sequence ?? "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Block Hash</p>
+            <p className="text-sm text-gray-600">{t('indexer.blockHash')}</p>
             <p className="text-sm font-mono truncate">
               {status.latestBlockHeader?.block_hash ?? "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Current RPC</p>
+            <p className="text-sm text-gray-600">{t('indexer.currentRpc')}</p>
             <p className="text-sm font-mono truncate">
               {status.currentRpcUrl}
             </p>
@@ -148,7 +150,7 @@ export function IndexerMonitorDashboard() {
             </div>
             <div className="ml-3">
               <p className="text-sm text-yellow-700">
-                <strong>Recent Reorg Detected:</strong> {status.recentReorgs.length} reorg(s) in the last period
+                <strong>{t('indexer.recentReorgDetected')}</strong> {status.recentReorgs.length} {t('indexer.reorgsInLastPeriod')}
               </p>
             </div>
           </div>
@@ -157,7 +159,7 @@ export function IndexerMonitorDashboard() {
 
       {/* RPC Health */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">RPC Node Health</h2>
+        <h2 className="text-lg font-semibold mb-4">{t('indexer.rpcNodeHealth')}</h2>
         <div className="space-y-3">
           {status.rpcHealth.map((node) => (
             <div
@@ -169,8 +171,8 @@ export function IndexerMonitorDashboard() {
               <div className="flex-1">
                 <p className="text-sm font-mono truncate">{node.rpc_url}</p>
                 <p className="text-xs text-gray-600">
-                  {node.is_healthy ? "Healthy" : "Unhealthy"} •{" "}
-                  {node.consecutive_failures} consecutive failures
+                  {node.is_healthy ? t('indexer.healthy') : t('indexer.unhealthy')} •{" "}
+                  {node.consecutive_failures} {t('indexer.consecutiveFailures')}
                 </p>
                 {node.last_failure_reason && (
                   <p className="text-xs text-red-600">{node.last_failure_reason}</p>
@@ -188,23 +190,23 @@ export function IndexerMonitorDashboard() {
 
       {/* Recent Reorgs */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Recent Reorg Events</h2>
+        <h2 className="text-lg font-semibold mb-4">{t('indexer.recentReorgEvents')}</h2>
         {status.recentReorgs.length === 0 ? (
-          <p className="text-gray-500">No recent reorgs</p>
+          <p className="text-gray-500">{t('indexer.noRecentReorgs')}</p>
         ) : (
           <div className="space-y-3">
             {status.recentReorgs.map((reorg) => (
               <div key={reorg.id} className="border-l-4 border-yellow-400 pl-4">
-                <p className="font-medium">Ledger {reorg.fork_ledger}</p>
+                <p className="font-medium">{t('indexer.ledger')} {reorg.fork_ledger}</p>
                 <p className="text-sm text-gray-600">
-                  Rollback depth: {reorg.rollback_depth} ledgers
+                  {t('indexer.rollbackDepth')} {reorg.rollback_depth} {t('indexer.ledgers')}
                 </p>
                 <p className="text-sm text-gray-600">{reorg.reason}</p>
                 <p className="text-xs text-gray-500">
                   {new Date(reorg.detected_at).toLocaleString()}
                   {reorg.resolved_at && (
                     <span className="ml-2 text-green-600">
-                      • Resolved {new Date(reorg.resolved_at).toLocaleString()}
+                      {t('indexer.resolved')} {new Date(reorg.resolved_at).toLocaleString()}
                     </span>
                   )}
                 </p>
@@ -216,25 +218,25 @@ export function IndexerMonitorDashboard() {
 
       {/* Manual Controls */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">Manual Controls</h2>
+        <h2 className="text-lg font-semibold mb-4">{t('indexer.manualControls')}</h2>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Manual Rollback
+              {t('indexer.manualRollback')}
             </label>
             <div className="flex gap-2">
               <input
                 type="number"
                 value={manualRollbackLedger}
                 onChange={(e) => setManualRollbackLedger(e.target.value)}
-                placeholder="Target ledger sequence"
+                placeholder={t('indexer.targetLedgerSequence')}
                 className="flex-1 border rounded px-3 py-2"
               />
               <button
                 onClick={handleManualRollback}
                 className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
               >
-                Rollback
+                {t('indexer.rollback')}
               </button>
             </div>
           </div>
@@ -243,7 +245,7 @@ export function IndexerMonitorDashboard() {
               onClick={handleCreateSnapshot}
               className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
             >
-              Create Snapshot
+              {t('indexer.createSnapshot')}
             </button>
           </div>
         </div>
