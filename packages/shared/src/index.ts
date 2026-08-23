@@ -244,3 +244,20 @@ export const STATE_CHANNELS = {
   /** Minimum signatures required to settle (2-of-2 cooperative). */
   SETTLEMENT_THRESHOLD: 2,
 } as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Range-Proof Attestation & Credential Issuance (#XXX)           */
+/* ------------------------------------------------------------------ */
+
+export type {
+  PedersenCommitment,
+  ZkRangeProofRequest,
+  ZkRangeProof,
+  ZkAttestation,
+  ZkVerificationResponse,
+  WasmRangeProofRequest,
+  WasmRangeProofResponse,
+  CredentialWalletState,
+} from "./types/zk-range.js";
+
+export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";
