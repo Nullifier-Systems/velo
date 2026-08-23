@@ -214,7 +214,11 @@ export const REORG_RESILIENT_INDEXER = {
   DAG_CONTINUITY_CHECK_MS: 1000,
   /** Maximum consecutive RPC failures before marking node as unhealthy */
   MAX_CONSECUTIVE_RPC_FAILURES: 3,
+} as const;
+
+/* ------------------------------------------------------------------ */
 /*  Bidirectional State Channels & Off-Chain Micropayment Streaming   */
+/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 
 /** Status of a state channel lifecycle. */
