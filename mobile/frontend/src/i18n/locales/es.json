@@ -259,5 +259,30 @@
     "anchored": "Clave revocada y nueva clave activada en la cadena",
     "failed": "Error de rotación: las firmas no coinciden",
     "retry": "Reintentar la propuesta"
+  },
+  "stateChannels": {
+    "title": "Panel de micropagos",
+    "connecting": "Conectando...",
+    "connected": "Conectado",
+    "disconnected": "Desconectado",
+    "dismiss": "Descartar",
+    "throughput": "Rendimiento",
+    "txSec": "tx/s",
+    "targetTps": "Objetivo: 500 tx/s",
+    "totalTransactions": "Transacciones totales",
+    "offChainCommits": "compromisos fuera de la cadena",
+    "sequenceNumber": "Número de secuencia",
+    "vectorClockPosition": "posición del reloj vectorial",
+    "channelCapacity": "Capacidad del canal",
+    "capacityUsed": "% utilizado",
+    "currentBalance": "Saldo actual",
+    "yourBalance": "Tu saldo",
+    "usdc": "USDC",
+    "counterpartyBalance": "Saldo de la contraparte",
+    "noBalanceData": "Sin datos de saldo aún",
+    "settlement": "Liquidación",
+    "settlementInfo": "Cuando esté listo, liquida este canal en la cadena con una sola transacción. Ambas partes deben haber firmado el estado final.",
+    "settling": "Liquidando...",
+    "settleButton": "Cerrar y liquidar canal"
   }
 }
