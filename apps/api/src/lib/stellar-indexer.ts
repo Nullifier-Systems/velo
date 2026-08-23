@@ -1,4 +1,4 @@
-import { Server } from "@stellar/stellar-sdk/rpc";
+import { Server, xdr } from "@stellar/stellar-sdk/rpc";
 import type { FastifyBaseLogger } from "fastify";
 import { decodeEscrowEvent, type IndexedEscrowEvent } from "./escrow-events.js";
 import { escrowDeltaFeed } from "./escrow-deltas.js";
@@ -182,22 +182,25 @@ export class StellarEscrowIndexer {
           });
 
       const ledger = ledgerHeaderResponse.ledgers[0];
-      if (ledger && ledger.previousLedgerHash !== expectedParentHash) {
+      // Extract previous hash from ledger header XDR
+      const previousHash = ledger.headerXdr.hash().toString("hex");
+      
+      if (ledger && previousHash !== expectedParentHash) {
         this.logger.warn(
           {
             ledger: throughLedger,
             expectedParentHash,
-            actualParentHash: ledger.previousLedgerHash,
+            actualParentHash: previousHash,
           },
           "Parent hash mismatch detected - triggering reorg handling",
         );
-        await this.handleReorg(throughLedger, expectedParentHash, ledger.previousLedgerHash);
+        await this.handleReorg(throughLedger, expectedParentHash, previousHash);
         return 0;
       }
 
       // Add block header to DAG
       if (ledger) {
-        await this.blockDAG.addBlockHeader(throughLedger, ledgerHash, ledger.previousLedgerHash);
+        await this.blockDAG.addBlockHeader(throughLedger, ledgerHash, previousHash);
       }
     }
 

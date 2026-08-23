@@ -184,7 +184,7 @@ export class ReorgHandler {
       return {
         id: reorgEventId,
         detected_at: new Date().toISOString(),
-        fork_ledger: reorgDetection.fork_ledger || targetLedger,
+        fork_ledger: reorgDetection.fork_ledger ?? targetLedger,
         rollback_depth: rollbackDepth,
         reason: "Parent hash mismatch detected",
       };
