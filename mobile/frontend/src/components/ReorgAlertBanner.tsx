@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../lib/api";
+import { api, IndexerReorgsResponse } from "../lib/api";
 
 interface ReorgEvent {
   id: string;
@@ -46,7 +46,8 @@ export function ReorgAlertBanner({
     
     try {
       setLoading(true);
-      const response = await api.get("/indexer/reorgs?limit=5");
+      const adminKey = process.env.VITE_ADMIN_API_KEY;
+      const response = await api.get<IndexerReorgsResponse>("/indexer/reorgs?limit=5", adminKey);
       const reorgs = response.data.reorgs || [];
       
       // Check for new unresolved reorgs

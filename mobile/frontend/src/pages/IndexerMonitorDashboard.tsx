@@ -1,40 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../lib/api";
-
-interface IndexerStatus {
-  latestBlockHeader: {
-    ledger_sequence: number;
-    block_hash: string;
-    parent_hash: string;
-    created_at: string;
-  } | null;
-  recentReorgs: Array<{
-    id: string;
-    detected_at: string;
-    fork_ledger: number;
-    rollback_depth: number;
-    reason: string;
-    resolved_at?: string;
-  }>;
-  rpcHealth: Array<{
-    id: string;
-    rpc_url: string;
-    is_healthy: boolean;
-    last_check: string;
-    consecutive_failures: number;
-    last_failure_reason?: string;
-  }>;
-  snapshots: {
-    count: number;
-    latest: {
-      ledger_sequence: number;
-      block_hash: string;
-      created_at: string;
-    } | null;
-  };
-  currentRpcUrl: string;
-}
+import { api, IndexerStatus } from "../lib/api";
 
 export function IndexerMonitorDashboard() {
   const { t } = useTranslation();
@@ -51,7 +17,8 @@ export function IndexerMonitorDashboard() {
 
   const fetchStatus = async () => {
     try {
-      const response = await api.get("/indexer/status");
+      const adminKey = process.env.VITE_ADMIN_API_KEY;
+      const response = await api.get<IndexerStatus>("/indexer/status", adminKey);
       setStatus(response.data);
       setError(null);
     } catch (err) {
@@ -66,10 +33,11 @@ export function IndexerMonitorDashboard() {
     if (!manualRollbackLedger) return;
 
     try {
+      const adminKey = process.env.VITE_ADMIN_API_KEY;
       await api.post("/indexer/rollback", {
         targetLedger: parseInt(manualRollbackLedger),
         reason: "Manual rollback from dashboard",
-      });
+      }, adminKey);
       alert("Rollback initiated successfully");
       setManualRollbackLedger("");
       fetchStatus();
@@ -81,7 +49,8 @@ export function IndexerMonitorDashboard() {
 
   const handleCreateSnapshot = async () => {
     try {
-      await api.post("/indexer/snapshots");
+      const adminKey = process.env.VITE_ADMIN_API_KEY;
+      await api.post("/indexer/snapshots", {}, adminKey);
       alert("Snapshot created successfully");
       fetchStatus();
     } catch (err) {

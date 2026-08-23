@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../lib/api";
+import { api, IndexerStatus, IndexerDagResponse } from "../lib/api";
 
 interface BlockHeader {
   ledger_sequence: number;
@@ -43,7 +43,8 @@ export function LedgerDagViewer({
   const fetchBlockHeaders = async () => {
     try {
       setLoading(true);
-      const latestHeader = await api.get("/indexer/status");
+      const adminKey = process.env.VITE_ADMIN_API_KEY;
+      const latestHeader = await api.get<IndexerStatus>("/indexer/status", adminKey);
       const latestSequence = latestHeader.data.latestBlockHeader?.ledger_sequence || 0;
       
       if (latestSequence === 0) {
@@ -53,7 +54,7 @@ export function LedgerDagViewer({
       }
 
       const fromLedger = Math.max(0, latestSequence - limit + 1);
-      const response = await api.get(`/indexer/dag?fromLedger=${fromLedger}&toLedger=${latestSequence}`);
+      const response = await api.get<IndexerDagResponse>(`/indexer/dag?fromLedger=${fromLedger}&toLedger=${latestSequence}`, adminKey);
       
       setBlockHeaders(response.data.headers || []);
       setError(null);
