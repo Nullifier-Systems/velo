@@ -53,7 +53,11 @@ export interface CashRequest {
 /* ------------------------------------------------------------------ */
 
 /** Formal invariant verdict emitted by the checker every closed ledger. */
-export type InvariantCheckStatus = "HEALTHY" | "WARNING" | "VIOLATED" | "HALTED";
+export type InvariantCheckStatus =
+  | "HEALTHY"
+  | "WARNING"
+  | "VIOLATED"
+  | "HALTED";
 
 /** What the automated arbitration engine decided to do with a violation. */
 export type CircuitBreakerAction =
@@ -77,7 +81,9 @@ export const CIRCUIT_BREAKER = {
   /** SLA: emergency on-chain pause must be submitted within 1000ms of a violation. */
   PAUSE_TRIGGER_DEADLINE_MS: 1_000,
   /** Soroban RPC ledger-stream endpoint (testnet by default). */
-  LEDGER_STREAM_URL: process.env.SOROBAN_LEDGER_STREAM_URL ?? "wss://soroban-testnet.stellar.org",
+  LEDGER_STREAM_URL:
+    process.env.SOROBAN_LEDGER_STREAM_URL ??
+    "wss://soroban-testnet.stellar.org",
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
   DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
@@ -208,4 +214,97 @@ export const REORG_RESILIENT_INDEXER = {
   DAG_CONTINUITY_CHECK_MS: 1000,
   /** Maximum consecutive RPC failures before marking node as unhealthy */
   MAX_CONSECUTIVE_RPC_FAILURES: 3,
+/*  Bidirectional State Channels & Off-Chain Micropayment Streaming   */
+/* ------------------------------------------------------------------ */
+
+/** Status of a state channel lifecycle. */
+export type ChannelStatus = "OPEN" | "CLOSING" | "CLOSED" | "DISPUTED";
+
+/** Metadata for a bidirectional state channel between two parties. */
+export interface StateChannel {
+  channelId: string;
+  partyA: string;
+  partyB: string;
+  totalDepositStroops: bigint;
+  nonce: bigint;
+  status: ChannelStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Off-chain state commit with vector clock ordering and signature. */
+export interface StateChannelCommit {
+  commitId: string;
+  channelId: string;
+  sequenceNumber: bigint;
+  signer: string;
+  stateRoot: string;
+  signature: string;
+  partyABalance: bigint;
+  partyBBalance: bigint;
+  createdAt: string;
+}
+
+/** On-chain settlement submission tracking. */
+export interface StateChannelSettlement {
+  settlementId: string;
+  channelId: string;
+  finalSequenceNumber: bigint;
+  initiator: string;
+  partyAFinalBalance: bigint;
+  partyBFinalBalance: bigint;
+  merkleRoot: string;
+  submittedTxnHash?: string | null;
+  status: string;
+  settledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Dispute evidence and challenge record for penalty enforcement. */
+export interface StateChannelAuditLog {
+  auditId: string;
+  channelId: string;
+  eventType: string;
+  challenger: string;
+  challengedSequence: bigint;
+  evidenceRoot?: string | null;
+  penaltyAmount?: bigint | null;
+  status: string;
+  createdAt: string;
+  resolvedAt?: string | null;
+}
+
+/** WebSocket message types for state channel state updates. */
+export type StateChannelMessageType =
+  | "sign_request"
+  | "sign_response"
+  | "settlement_ready"
+  | "settlement_confirmed"
+  | "dispute_challenge";
+
+/** Signed off-chain state update sent over WebSocket. */
+export interface StateChannelUpdate {
+  messageType: StateChannelMessageType;
+  channelId: string;
+  sequenceNumber: bigint;
+  partyABalance: bigint;
+  partyBBalance: bigint;
+  signer: string;
+  signature: string;
+  timestamp: number;
+}
+
+/** State channel configuration constants. */
+export const STATE_CHANNELS = {
+  /** Maximum number of off-chain transactions per second per channel. */
+  MAX_TPS: 500,
+  /** Redis stream for state channel updates. */
+  UPDATE_STREAM: "velo:state-channels:updates",
+  /** Consumer group for state channel workers. */
+  WORKER_GROUP: "state-channels-group",
+  /** Penalty slashing window (ms) for uncooperative close. */
+  DISPUTE_WINDOW_MS: 86400000, // 24 hours
+  /** Minimum signatures required to settle (2-of-2 cooperative). */
+  SETTLEMENT_THRESHOLD: 2,
 } as const;
