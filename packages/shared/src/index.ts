@@ -150,6 +150,11 @@ export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
 export const SESSION_ROTATION_GROUP = "rotation-group";
 
 /* ------------------------------------------------------------------ */
+/*  Enterprise Multi-Tenant RBAC/ABAC & KMS (#401)                     */
+/* ------------------------------------------------------------------ */
+export * from "./types/enterprise.js";
+
+/* ------------------------------------------------------------------ */
 /*  Bidirectional State Channels & Off-Chain Micropayment Streaming   */
 /* ------------------------------------------------------------------ */
 
