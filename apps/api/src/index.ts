@@ -6,6 +6,7 @@ import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
+import { startBatchAuctionWorker } from "./lib/workers/batchAuctionWorker.js";
 import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
 import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
 import { createClient } from "redis";
@@ -24,6 +25,7 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
+    startBatchAuctionWorker();
 
     // (#380) Watch locked trades for approaching refund timeouts: warn 100
     // ledgers before expiry, auto-refund once the timeout is breached, and

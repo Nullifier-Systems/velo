@@ -88,6 +88,20 @@ export const CIRCUIT_BREAKER = {
   DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
 
+export * from "./types/batch-auctions.js";
+
+/**
+ * Timing + phase constants for the commit-reveal batch auction engine (#403).
+ */
+export const BATCH_AUCTION = {
+  /** Length of the COMMIT phase, in ms. */
+  COMMIT_PHASE_MS: 10_000,
+  /** Length of the REVEAL phase, in ms. */
+  REVEAL_PHASE_MS: 10_000,
+  /** Committed orders that never reveal by the reveal deadline forfeit their deposit. */
+  FORFEIT_ON_MISSED_REVEAL: true,
+} as const;
+
 /* ------------------------------------------------------------------ */
 /*  ZK Nullifier Escrow Settlement (#371)                              */
 /* ------------------------------------------------------------------ */
