@@ -7,6 +7,7 @@ members = [
     "soroban-lint",
     "invariant-verifier",
     "session-account",
+    "zk-credential",
 ]
 
 [workspace.dependencies]

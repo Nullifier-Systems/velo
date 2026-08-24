@@ -8,10 +8,12 @@ import {
   releaseCashRequest,
   refundCashRequest,
   fetchEscrowPauseState,
-  formatStroops,
+  formatStroopsPrecise,
   formatRefundCountdown,
   shortAddress,
   type CashRequestStatus,
+  isGatewayTimeoutError,
+  type GatewayTimeoutError,
 } from '../lib/api';
 import './ClaimQR.css';
 
@@ -26,6 +28,20 @@ const WAIT_CHECK_BACK = 30_000;   // "check back later"
 const CheckIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6, verticalAlign: "text-bottom"}}><polyline points="20 6 9 17 4 12"></polyline></svg>
 );
+
+/**
+ * Issue #381: the API answers 422 FEE_ARITHMETIC_OVERFLOW when a tranche
+ * fee computation would overflow or lose precision. Detect that code in
+ * any error surfaced from release/refund so the claim page can show the
+ * dedicated fee-error banner instead of a generic failure message.
+ */
+function isFeeArithmeticError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message.includes("FEE_ARITHMETIC_OVERFLOW") ||
+    err.message.toLowerCase().includes("fee calculation")
+  );
+}
 
 const LockIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 8}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
@@ -78,8 +94,11 @@ export default function ClaimQR() {
 
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [feeError, setFeeError] = useState(false);
+  const [timeoutError, setTimeoutError] = useState<GatewayTimeoutError | null>(null);
   const [releasing, setReleasing] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  const [retryDisabled, setRetryDisabled] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [escrowPaused, setEscrowPaused] = useState(false);
   const [releaseElapsed, setReleaseElapsed] = useState(0);
@@ -129,10 +148,26 @@ export default function ClaimQR() {
         setCountdownSeconds(null);
       }
       setError(null);
+      setError(null);
+      setFeeError(false);
+      setTimeoutError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("claim.somethingWentWrong"));
+      if (isGatewayTimeoutError(err)) {
+        setTimeoutError(err);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : t("claim.somethingWentWrong"));
+        setTimeoutError(null);
+      }
     }
   }, [id, t]);
+
+  const handleRetry = useCallback(async () => {
+    setRetryDisabled(true);
+    setTimeoutError(null);
+    await load();
+    setTimeout(() => setRetryDisabled(false), 3000); // 3-second throttle
+  }, [load]);
 
   const loadPauseState = useCallback(async () => {
     try {
@@ -238,6 +273,75 @@ export default function ClaimQR() {
     );
   }
 
+  if (timeoutError) {
+    return (
+      <div className="claim-page">
+        <LanguageSwitcher />
+        {renderThemeToggle()}
+        <div className="claim-ticket claim-ticket--timeout-error">
+          <div className="claim-ticket__header">
+            <span className="claim-ticket__brand">{t("claim.brand")}</span>
+            <span className="claim-ticket__stamp claim-ticket__stamp--error" aria-label={t("claim.timeoutError")}>
+              ⚠️
+            </span>
+          </div>
+          <div className="claim-ticket__qr-window">
+            <div className="claim-ticket__timeout-message" role="alert" aria-live="polite">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: 16}}>
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <h3 style={{margin: 0, fontSize: "1.2rem", fontWeight: 600}}>{t("claim.requestTimedOut")}</h3>
+              <p style={{margin: "8px 0 0 0", color: "#666"}}>
+                {timeoutError.message || "The payment network request timed out. Please retry your operation."}
+              </p>
+              {timeoutError.elapsedMs && (
+                <p style={{margin: "4px 0 0 0", fontSize: "0.9rem", color: "#999"}}>
+                  {t("claim.requestTook")} {Math.round(timeoutError.elapsedMs / 1000)}{t("claim.seconds")}
+                </p>
+              )}
+            </div>
+            <div className="claim-ticket__timeout-actions">
+              <button
+                className="claim-ticket__retry-button"
+                onClick={handleRetry}
+                disabled={retryDisabled}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  backgroundColor: retryDisabled ? "#ccc" : "#007AFF",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: retryDisabled ? "not-allowed" : "pointer",
+                  marginTop: 16,
+                }}
+              >
+                {retryDisabled ? t("claim.retrying") : t("claim.retryClaim")}
+              </button>
+              <a
+                href="https://t.me/nullifiersystem"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-block",
+                  marginTop: 12,
+                  fontSize: "0.9rem",
+                  color: "#007AFF",
+                  textDecoration: "none",
+                }}
+              >
+                {t("claim.contactSupport")}
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!status) {
     return (
       <div className="claim-page" aria-busy="true" aria-live="polite">
@@ -299,6 +403,13 @@ export default function ClaimQR() {
           </div>
         )}
 
+        {feeError && (
+          <div className="claim-ticket__fee-error-banner" role="alert">
+            <strong>{t("claim.feeErrorTitle")}</strong>
+            <p>{t("claim.feeErrorBody")}</p>
+          </div>
+        )}
+
         <div className="claim-ticket__qr-window">
           {status.status === 'locked' && qrPayload ? (
             <>
@@ -329,7 +440,7 @@ export default function ClaimQR() {
                   </div>
                   {status.releasedAmount && (
                     <p className="claim-ticket__tranche-amount">
-                      {formatStroops(status.releasedAmount)} / {formatStroops(status.amountStroops)} {t("claim.trancheReleased")}
+                      {formatStroopsPrecise(status.releasedAmount)} / {formatStroopsPrecise(status.amountStroops)} {t("claim.trancheReleased")}
                     </p>
                   )}
                 </div>
@@ -362,7 +473,7 @@ export default function ClaimQR() {
           <div className="claim-ticket__row">
             <span className="claim-ticket__label">{t("common.amount")}</span>
             <span className="claim-ticket__amount">
-              {formatStroops(status.amountStroops)}
+              {formatStroopsPrecise(status.amountStroops)}
             </span>
           </div>
           <div className="claim-ticket__row">
@@ -427,6 +538,7 @@ export default function ClaimQR() {
                     await refundCashRequest(status.id);
                     await load();
                   } catch (err) {
+                    setFeeError(isFeeArithmeticError(err));
                     setError(err instanceof Error ? err.message : t("claim.refundFailed"));
                   } finally {
                     setRefunding(false);
@@ -459,6 +571,7 @@ export default function ClaimQR() {
                   await releaseCashRequest(status.id, secret);
                   await load();
                 } catch (err) {
+                  setFeeError(isFeeArithmeticError(err));
                   setError(err instanceof Error ? err.message : t("claim.releaseFailed"));
                 } finally {
                   setReleasing(false);

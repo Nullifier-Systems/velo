@@ -54,9 +54,37 @@ export function isUncertainReleaseError(error: unknown): error is ReleaseRequest
   return error instanceof ReleaseRequestError && error.kind === "uncertain";
 }
 
+export class GatewayTimeoutError extends Error {
+  constructor(
+    message: string,
+    readonly requestId: string,
+    readonly operation?: string,
+    readonly elapsedMs?: number,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = "GatewayTimeoutError";
+  }
+}
+
+export function isGatewayTimeoutError(error: unknown): error is GatewayTimeoutError {
+  return error instanceof GatewayTimeoutError;
+}
+
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
   if (!res.ok) {
+    if (res.status === 504) {
+      const body = await res.json().catch(() => ({} as { error?: { code?: string; message?: string; requestId?: string } }));
+      if (body.error?.code === "GATEWAY_TIMEOUT") {
+        throw new GatewayTimeoutError(
+          body.error.message || "The payment network request timed out. Please retry your operation.",
+          body.error.requestId || "unknown",
+          body.error.operation,
+          body.error.elapsed_ms
+        );
+      }
+    }
     throw new Error(res.status === 404 ? "not-found" : `request failed (${res.status})`);
   }
   return res.json();
@@ -193,6 +221,21 @@ export function formatStroops(stroops: string): string {
   const whole = n / 10_000_000n;
   const frac = (n % 10_000_000n).toString().padStart(7, "0").slice(0, 2);
   return `${whole}.${frac}`;
+}
+
+/**
+ * Formats a stroop amount with exact precision — up to all 7 decimals of
+ * the stroop scale, using BigInt math only so micro-fees never lose
+ * precision to float rounding or display truncation (issue #381).
+ */
+export function formatStroopsPrecise(stroops: string | bigint, decimals = 7): string {
+  const n = BigInt(stroops);
+  const negative = n < 0n;
+  const abs = negative ? -n : n;
+  const base = 10n ** BigInt(decimals);
+  const whole = abs / base;
+  const frac = (abs % base).toString().padStart(decimals, "0");
+  return `${negative ? "-" : ""}${whole}.${frac}`;
 }
 
 export interface StatusResponse {

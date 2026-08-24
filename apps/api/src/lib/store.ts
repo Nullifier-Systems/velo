@@ -268,3 +268,42 @@ export function getRecentActivity(limit = 10): RecentActivityItem[] {
         .slice(0, limit)
         .map(({ id, status, createdAt }) => ({ id, status, createdAt }));
 }
+
+export interface TimeoutIncidentLog {
+    id: string;
+    endpoint: string;
+    clientUserAgent?: string;
+    responseTimeMs: number;
+    createdAt: string;
+}
+
+const timeoutLogs: TimeoutIncidentLog[] = [];
+
+/**
+ * Log an API timeout incident for monitoring and debugging.
+ * In production, this should write to the api_timeout_incident_logs table.
+ */
+export function logTimeoutIncident(
+    endpoint: string,
+    clientUserAgent: string | undefined,
+    responseTimeMs: number
+): void {
+    const log: TimeoutIncidentLog = {
+        id: crypto.randomUUID(),
+        endpoint,
+        clientUserAgent,
+        responseTimeMs,
+        createdAt: new Date().toISOString(),
+    };
+    timeoutLogs.push(log);
+    
+    // In production, this would insert into the database:
+    // await db.query(`
+    //   INSERT INTO api_timeout_incident_logs (endpoint, client_user_agent, response_time_ms)
+    //   VALUES ($1, $2, $3)
+    // `, [endpoint, clientUserAgent, responseTimeMs]);
+}
+
+export function getTimeoutLogs(): TimeoutIncidentLog[] {
+    return Array.from(timeoutLogs);
+}

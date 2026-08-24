@@ -53,7 +53,11 @@ export interface CashRequest {
 /* ------------------------------------------------------------------ */
 
 /** Formal invariant verdict emitted by the checker every closed ledger. */
-export type InvariantCheckStatus = "HEALTHY" | "WARNING" | "VIOLATED" | "HALTED";
+export type InvariantCheckStatus =
+  | "HEALTHY"
+  | "WARNING"
+  | "VIOLATED"
+  | "HALTED";
 
 /** What the automated arbitration engine decided to do with a violation. */
 export type CircuitBreakerAction =
@@ -77,14 +81,201 @@ export const CIRCUIT_BREAKER = {
   /** SLA: emergency on-chain pause must be submitted within 1000ms of a violation. */
   PAUSE_TRIGGER_DEADLINE_MS: 1_000,
   /** Soroban RPC ledger-stream endpoint (testnet by default). */
-  LEDGER_STREAM_URL: process.env.SOROBAN_LEDGER_STREAM_URL ?? "wss://soroban-testnet.stellar.org",
+  LEDGER_STREAM_URL:
+    process.env.SOROBAN_LEDGER_STREAM_URL ??
+    "wss://soroban-testnet.stellar.org",
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
 } as const;
 
-import { z } from 'zod';
-export const SpatialClearRequestSchema = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  radiusMeters: z.number().positive().max(5000),
-  maxCycleLength: z.number().int().min(2).max(10).default(5),
-});
+export * from "./types/batch-auctions.js";
+
+/**
+ * Timing + phase constants for the commit-reveal batch auction engine (#403).
+ */
+export const BATCH_AUCTION = {
+  /** Length of the COMMIT phase, in ms. */
+  COMMIT_PHASE_MS: 10_000,
+  /** Length of the REVEAL phase, in ms. */
+  REVEAL_PHASE_MS: 10_000,
+  /** Committed orders that never reveal by the reveal deadline forfeit their deposit. */
+  FORFEIT_ON_MISSED_REVEAL: true,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Nullifier Escrow Settlement (#371)                              */
+/* ------------------------------------------------------------------ */
+
+export type ZkNullifierStatus = "PENDING" | "SETTLED" | "REJECTED";
+
+export interface ZkSettleRequest {
+  proof: string;
+  nullifierHash: string;
+  commitment: string;
+  credentialSecret?: string;
+}
+
+export interface ZkSettleResponse {
+  message: string;
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+}
+
+export interface ZkSettleStatusResponse {
+  nullifierHash: string;
+  status: ZkNullifierStatus;
+  txHash?: string | null;
+  errorMessage?: string | null;
+}
+
+export const ZK_SETTLEMENT = {
+  STREAM_KEY: "velo:zk-settlement-queue",
+  GROUP_NAME: "zk-settlement-group",
+  DLQ_KEY: "velo:zk-settlement-dlq",
+  MAX_RETRIES: 5,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Session-key multi-sig emergency rotation (#375)                   */
+/* ------------------------------------------------------------------ */
+
+/** Lifecycle of a delegated session key in `session_key_registry`. */
+export type SessionKeyStatus = "ACTIVE" | "ROTATING" | "REVOKED";
+
+/** Row shape of `session_key_rotation_proposals` (2-of-3 admin threshold). */
+export interface SessionKeyRotationProposal {
+  proposalId: string;
+  oldPubkey: string;
+  newPubkey: string;
+  signaturesCollected: number;
+  requiredSignatures: number;
+  signer1: string;
+  signer2: string | null;
+  executed: boolean;
+  createdAt?: string;
+  executedAt?: string | null;
+}
+
+/** Redis stream the API enqueues accepted rotation proposals onto. */
+export const SESSION_ROTATION_QUEUE = "velo:session-rotation-queue";
+/** Dead-letter stream for proposals that exhausted every confirmation retry. */
+export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
+/** Consumer group the rotation worker reads the queue with. */
+export const SESSION_ROTATION_GROUP = "rotation-group";
+
+/* ------------------------------------------------------------------ */
+/*  Enterprise Multi-Tenant RBAC/ABAC & KMS (#401)                     */
+/* ------------------------------------------------------------------ */
+export * from "./types/enterprise.js";
+
+/* ------------------------------------------------------------------ */
+/*  Bidirectional State Channels & Off-Chain Micropayment Streaming   */
+/* ------------------------------------------------------------------ */
+
+/** Status of a state channel lifecycle. */
+export type ChannelStatus = "OPEN" | "CLOSING" | "CLOSED" | "DISPUTED";
+
+/** Metadata for a bidirectional state channel between two parties. */
+export interface StateChannel {
+  channelId: string;
+  partyA: string;
+  partyB: string;
+  totalDepositStroops: bigint;
+  nonce: bigint;
+  status: ChannelStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Off-chain state commit with vector clock ordering and signature. */
+export interface StateChannelCommit {
+  commitId: string;
+  channelId: string;
+  sequenceNumber: bigint;
+  signer: string;
+  stateRoot: string;
+  signature: string;
+  partyABalance: bigint;
+  partyBBalance: bigint;
+  createdAt: string;
+}
+
+/** On-chain settlement submission tracking. */
+export interface StateChannelSettlement {
+  settlementId: string;
+  channelId: string;
+  finalSequenceNumber: bigint;
+  initiator: string;
+  partyAFinalBalance: bigint;
+  partyBFinalBalance: bigint;
+  merkleRoot: string;
+  submittedTxnHash?: string | null;
+  status: string;
+  settledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Dispute evidence and challenge record for penalty enforcement. */
+export interface StateChannelAuditLog {
+  auditId: string;
+  channelId: string;
+  eventType: string;
+  challenger: string;
+  challengedSequence: bigint;
+  evidenceRoot?: string | null;
+  penaltyAmount?: bigint | null;
+  status: string;
+  createdAt: string;
+  resolvedAt?: string | null;
+}
+
+/** WebSocket message types for state channel state updates. */
+export type StateChannelMessageType =
+  | "sign_request"
+  | "sign_response"
+  | "settlement_ready"
+  | "settlement_confirmed"
+  | "dispute_challenge";
+
+/** Signed off-chain state update sent over WebSocket. */
+export interface StateChannelUpdate {
+  messageType: StateChannelMessageType;
+  channelId: string;
+  sequenceNumber: bigint;
+  partyABalance: bigint;
+  partyBBalance: bigint;
+  signer: string;
+  signature: string;
+  timestamp: number;
+}
+
+/** State channel configuration constants. */
+export const STATE_CHANNELS = {
+  /** Maximum number of off-chain transactions per second per channel. */
+  MAX_TPS: 500,
+  /** Redis stream for state channel updates. */
+  UPDATE_STREAM: "velo:state-channels:updates",
+  /** Consumer group for state channel workers. */
+  WORKER_GROUP: "state-channels-group",
+  /** Penalty slashing window (ms) for uncooperative close. */
+  DISPUTE_WINDOW_MS: 86400000, // 24 hours
+  /** Minimum signatures required to settle (2-of-2 cooperative). */
+  SETTLEMENT_THRESHOLD: 2,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Range-Proof Attestation & Credential Issuance (#XXX)           */
+/* ------------------------------------------------------------------ */
+
+export type {
+  PedersenCommitment,
+  ZkRangeProofRequest,
+  ZkRangeProof,
+  ZkAttestation,
+  ZkVerificationResponse,
+  WasmRangeProofRequest,
+  WasmRangeProofResponse,
+  CredentialWalletState,
+} from "./types/zk-range.js";
+
+export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";

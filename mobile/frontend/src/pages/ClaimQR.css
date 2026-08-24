@@ -143,6 +143,32 @@ html.dark {
   color: var(--ink-muted);
 }
 
+/* Issue #381 — fee arithmetic failure banner (role="alert"). */
+.claim-ticket__fee-error-banner {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--stamp-red);
+  background: color-mix(in srgb, var(--stamp-red) 8%, var(--card));
+  color: var(--ink);
+}
+
+.claim-ticket__fee-error-banner strong {
+  display: block;
+  font-family: "IBM Plex Serif", serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.claim-ticket__fee-error-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
+
 .claim-ticket__qr-window {
   display: flex;
   flex-direction: column;
@@ -549,4 +575,43 @@ html.dark .claim-ticket__tranche-progress {
   color: var(--ink-muted);
   margin: 6px 0 0 0;
   text-align: center;
+}
+
+/* Timeout error state */
+.claim-ticket--timeout-error {
+  border: 2px solid var(--stamp-amber);
+}
+
+.claim-ticket__stamp--error {
+  color: var(--stamp-amber);
+}
+
+.claim-ticket__timeout-message {
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.claim-ticket__timeout-message h3 {
+  margin: 0 0 8px 0;
+  color: var(--ink);
+}
+
+.claim-ticket__timeout-message p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.claim-ticket__timeout-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 24px 24px;
+}
+
+.claim-ticket__retry-button {
+  transition: all 0.2s ease;
+}
+
+.claim-ticket__retry-button:hover:not(:disabled) {
+  opacity: 0.9;
 }
