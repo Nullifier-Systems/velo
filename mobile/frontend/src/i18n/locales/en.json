@@ -326,5 +326,20 @@
     "copyAttestation": "Copy Attestation",
     "download": "Download",
     "id": "ID:"
+  },
+  "spatialNetting": {
+    "header": "Spatial Netting",
+    "activeH3Cell": "Active H3 cell: [ {{cell}} ] (Resolution {{resolution}})",
+    "abortNetting": "Abort netting",
+    "executeAtomicSwap": "Execute atomic swap",
+    "htlcTimeout": "HTLC timeout",
+    "revertCollateral": "Revert collateral",
+    "errors": {
+      "invalidSecret": "Invalid secret"
+    },
+    "nettingLoop": "Netting Loop: Provider A ──► Provider B ──► Provider C",
+    "clearedBalance": "Cleared Balance: $12,500.00 USDC",
+    "htlcLabel": "HTLC Secret Key:",
+    "relayerState": "Relayer State: Propagating Secret Preimage On-Chain..."
   }
 }
