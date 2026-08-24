@@ -38,6 +38,8 @@ import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
 import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
 import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
 import { stateChannelRoutes } from "./routes/state-channels.js";
+import { spatialHotspotsRoutes } from "./routes/spatial-hotspots.js";
+import { globalSpatialMetricsWorker } from "./lib/workers/spatialMetricsWorker.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
@@ -412,6 +414,7 @@ app.register(zkSettleRoutes, { prefix: "/api/v1" });
 app.register(enterpriseOrgsRoutes, { prefix: "/api/v1" });
 app.register(enterprisePoliciesRoutes, { prefix: "/api/v1" });
 app.register(enterpriseApprovalsRoutes, { prefix: "/api/v1" });
+app.register(spatialHotspotsRoutes, { prefix: "/api/v1" });
 app.register(stateChannelRoutes, {
   prefix: "/api/v1",
   db: pgPool,

@@ -326,5 +326,21 @@
     "copyAttestation": "Copy Attestation",
     "download": "Download",
     "id": "ID:"
+  },
+  "hotspots": {
+    "title": "Demand Hotspots",
+    "subtitle": "High-demand zones with boosted provider fee earnings",
+    "liveDemand": "Live Spatial Demand",
+    "multiplier": "{{multiplier}}x Fee Multiplier",
+    "multiplierShort": "{{multiplier}}x",
+    "boost": "+{{boost}}% Bonus",
+    "relocatePrompt": "Relocate here to earn higher fee share on incoming requests.",
+    "demandRatio": "Demand Ratio: {{ratio}}",
+    "activeRequests": "Active Requests: {{count}}",
+    "availableProviders": "Available Providers: {{count}}",
+    "noHotspots": "No active hotspots detected nearby. All zones currently balanced.",
+    "selectHex": "Select a cell to view hotspot incentive details",
+    "refresh": "Refresh Hotspots",
+    "loading": "Loading spatial demand map..."
   }
 }
