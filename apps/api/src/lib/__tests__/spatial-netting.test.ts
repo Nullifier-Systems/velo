@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { findCycles } from '../liquidity-netting';
+import { findCycles } from '../liquidity-netting.js';
 
 test('Johnson\'s cycle detection algorithm correctly identifies 3-node, 4-node, and 5-node liquidity cycles', async () => {
     const cycles = await findCycles('8828308281fffff', 5000, 5);

@@ -1,4 +1,4 @@
-import { redisClient } from '../redis'; // Assumption
+import { redisClient } from '../redis.js'; // Assumption
 
 export async function startSpatialNettingWorker() {
   console.log('Starting spatial netting worker...');

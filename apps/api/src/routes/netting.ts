@@ -1,9 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { pool } from '../db';
-import { getH3Index } from '../lib/h3-spatial-index';
-import { findCycles } from '../lib/liquidity-netting';
-import { redisClient } from '../lib/redis';
+import { pool } from '../db.js';
+import { getH3Index } from '../lib/h3-spatial-index.js';
+import { findCycles } from '../lib/liquidity-netting.js';
+import { redisClient } from '../lib/redis.js';
 
 export const SpatialClearRequestSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -30,14 +30,17 @@ export default async function (fastify: FastifyInstance) {
         });
       }
 
-      const cycle = cycles[0];
-      const participantIds = cycle.nodes.map(n => n.id).sort(); // Lexicographical sort
+      type CycleNode = { id: string };
+      type Cycle = { nodes: CycleNode[]; legs: any[]; clearedAmount: number };
+
+      const cycle = cycles[0] as Cycle;
+      const participantIds = cycle.nodes.map((n: CycleNode) => n.id).sort(); // Lexicographical sort
 
       const client = await pool.connect();
       try {
         await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
 
-        const paramsStr = participantIds.map((_, i) => `$${i + 1}`).join(', ');
+        const paramsStr = participantIds.map((_id: string, i: number) => `$${i + 1}`).join(', ');
         
         // Ordered Pessimistic Locking
         try {

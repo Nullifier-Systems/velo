@@ -85,6 +85,7 @@ export const CIRCUIT_BREAKER = {
     process.env.SOROBAN_LEDGER_STREAM_URL ??
     "wss://soroban-testnet.stellar.org",
   /** Redis stream used as the malformed-ledger-frame dead-letter queue. */
+  DLQ_CHANNEL: process.env.DLQ_CHANNEL ?? "velo:indexer-dlq",
 } as const;
 
 export * from "./types/batch-auctions.js";
