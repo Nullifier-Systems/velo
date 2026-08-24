@@ -168,7 +168,7 @@ export class BlockDAG {
   ): Promise<number> {
     let currentSequence = ledgerSequence - 1;
     let currentHash = actualParentHash;
-    const maxIterations = 100; // Safety limit to prevent infinite loops
+    const maxIterations = 1000; // Increased to handle deeper reorgs (approx 1.5 hours of ledgers)
     let iterations = 0;
 
     while (iterations < maxIterations) {
@@ -193,7 +193,7 @@ export class BlockDAG {
     // If we exhaust the search, return the earliest point we found
     this.logger.warn(
       { ledgerSequence, iterations },
-      "Could not find fork point within max iterations",
+      "Could not find fork point within max iterations, returning fallback point",
     );
     return Math.max(0, ledgerSequence - maxIterations);
   }
@@ -267,5 +267,32 @@ export class BlockDAG {
   async getExpectedParentHash(ledgerSequence: number): Promise<string | null> {
     const previousHeader = await this.getBlockHeader(ledgerSequence - 1);
     return previousHeader?.block_hash ?? null;
+  }
+
+  /**
+   * Clean up old block headers to prevent unbounded table growth.
+   * 
+   * @param keepRecentLedgers - Number of recent ledgers to keep (default: 1000)
+   * @param currentLedger - Current ledger sequence for calculating retention
+   */
+  async cleanupOldHeaders(keepRecentLedgers: number = 1000, currentLedger?: number): Promise<void> {
+    const cutoffLedger = currentLedger 
+      ? currentLedger - keepRecentLedgers 
+      : await this.getLatestBlockHeader().then(h => h ? h.ledger_sequence - keepRecentLedgers : 0);
+    
+    if (cutoffLedger <= 0) {
+      return; // Nothing to clean up
+    }
+
+    const result = await this.pool.query(
+      `DELETE FROM indexer_block_headers
+       WHERE ledger_sequence < $1`,
+      [cutoffLedger],
+    );
+
+    this.logger.info(
+      { cutoffLedger, deletedCount: result.rowCount },
+      "Old block headers cleaned up",
+    );
   }
 }

@@ -206,6 +206,7 @@ export class StellarEscrowIndexer {
     }
 
     // Record undo logs before processing if reorg resilience is enabled
+    // This ensures we can roll back database changes if a reorg is detected later
     if (this.reorgHandler && events.length > 0) {
       await this.recordUndoLogsForEvents(events, throughLedger);
     }
@@ -341,11 +342,12 @@ export class StellarEscrowIndexer {
       await this.reorgHandler.markReorgResolved(reorgEvent.id, {
         restored_from_snapshot: !!this.snapshotEngine,
         new_current_ledger: targetLedger,
+        need_reprocess: true, // Flag that events need to be reprocessed
       });
 
       this.logger.info(
         { reorgEventId: reorgEvent.id, targetLedger },
-        "Reorg handling completed successfully",
+        "Reorg handling completed successfully - indexer will resume from rollback point",
       );
     } catch (error) {
       this.logger.error({ err: error }, "Reorg handling failed");
