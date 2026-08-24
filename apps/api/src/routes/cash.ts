@@ -58,13 +58,35 @@ import {
 import { t, type Locale } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
-import { ApiError } from "../lib/errors.js";
+import { ApiError, ErrorCode } from "../lib/errors.js";
+import {
+  applyNetPayout,
+  computeTrancheFeeStroops,
+  FeeArithmeticOverflowError,
+} from "../lib/fee-math.js";
 import { globalH3SpatialIndex, type H3Resolution } from "../lib/h3-spatial-index.js";
 import { globalMatchingEngine } from "../lib/matching-engine.js";
 import { globalOrderAllocator } from "../lib/order-allocator.js";
 
 const ESCROW_CONTRACT_ID =
   process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
+
+/**
+ * Platform fee in basis points used for the off-chain safe-math pre-check
+ * (issue #381). Must mirror the value configured on the escrow contract.
+ * Out-of-range values are rejected so the pre-check can never disagree
+ * with the contract's own bounds.
+ */
+const PLATFORM_FEE_BPS = (() => {
+  const raw = process.env.PLATFORM_FEE_BPS;
+  const parsed = raw === undefined ? 0 : Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10_000) {
+    throw new Error(
+      `PLATFORM_FEE_BPS must be an integer in [0, 10000], got: ${raw}`,
+    );
+  }
+  return parsed;
+})();
 
 const PAUSED_NEW_TRADE_MESSAGE =
   "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
@@ -1223,6 +1245,37 @@ export async function cashRoutes(app: FastifyInstance) {
       if (tranche.released) {
         reply.code(409).send({ error: "tranche already released" });
         return;
+      }
+
+      // Issue #381: validate the tranche fee against safe-math bounds
+      // BEFORE submitting on-chain, mirroring the contract's checked
+      // arithmetic (checked_mul / checked_div + 1-stroop micro-tranche
+      // floor). A computation that would overflow i128 or lose precision
+      // fails here with 422 instead of trapping funds in a panicking call.
+      try {
+        const grossStroops = BigInt(tranche.amountStroops);
+        const feeStroops = computeTrancheFeeStroops(grossStroops, PLATFORM_FEE_BPS);
+        const netStroops = applyNetPayout(grossStroops, feeStroops);
+        req.log.info(
+          {
+            tradeId: record.id,
+            tranche_index,
+            gross: grossStroops.toString(),
+            fee: feeStroops.toString(),
+            net: netStroops.toString(),
+          },
+          "tranche fee safe-math pre-check passed",
+        );
+      } catch (err) {
+        if (err instanceof FeeArithmeticOverflowError) {
+          throw new ApiError(
+            422,
+            ErrorCode.FEE_ARITHMETIC_OVERFLOW,
+            "Tranche fee calculation resulted in arithmetic overflow or invalid precision.",
+            { detail: err.message },
+          );
+        }
+        throw err;
       }
 
       try {

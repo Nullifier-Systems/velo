@@ -74,6 +74,9 @@ export const ErrorCode = {
   /* 415 — Unsupported media */
   UNSUPPORTED_MEDIA_TYPE: "UNSUPPORTED_MEDIA_TYPE",
 
+  /* 422 — Unprocessable entity (issue #381) */
+  FEE_ARITHMETIC_OVERFLOW: "FEE_ARITHMETIC_OVERFLOW",
+
   /* 429 — Rate limit */
   RATE_LIMIT: "RATE_LIMIT",
 

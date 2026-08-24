@@ -71,6 +71,8 @@
     "somethingWentWrong": "algo salió mal",
     "pausedTitle": "Nuevos intercambios en pausa",
     "pausedBody": "Velo ha detenido temporalmente las nuevas solicitudes de efectivo. Este reclamo existente aún puede liberarse o reembolsarse — tus fondos bloqueados no quedan atrapados.",
+    "feeErrorTitle": "Error en el cálculo de la tarifa de la transacción",
+    "feeErrorBody": "No pudimos liberar este reclamo porque no se pudo calcular la tarifa con precisión. Tus fondos están seguros — inténtalo de nuevo o contacta a soporte.",
     "waitNormal": "Bloqueando fondos en Stellar…",
     "waitLonger": "Está tardando un poco más de lo habitual — el nodo RPC puede estar ocupado. Tus fondos están seguros.",
     "waitStill": "Seguimos trabajando. La transacción fue enviada; estamos esperando confirmación en la cadena.",

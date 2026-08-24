@@ -341,3 +341,113 @@ fn test_empty_tranches_rejected() {
         .try_lock_with_tranches(&f.id, &f.seller, &f.buyer, &500, &tranches, &100);
     assert_eq!(result.unwrap_err().unwrap(), Error::NoTranches);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #381 — precision truncation & i128 stroop overflow in fee math.
+//
+// The old `amount * fee_bps / 10_000` arithmetic had two failure modes:
+//   * amounts near i128::MAX (or an out-of-range fee config) overflowed
+//     i128 and panicked the WASM runtime, freezing locked funds;
+//   * micro-tranches truncated down to a 0-stroop fee, letting tiny
+//     releases settle entirely fee-free.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_micro_tranche_fee_rounds_up_to_minimum_one_stroop() {
+    // fee_bps = 1 on a 100-stroop tranche: the raw quotient is
+    // 100 * 1 / 10_000 = 0, which used to settle fee-free. The fee must
+    // round UP to the 1-stroop minimum instead.
+    let f = setup(1_000, 1);
+
+    let secret1 = BytesN::from_array(&f.env, &[10u8; 32]);
+    let hash1 = f.env.crypto().sha256(&secret1.clone().into()).to_bytes();
+
+    let mut tranches = Vec::new(&f.env);
+    tranches.push_back(Tranche {
+        amount: 100,
+        secret_hash: hash1,
+        released: false,
+    });
+
+    f.client
+        .lock_with_tranches(&f.id, &f.seller, &f.buyer, &100, &tranches, &100);
+
+    let payout = f.client.release_tranche(&f.id, &0, &secret1);
+    assert_eq!(payout, 99); // 100 − 1 (rounded-up minimum fee)
+    assert_eq!(f.token.balance(&f.seller), 99);
+    assert_eq!(f.token.balance(&f.admin), 1); // never zero
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+
+    // Conservation invariant: payout + fee == gross amount exactly.
+    assert_eq!(payout + f.token.balance(&f.admin), 100);
+}
+
+#[test]
+fn test_release_max_lockable_amount_does_not_overflow() {
+    // lock_with_tranches caps amounts at i128::MAX / 10_000; at the maximum
+    // legal fee of 10_000 bps the product `amount * fee_bps` lands exactly
+    // at the i128 boundary. Checked math must settle this release cleanly
+    // instead of panicking the WASM runtime and freezing the escrow.
+    let max_amount = i128::MAX / 10_000;
+    let f = setup(max_amount, 10_000); // 100% fee — the boundary case
+
+    let secret1 = BytesN::from_array(&f.env, &[10u8; 32]);
+    let hash1 = f.env.crypto().sha256(&secret1.clone().into()).to_bytes();
+
+    let mut tranches = Vec::new(&f.env);
+    tranches.push_back(Tranche {
+        amount: max_amount,
+        secret_hash: hash1,
+        released: false,
+    });
+
+    f.client
+        .lock_with_tranches(&f.id, &f.seller, &f.buyer, &max_amount, &tranches, &100);
+
+    // At a 100% fee everything goes to the platform; payout is 0 but the
+    // release itself must succeed without any arithmetic panic.
+    let payout = f.client.release_tranche(&f.id, &0, &secret1);
+    assert_eq!(payout, 0);
+    assert_eq!(f.token.balance(&f.seller), 0);
+    assert_eq!(f.token.balance(&f.admin), max_amount);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+
+    let trade = f.client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, TradeStatus::Released);
+}
+
+#[test]
+fn test_fee_helpers_reject_overflow_instead_of_panicking() {
+    use htlc_core::{calculate_fee, FeeMathError};
+
+    // Directly exercise the shared checked-math helpers at values the
+    // public entry points refuse at lock time — proving the math itself
+    // can never panic if a future code path reaches it with such input.
+    assert_eq!(calculate_fee(i128::MAX, 2), Err(FeeMathError::Overflow));
+    assert_eq!(
+        calculate_fee(i128::MAX, u32::MAX),
+        Err(FeeMathError::Overflow)
+    );
+
+    // The exact boundary that CAN occur must compute precisely.
+    let max_lockable = i128::MAX / 10_000;
+    assert_eq!(calculate_fee(max_lockable, 10_000), Ok(max_lockable));
+
+    // Micro-tranche floor applies to the helper too.
+    assert_eq!(calculate_fee(99, 1), Ok(1));
+    assert_eq!(calculate_fee(0, 250), Ok(0));
+}
+
+#[test]
+fn test_set_platform_fee_rejects_above_max_bps() {
+    // Issue #381: set_platform_fee() silently accepted fees above 100%,
+    // which made every subsequent release overflow and panic. It must
+    // reject them with InvalidFee, matching initialize().
+    let f = setup(1_000, 100);
+
+    let result = f.client.try_set_platform_fee(&10_001, &Vec::new(&f.env));
+    assert_eq!(result.unwrap_err().unwrap(), Error::InvalidFee);
+
+    // The boundary value itself remains legal.
+    f.client.set_platform_fee(&10_000, &Vec::new(&f.env));
+}

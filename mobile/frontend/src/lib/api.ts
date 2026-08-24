@@ -223,6 +223,21 @@ export function formatStroops(stroops: string): string {
   return `${whole}.${frac}`;
 }
 
+/**
+ * Formats a stroop amount with exact precision — up to all 7 decimals of
+ * the stroop scale, using BigInt math only so micro-fees never lose
+ * precision to float rounding or display truncation (issue #381).
+ */
+export function formatStroopsPrecise(stroops: string | bigint, decimals = 7): string {
+  const n = BigInt(stroops);
+  const negative = n < 0n;
+  const abs = negative ? -n : n;
+  const base = 10n ** BigInt(decimals);
+  const whole = abs / base;
+  const frac = (abs % base).toString().padStart(decimals, "0");
+  return `${negative ? "-" : ""}${whole}.${frac}`;
+}
+
 export interface StatusResponse {
   api: { status: string; uptime_seconds: number; timestamp: string };
   chain: { network: string; status: string; latest_ledger: number | null };
