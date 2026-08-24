@@ -88,6 +88,20 @@ export const CIRCUIT_BREAKER = {
   DLQ_CHANNEL: "velo:indexer-dlq",
 } as const;
 
+export * from "./types/batch-auctions.js";
+
+/**
+ * Timing + phase constants for the commit-reveal batch auction engine (#403).
+ */
+export const BATCH_AUCTION = {
+  /** Length of the COMMIT phase, in ms. */
+  COMMIT_PHASE_MS: 10_000,
+  /** Length of the REVEAL phase, in ms. */
+  REVEAL_PHASE_MS: 10_000,
+  /** Committed orders that never reveal by the reveal deadline forfeit their deposit. */
+  FORFEIT_ON_MISSED_REVEAL: true,
+} as const;
+
 /* ------------------------------------------------------------------ */
 /*  ZK Nullifier Escrow Settlement (#371)                              */
 /* ------------------------------------------------------------------ */
@@ -312,3 +326,20 @@ export const STATE_CHANNELS = {
   /** Minimum signatures required to settle (2-of-2 cooperative). */
   SETTLEMENT_THRESHOLD: 2,
 } as const;
+
+/* ------------------------------------------------------------------ */
+/*  ZK Range-Proof Attestation & Credential Issuance (#XXX)           */
+/* ------------------------------------------------------------------ */
+
+export type {
+  PedersenCommitment,
+  ZkRangeProofRequest,
+  ZkRangeProof,
+  ZkAttestation,
+  ZkVerificationResponse,
+  WasmRangeProofRequest,
+  WasmRangeProofResponse,
+  CredentialWalletState,
+} from "./types/zk-range.js";
+
+export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";

@@ -71,6 +71,8 @@
     "somethingWentWrong": "something went wrong",
     "pausedTitle": "New trades are paused",
     "pausedBody": "Velo has temporarily stopped new cash requests. This existing claim can still be released or refunded — your locked funds are not trapped.",
+    "feeErrorTitle": "Transaction fee calculation error",
+    "feeErrorBody": "We couldn't release this claim because the transaction fee could not be calculated precisely. Your funds are safe — please try again or contact support.",
     "waitNormal": "Locking escrow on Stellar…",
     "waitLonger": "Taking a bit longer than usual — the RPC node may be busy. Your funds are safe.",
     "waitStill": "Still working. The transaction has been submitted; we're waiting for on-chain confirmation.",
@@ -230,6 +232,15 @@
     "reasonPlaceholder": "Minimum 10 characters…",
     "broadcasting": "Broadcasting…"
   },
+  "batchAuction": {
+    "title": "Batch Auction",
+    "phase": "Phase",
+    "secondsRemaining": "({{seconds}}s)",
+    "submitted": "Your order is encrypted and committed to this round.",
+    "notSubmitted": "No order submitted for this round yet.",
+    "history": "Recent clearing prices",
+    "clearingPriceStroops": "{{amount}} stroops"
+  },
   "zkSettle": {
     "modalTitle": "Zero-Knowledge Settlement",
     "nullifierSpent": "Nullifier already spent",
@@ -334,5 +345,36 @@
     "settlementInfo": "When ready, settle this channel on-chain with a single transaction. Both parties must have signed the final state.",
     "settling": "Settling...",
     "settleButton": "Close & Settle Channel"
+  },
+  "zk": {
+    "credentialWallet": "ZK Credential Wallet",
+    "yourCredentials": "Your Credentials",
+    "loadingCommitments": "Loading commitments...",
+    "noCredentialsYet": "No credentials yet. Issue a commitment to get started.",
+    "commitment": "Commitment:",
+    "expires": "Expires:",
+    "generateRangeProof": "Generate Range Proof",
+    "verifiedAttestations": "Verified Attestations",
+    "loadingAttestations": "Loading attestations...",
+    "noAttestationsYet": "No verified attestations yet. Generate and verify a proof.",
+    "verified": "Verified",
+    "issuer": "Issuer:",
+    "secretValue": "Secret Value:",
+    "enterSecretValue": "Enter your secret value",
+    "rangeMin": "Range Min:",
+    "rangeMax": "Range Max:",
+    "generationTime": "Generation time:",
+    "ms": "ms",
+    "generationExceeded": "Proof generation exceeded 1.5 seconds",
+    "generating": "Generating...",
+    "generateAndVerifyProof": "Generate & Verify Proof",
+    "attestationQRCode": "Attestation QR Code",
+    "scanToVerify": "Scan to verify credential",
+    "generatingQRCode": "Generating QR code...",
+    "attestationExpired": "This attestation has expired",
+    "copied": "Copied!",
+    "copyAttestation": "Copy Attestation",
+    "download": "Download",
+    "id": "ID:"
   }
 }

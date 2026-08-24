@@ -6,12 +6,15 @@ import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
+import { startBatchAuctionWorker } from "./lib/workers/batchAuctionWorker.js";
 import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
 import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
 import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
+import { createEnterpriseStore } from "./lib/enterprise-store.js";
+import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -22,6 +25,7 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
+    startBatchAuctionWorker();
 
     // (#380) Watch locked trades for approaching refund timeouts: warn 100
     // ledgers before expiry, auto-refund once the timeout is breached, and
@@ -97,6 +101,14 @@ async function startServer() {
       }
     } else {
       app.log.warn("DATABASE_URL or REDIS_URL is not configured; session-key rotation worker is disabled");
+    }
+
+    // (#401) Dual-control expiration: expire PENDING approvals after 24h, poll 60s
+    try {
+      const enterpriseStore = createEnterpriseStore(pgPool as never);
+      startApprovalTimeoutWorker({ store: enterpriseStore });
+    } catch (error) {
+      app.log.error(error, "approval timeout worker failed to start");
     }
   } catch (err) {
     app.log.error(err);

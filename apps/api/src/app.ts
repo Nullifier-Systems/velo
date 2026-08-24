@@ -32,7 +32,11 @@ import { Pool } from "pg";
 import { PostgresEventStore } from "./lib/stellar-event-store.js";
 import { graphqlRoutes } from "./routes/graphql.js";
 import { circuitBreakerRoutes } from "./routes/circuit-breaker.js";
+import { batchAuctionRoutes } from "./routes/batch-auctions.js";
 import { zkSettleRoutes } from "./routes/zk-settle.js";
+import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
+import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
+import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
 import { stateChannelRoutes } from "./routes/state-channels.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 
@@ -403,7 +407,11 @@ app.register(sessionRotationRoutes, { prefix: "/api/v1" });
 app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });
 app.register(circuitBreakerRoutes, { prefix: "/api/v1" });
+app.register(batchAuctionRoutes, { prefix: "/api/v1" });
 app.register(zkSettleRoutes, { prefix: "/api/v1" });
+app.register(enterpriseOrgsRoutes, { prefix: "/api/v1" });
+app.register(enterprisePoliciesRoutes, { prefix: "/api/v1" });
+app.register(enterpriseApprovalsRoutes, { prefix: "/api/v1" });
 app.register(stateChannelRoutes, {
   prefix: "/api/v1",
   db: pgPool,
