@@ -94,6 +94,12 @@ export const RPC_TIMEOUTS = {
   genericBuildSim: 15_000,
   /** Generic poll budget used by submitSignedEnvelope. */
   genericPoll: 30_000,
+  /** (#408) Quote / position read against a yield strategy adapter. */
+  vaultQuote: 10_000,
+  /** (#408) Deploy idle reserves into a yield vault (build+simulate). */
+  vaultDeploy: 15_000,
+  /** (#408) Instant recall from a yield vault (build+simulate). */
+  vaultRecall: 15_000,
 } as const;
 
 export const NETWORK_PASSPHRASE = IS_PUBLIC
@@ -104,6 +110,15 @@ export const server = new Server(RPC_URL, { allowHttp: RPC_ALLOW_HTTP });
 /** Return the latest closed ledger sequence for timeout bookkeeping. */
 export async function getLatestLedgerSequence(): Promise<number> {
   return (await server.getLatestLedger()).sequence;
+}
+
+/**
+ * (#408) Contract ID of the escrow's external yield vault for the settlement
+ * token, when one has been deployed and configured. Placeholder-free: absent
+ * config means yield aggregation stays dormant rather than guessing.
+ */
+export function escrowYieldVaultContractId(): string | null {
+  return process.env.YIELD_VAULT_CONTRACT_ID ?? null;
 }
 
 /**
