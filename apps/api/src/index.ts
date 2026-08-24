@@ -14,6 +14,8 @@ import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stel
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
 import { createEnterpriseStore } from "./lib/enterprise-store.js";
 import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
+import { startYieldRebalanceWorker } from "./lib/workers/yieldRebalanceWorker.js";
+import { InMemoryStrategyAdapter } from "./lib/yield/strategy-adapter.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -107,6 +109,30 @@ async function startServer() {
       startApprovalTimeoutWorker({ store: enterpriseStore });
     } catch (error) {
       app.log.error(error, "approval timeout worker failed to start");
+    }
+
+    // (#408) Yield rebalance: compound deployed collateral and keep the
+    // dynamic 20% liquid buffer topped up for instant settlements. Runs on
+    // the in-memory store until the pg-backed vault store is provisioned;
+    // disable with YIELD_REBALANCE_DISABLED=true.
+    if (process.env.YIELD_REBALANCE_DISABLED !== "true") {
+      try {
+        startYieldRebalanceWorker(
+          {
+            adapter: new InMemoryStrategyAdapter(),
+            logger: {
+              info: (obj, msg) => app.log.info(obj, msg),
+              warn: (obj, msg) => app.log.warn(obj, msg),
+              error: (obj, msg) => app.log.error(obj, msg),
+            },
+          },
+          process.env.YIELD_REBALANCE_POLL_MS
+            ? { pollIntervalMs: Number(process.env.YIELD_REBALANCE_POLL_MS) }
+            : undefined,
+        );
+      } catch (error) {
+        app.log.error(error, "yield rebalance worker failed to start");
+      }
     }
   } catch (err) {
     app.log.error(err);

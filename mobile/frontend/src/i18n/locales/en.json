@@ -315,5 +315,33 @@
     "copyAttestation": "Copy Attestation",
     "download": "Download",
     "id": "ID:"
+  },
+  "yieldPortal": {
+    "title": "Provider Yield Portal",
+    "subtitle": "Idle collateral earns 4-8% APY while a dynamic 20% liquid buffer keeps cash trades instant.",
+    "refresh": "Refresh",
+    "loading": "Loading vaults…",
+    "noVaults": "No yield vaults configured yet.",
+    "loadFailed": "Could not reach the yield service.",
+    "dismissError": "Dismiss",
+    "adminKeyNeeded": "An admin API key is required for this action.",
+    "harvest": "Harvest yield",
+    "harvesting": "Harvesting…",
+    "harvestDone": "Yield harvested and compounded.",
+    "applyRatio": "Apply buffer",
+    "applying": "Applying…",
+    "ratioApplied": "Liquid buffer target set to {{percent}}%.",
+    "bufferSliderLabel": "Liquid buffer ratio",
+    "chartAlt": "APY history chart",
+    "tvl": "TVL",
+    "deployed": "Deployed to strategy",
+    "liquidBuffer": "Liquid buffer",
+    "apy": "APY",
+    "rateLabel": "Share rate",
+    "vaultSection": "Yield vault",
+    "bufferAction": "Buffer action",
+    "yourShares": "Your shares",
+    "yourValueUsdc": "Your value",
+    "checkPosition": "Check my position"
   }
 }

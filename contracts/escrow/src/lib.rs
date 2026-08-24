@@ -21,6 +21,12 @@ use soroban_sdk::{
     BytesN, Env, Symbol, Vec,
 };
 
+/// (#408) Cross-asset yield aggregation vault + escrow-side rebalancing
+/// entry points. See docs in the module itself.
+pub mod yield_vault;
+
+use yield_vault::YieldVaultContractClient;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArbitratorSet {
@@ -95,6 +101,11 @@ enum DataKey {
     /// Maximum escrow USD value allowed at lock time, in oracle base units
     /// (same scale as `price / 10^decimals`). `0` disables the limit.
     MaxUsdLimit,
+    /// (#408) Cross-asset yield aggregation: external yield-vault contract
+    /// holding idle escrow reserves above the liquid buffer.
+    YieldVaultAddress,
+    /// (#408) Total escrow underlying currently deployed into the yield vault.
+    DeployedToVault,
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -2324,6 +2335,154 @@ impl EscrowContract {
 
         Ok(payout)
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  (#408) Cross-asset yield aggregation: reserve rebalancing          */
+    /* ------------------------------------------------------------------ */
+
+    /// Point the escrow at a deployed [`yield_vault::YieldVaultContract`]
+    /// instance for its settlement token. Multisig-gated like every treasury
+    /// movement; falls back to single-admin before migration.
+    pub fn set_yield_vault(env: Env, vault: Address, signers: Vec<Address>) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::YieldVaultAddress, &vault);
+        Ok(())
+    }
+
+    /// Configured external yield vault, if any.
+    pub fn get_yield_vault(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::YieldVaultAddress)
+    }
+
+    /// Underlying currently deployed into the yield vault.
+    pub fn deployed_to_vault(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DeployedToVault)
+            .unwrap_or(0)
+    }
+
+    /// Instantly spendable liquid reserve: unallocated token balance held
+    /// directly by the escrow. Instant cash-trade settlements draw from here
+    /// first; `recall_from_vault` tops it back up when it runs low.
+    pub fn liquid_reserve(env: Env) -> i128 {
+        let Some(token_addr) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Token)
+        else {
+            return 0;
+        };
+        token::Client::new(&env, &token_addr).balance(&env.current_contract_address())
+    }
+
+    /// Deploy idle reserves above the liquid buffer into the yield vault.
+    /// Multisig-gated; sizing comes from the off-chain buffer optimizer
+    /// (apps/api/src/lib/yield/buffer-optimizer.ts). Returns the new total
+    /// deployed amount.
+    pub fn deploy_idle_to_vault(
+        env: Env,
+        amount: i128,
+        signers: Vec<Address>,
+    ) -> Result<i128, Error> {
+        require_multisig(&env, &signers)?;
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let vault: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::YieldVaultAddress)
+            .ok_or(Error::NotInitialized)?;
+
+        // Push-model deposit: the escrow sends its own tokens into the vault
+        // first, and the vault credits them against a balance-delta check
+        // (no SAC allowance dance needed between contracts).
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        token::Client::new(&env, &token_addr).transfer(
+            &env.current_contract_address(),
+            &vault,
+            &amount,
+        );
+
+        let client = YieldVaultContractClient::new(&env, &vault);
+        let minted = client.deposit(&env.current_contract_address(), &amount);
+
+        let deployed = Self::deployed_to_vault(env.clone()) + amount;
+        env.storage()
+            .instance()
+            .set(&DataKey::DeployedToVault, &deployed);
+
+        env.events().publish(
+            (symbol_short(&env, "vlt_deploy"), minted),
+            (amount, deployed),
+        );
+        Ok(deployed)
+    }
+
+    /// Permissionless instant recall: pull at least `min_amount` of
+    /// underlying back from the vault (everything deployed when `min_amount`
+    /// is 0), restoring the liquid buffer without trade-settlement latency.
+    /// Anyone may call it — recall only moves escrow-owned funds from the
+    /// vault back to the escrow. Returns the amount actually recalled.
+    pub fn recall_from_vault(env: Env, min_amount: i128) -> Result<i128, Error> {
+        if min_amount < 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let vault: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::YieldVaultAddress)
+            .ok_or(Error::NotInitialized)?;
+        let deployed = Self::deployed_to_vault(env.clone());
+        if deployed == 0 {
+            // Nothing deployed: the buffer is already fully liquid.
+            return Ok(0);
+        }
+        let wanted = if min_amount == 0 || min_amount > deployed {
+            deployed
+        } else {
+            min_amount
+        };
+
+        let client = YieldVaultContractClient::new(&env, &vault);
+        let total_assets = client.total_assets();
+        let total_shares = client.total_shares();
+        // Full-drain recalls withdraw the escrow's ENTIRE share position so
+        // accrued yield rides home too; partial recalls round the share
+        // requirement UP so the payout can never undershoot the buffer
+        // top-up a waiting settlement depends on.
+        let shares = if min_amount == 0 || min_amount >= deployed {
+            client.share_balance(&env.current_contract_address())
+        } else if total_assets <= 0 || total_shares <= 0 {
+            wanted
+        } else {
+            // ceil(wanted * shares / assets)
+            (wanted * total_shares + total_assets - 1) / total_assets
+        };
+
+        let received = client.withdraw(&env.current_contract_address(), &shares);
+
+        // Tracking floors at zero: a full-drain recall legitimately pays out
+        // accrued yield ON TOP of the tracked deployment figure.
+        let tracked = Self::deployed_to_vault(env.clone());
+        let remaining = if received >= tracked { 0 } else { tracked - received };
+        env.storage()
+            .instance()
+            .set(&DataKey::DeployedToVault, &remaining);
+
+        env.events().publish(
+            (symbol_short(&env, "vlt_recall"), received),
+            remaining,
+        );
+        Ok(received)
+    }
 }
 
 /// Derives the id for a trade created via `chain_release_to_lock()`:
@@ -4323,3 +4482,7 @@ mod unit_tests;
 
 #[cfg(test)]
 mod tranche_tests;
+
+/// (#408) Cross-asset yield vault share-math + escrow rebalance integration.
+#[cfg(test)]
+mod yield_vault_tests;

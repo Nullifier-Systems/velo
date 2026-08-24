@@ -266,3 +266,20 @@ export type {
 } from "./types/zk-range.js";
 
 export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";
+
+/* ------------------------------------------------------------------ */
+/*  Automated Liquidity Reserve Rebalancing & Cross-Asset Yield       */
+/*  Aggregation Vault (#408)                                          */
+/* ------------------------------------------------------------------ */
+
+export type {
+  YieldVaultConfig,
+  ProviderVaultShare,
+  ApySample,
+  HarvestResult,
+  StrategyPosition,
+  BufferDecision,
+  LiquidityDrawPlan,
+} from "./types/yield.js";
+
+export { YIELD_VAULT } from "./types/yield.js";

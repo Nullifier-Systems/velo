@@ -315,5 +315,33 @@
     "copyAttestation": "Copiar atestación",
     "download": "Descargar",
     "id": "ID:"
+  },
+  "yieldPortal": {
+    "title": "Portal de Rendimiento para Proveedores",
+    "subtitle": "El colateral inactivo gana 4-8% APY mientras un búfer líquido dinámico del 20% mantiene los retiros al instante.",
+    "refresh": "Actualizar",
+    "loading": "Cargando bóvedas…",
+    "noVaults": "Aún no hay bóvedas de rendimiento configuradas.",
+    "loadFailed": "No se pudo contactar el servicio de rendimiento.",
+    "dismissError": "Cerrar",
+    "adminKeyNeeded": "Se requiere una clave de API de administrador para esta acción.",
+    "harvest": "Cosechar rendimiento",
+    "harvesting": "Cosechando…",
+    "harvestDone": "Rendimiento cosechado y capitalizado.",
+    "applyRatio": "Aplicar búfer",
+    "applying": "Aplicando…",
+    "ratioApplied": "Objetivo del búfer líquido fijado en {{percent}}%.",
+    "bufferSliderLabel": "Proporción del búfer líquido",
+    "chartAlt": "Gráfico del historial de APY",
+    "tvl": "TVL",
+    "deployed": "Asignado a estrategia",
+    "liquidBuffer": "Búfer líquido",
+    "apy": "APY",
+    "rateLabel": "Tasa de participación",
+    "vaultSection": "Bóveda de rendimiento",
+    "bufferAction": "Acción del búfer",
+    "yourShares": "Tus participaciones",
+    "yourValueUsdc": "Tu valor",
+    "checkPosition": "Ver mi posición"
   }
 }

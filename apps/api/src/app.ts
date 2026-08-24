@@ -37,6 +37,7 @@ import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
 import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
 import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
 import { stateChannelRoutes } from "./routes/state-channels.js";
+import { yieldVaultRoutes } from "./routes/yield-vaults.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
@@ -415,3 +416,4 @@ app.register(stateChannelRoutes, {
   db: pgPool,
   redis: undefined,
 });
+app.register(yieldVaultRoutes, { prefix: "/api/v1" });

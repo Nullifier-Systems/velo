@@ -285,3 +285,73 @@ export function verifyNoUnbackedValue(
   }
   return true;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Instant settlement draws against the yield-aggregated reserve      */
+/*  (#408)                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface InstantSettlementDrawParams {
+  /** Underlying the settlement needs right now (stroops). */
+  requiredStroops: bigint;
+  /** Unallocated balance held directly by the escrow (stroops). */
+  liquidReserveStroops: bigint;
+  /** Escrow underlying currently deployed into the yield vault (stroops). */
+  deployedToVaultStroops: bigint;
+}
+
+export interface InstantSettlementDrawPlan {
+  source: "BUFFER_ONLY" | "BUFFER_PLUS_VAULT_RECALL" | "INSUFFICIENT";
+  requiredStroops: bigint;
+  liquidReserveStroops: bigint;
+  /** Portion that must be recalled from the yield vault first. */
+  recallFromVaultStroops: bigint;
+  /** > 0 only when even a full recall cannot cover the requirement. */
+  shortfallStroops: bigint;
+}
+
+const ZERO = 0n;
+
+/**
+ * Plan how an instant cash-trade settlement is funded without ever delaying
+ * the hand-off: draw from the liquid buffer first; whatever it lacks is
+ * flagged as a permissionless `recall_from_vault()` leg sized exactly to the
+ * gap (never more). Mirrors the on-chain recall in
+ * contracts/escrow/src/yield_vault.rs and is pure so the concurrency stress
+ * test can hammer it alongside the HTTP layer.
+ */
+export function planInstantSettlementDraw(
+  params: InstantSettlementDrawParams,
+): InstantSettlementDrawPlan {
+  const { requiredStroops, liquidReserveStroops, deployedToVaultStroops } =
+    params;
+  if (requiredStroops < ZERO) {
+    throw new RangeError("requiredStroops must be non-negative");
+  }
+  if (liquidReserveStroops < ZERO || deployedToVaultStroops < ZERO) {
+    throw new RangeError("reserves must be non-negative");
+  }
+
+  if (liquidReserveStroops >= requiredStroops) {
+    return {
+      source: "BUFFER_ONLY",
+      requiredStroops,
+      liquidReserveStroops,
+      recallFromVaultStroops: ZERO,
+      shortfallStroops: ZERO,
+    };
+  }
+
+  const gap = requiredStroops - liquidReserveStroops;
+  const recallable =
+    deployedToVaultStroops < gap ? deployedToVaultStroops : gap;
+  const shortfall = gap - recallable;
+
+  return {
+    source: shortfall > ZERO ? "INSUFFICIENT" : "BUFFER_PLUS_VAULT_RECALL",
+    requiredStroops,
+    liquidReserveStroops,
+    recallFromVaultStroops: recallable,
+    shortfallStroops: shortfall,
+  };
+}

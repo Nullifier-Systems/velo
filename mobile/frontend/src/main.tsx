@@ -14,6 +14,7 @@ import AdminDashboard from "./pages/AdminDashboard.js";
 import AdminCircuitBreakerDashboard from "./pages/AdminCircuitBreakerDashboard.js";
 import EnterpriseDashboard from "./pages/EnterpriseDashboard.js";
 import EnterpriseApprovals from "./pages/EnterpriseApprovals.js";
+import ProviderYieldPortal from "./pages/ProviderYieldPortal.js";
 
 import NotFound from "./pages/NotFound.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -42,6 +43,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/admin/circuit-breaker" element={<AdminCircuitBreakerDashboard />} />
           <Route path="/enterprise" element={<EnterpriseDashboard />} />
           <Route path="/enterprise/approvals" element={<EnterpriseApprovals />} />
+          {/* (#408) Provider-facing yield aggregation dashboard. */}
+          <Route path="/provider/yield" element={<ProviderYieldPortal />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -81,6 +81,8 @@ export function clearStore() {
     providersStore.clear();
     globalH3SpatialIndex.clear();
     globalOrderAllocator.clear();
+    // (#408) Reset yield-vault config/share mirrors too.
+    clearYieldStores();
 }
 
 export function saveProvider(record: ProviderRecord) {
@@ -306,4 +308,86 @@ export function logTimeoutIncident(
 
 export function getTimeoutLogs(): TimeoutIncidentLog[] {
     return Array.from(timeoutLogs);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Yield aggregation vaults (#408) — in-memory dual of migration 010 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * In-memory mirror of `yield_vault_configs`. `currentTvlStroops` is a string
+ * for JSON safety, matching amountStroops elsewhere in this store; the pg
+ * column is BIGINT.
+ */
+export interface YieldVaultConfigRecord {
+    vaultId: string;
+    assetAddress: string;
+    liquidBufferRatio: number;
+    currentTvlStroops: string;
+    /** Instantly withdrawable portion tracked by the route/worker layer. */
+    liquidStroops: string;
+    /** Last settled share exchange rate, scaled per YIELD_VAULT.EXCHANGE_RATE_SCALE. */
+    lastExchangeRateScaled: string;
+}
+
+/** In-memory mirror of `provider_vault_shares`. */
+export interface ProviderVaultShareRecord {
+    providerId: string;
+    vaultId: string;
+    shareBalance: string;
+}
+
+const yieldVaultConfigs = new Map<string, YieldVaultConfigRecord>();
+const providerVaultShares = new Map<string, ProviderVaultShareRecord>();
+
+function providerShareKey(providerId: string, vaultId: string): string {
+    return `${providerId}\u0000${vaultId}`;
+}
+
+export function saveYieldVaultConfig(record: YieldVaultConfigRecord): void {
+    yieldVaultConfigs.set(record.vaultId, record);
+}
+
+export function getYieldVaultConfig(vaultId: string): YieldVaultConfigRecord | undefined {
+    return yieldVaultConfigs.get(vaultId);
+}
+
+export function getYieldVaultConfigByAsset(assetAddress: string): YieldVaultConfigRecord | undefined {
+    for (const config of yieldVaultConfigs.values()) {
+        if (config.assetAddress === assetAddress) return config;
+    }
+    return undefined;
+}
+
+export function listYieldVaultConfigs(): YieldVaultConfigRecord[] {
+    return Array.from(yieldVaultConfigs.values());
+}
+
+export function upsertProviderVaultShare(record: ProviderVaultShareRecord): void {
+    providerVaultShares.set(providerShareKey(record.providerId, record.vaultId), record);
+}
+
+export function getProviderVaultShare(
+    providerId: string,
+    vaultId: string,
+): ProviderVaultShareRecord | undefined {
+    return providerVaultShares.get(providerShareKey(providerId, vaultId));
+}
+
+export function listProviderVaultShares(vaultId?: string): ProviderVaultShareRecord[] {
+    const all = Array.from(providerVaultShares.values());
+    return vaultId ? all.filter((share) => share.vaultId === vaultId) : all;
+}
+
+/** Total shares outstanding for a vault — the denominator of the exchange rate. */
+export function totalSharesForVault(vaultId: string): bigint {
+    return listProviderVaultShares(vaultId).reduce(
+        (sum, share) => sum + BigInt(share.shareBalance),
+        0n,
+    );
+}
+
+export function clearYieldStores(): void {
+    yieldVaultConfigs.clear();
+    providerVaultShares.clear();
 }
