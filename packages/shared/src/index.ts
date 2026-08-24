@@ -89,6 +89,7 @@ export const CIRCUIT_BREAKER = {
 } as const;
 
 export * from "./types/batch-auctions.js";
+export * from "./types/enterprise.js";
 
 /**
  * Timing + phase constants for the commit-reveal batch auction engine (#403).
