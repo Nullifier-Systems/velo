@@ -154,6 +154,75 @@ pub fn net_of(gross: i128, fee: i128) -> Result<i128, FeeMathError> {
     Ok(net)
 }
 
+/// Issue #420 — minimum number of ledgers a collateral deposit must stay
+/// locked before it can be released or reallocated (~25s at ~5s/ledger).
+///
+/// Instantaneous single-ledger deposit→release cycles let flash-loan
+/// attackers manipulate provider liquidity allocations and extract
+/// arbitrage before returning the borrowed funds in the same ledger.
+/// Every HTLC-based contract in this workspace enforces the same floor so
+/// the anti-flash-loan invariant holds across products, not just escrow.
+pub const MIN_COLLATERAL_LOCKUP_LEDGERS: u32 = 5;
+
+/// Returns how many ledgers remain in a collateral deposit's flash-loan
+/// cooldown (issue #420). `0` means the deposit is releasable.
+///
+/// Saturating on both ends: a `deposit_ledger` near `u32::MAX` must not
+/// panic under `overflow-checks`, and a `current_ledger` past the unlock
+/// point yields exactly `0` rather than wrapping.
+pub fn collateral_cooldown_remaining(deposit_ledger: u32, current_ledger: u32) -> u32 {
+    let unlock_at = deposit_ledger.saturating_add(MIN_COLLATERAL_LOCKUP_LEDGERS);
+    unlock_at.saturating_sub(current_ledger)
+}
+
+/// Returns `true` when `current_ledger` is still inside the deposit's
+/// mandatory lockup window (i.e. releasing now would be a flash-loan
+/// pattern violation).
+pub fn is_collateral_locked(deposit_ledger: u32, current_ledger: u32) -> bool {
+    collateral_cooldown_remaining(deposit_ledger, current_ledger) > 0
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+
+    #[test]
+    fn same_ledger_release_is_blocked() {
+        // Deposit and release in the exact same ledger sequence — the core
+        // flash-loan pattern this module exists to prevent (#420).
+        assert_eq!(collateral_cooldown_remaining(1_000, 1_000), 5);
+        assert!(is_collateral_locked(1_000, 1_000));
+    }
+
+    #[test]
+    fn cooldown_decays_one_ledger_at_a_time() {
+        assert_eq!(collateral_cooldown_remaining(1_000, 1_001), 4);
+        assert_eq!(collateral_cooldown_remaining(1_000, 1_003), 2);
+        assert_eq!(collateral_cooldown_remaining(1_000, 1_004), 1);
+        assert!(is_collateral_locked(1_000, 1_004));
+    }
+
+    #[test]
+    fn release_allowed_after_full_lockup() {
+        assert_eq!(collateral_cooldown_remaining(1_000, 1_005), 0);
+        assert!(!is_collateral_locked(1_000, 1_005));
+        assert!(!is_collateral_locked(1_000, 10_000));
+    }
+
+    #[test]
+    fn saturates_instead_of_overflowing() {
+        // No arithmetic panic at the u32 boundary (overflow-checks = true).
+        // deposit + 5 saturates at u32::MAX, so deposits in the last few
+        // representable ledgers have their window clamped short — harmless,
+        // real ledger sequences never approach u32::MAX.
+        assert_eq!(collateral_cooldown_remaining(u32::MAX, u32::MAX), 0);
+        assert_eq!(collateral_cooldown_remaining(u32::MAX - 2, u32::MAX), 0);
+        assert_eq!(collateral_cooldown_remaining(u32::MAX - 6, u32::MAX), 0);
+        // One ledger before saturation still decays normally.
+        assert_eq!(collateral_cooldown_remaining(u32::MAX - 6, u32::MAX - 2), 1);
+    }
+}
+
 #[cfg(test)]
 mod fee_math_tests {
     use super::*;

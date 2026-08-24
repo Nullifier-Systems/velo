@@ -41,6 +41,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/cash/request/submit",
       "/api/v1/cash/request/{id}",
       "/api/v1/cash/request/{id}/release",
+      "/api/v1/cash/collateral/release-check",
       "/api/v1/reputation/{address}",
     ];
     expect(Object.keys(doc.paths).sort()).toEqual([...expected].sort());

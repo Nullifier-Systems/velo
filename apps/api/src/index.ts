@@ -15,6 +15,8 @@ import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stel
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
 import { createEnterpriseStore } from "./lib/enterprise-store.js";
 import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
+import { startCollateralCooldownWorker } from "./lib/workers/cooldownWorker.js";
+import { CollateralGuardStore } from "./lib/collateralGuard.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -81,6 +83,19 @@ async function startServer() {
       }).start();
     } else {
       app.log.warn("DATABASE_URL is not configured; Stellar indexer, circuit breaker and GraphQL are disabled");
+    }
+
+    // (#420) Collateral cooldown monitor: unlock escrow collateral deposits
+    // once their flash-loan lockup (~5 ledgers / ~25s) has elapsed. Needs
+    // Postgres for deposit rows; ledger sequences come from Soroban RPC.
+    if (pgPool) {
+      startCollateralCooldownWorker({
+        store: new CollateralGuardStore(pgPool),
+        onUnlocked: (count) => app.log.info({ count }, "collateral cooldowns expired"),
+        onError: (error) => app.log.error(error, "collateral cooldown worker tick failed"),
+      });
+    } else {
+      app.log.warn("DATABASE_URL is not configured; collateral cooldown worker is disabled");
     }
 
     // (#375) Session-key multi-sig emergency rotation: drain

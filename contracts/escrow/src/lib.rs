@@ -15,7 +15,8 @@
 extern crate std;
 
 use htlc_core::{
-    apply_bps, calculate_fee, net_of, Htlc, TradeState, TradeStatus, Tranche, MAX_FEE_BPS,
+    apply_bps, calculate_fee, collateral_cooldown_remaining, net_of, Htlc, TradeState, TradeStatus,
+    Tranche, MAX_FEE_BPS, MIN_COLLATERAL_LOCKUP_LEDGERS,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -184,6 +185,11 @@ pub enum Error {
     /// math replaces raw `*`//` on stroop values so this surfaces as a
     /// recoverable error instead of a WASM panic that freezes escrow.
     FeeArithmeticOverflow = 51,
+    /// Collateral release attempted while the flash-loan cooldown is still
+    /// active (issue #420). A deposit can never be released in the same
+    /// ledger it was created — at least `MIN_COLLATERAL_LOCKUP_LEDGERS`
+    /// (~25s) must elapse first.
+    CooldownActive = 52,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -243,6 +249,10 @@ pub struct CommitmentState {
     pub amount: i128,
     /// Ledger when commitment was created (for window enforcement).
     pub committed_at_ledger: u32,
+    /// Issue #420: ledger at which the collateral's flash-loan cooldown
+    /// expires. Releases before this ledger are rejected with
+    /// `Error::CooldownActive` (minimum ~5 ledgers / ~25 seconds).
+    pub cooldown_until_ledger: u32,
     /// Reveal window must open after Nmin blocks.
     pub reveal_window_min_ledgers: u32,
     /// Reveal window must close before Nmax blocks (commits expire after this).
@@ -416,6 +426,12 @@ const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100; // ~15 minutes (same as lock 
 /// Collateral multiplier: bond required to make commit is % of trade amount.
 /// Stored as fixed-point (10000 = 100%, 500 = 5%).
 const COMMIT_COLLATERAL_RATE_FP: u32 = 500; // 5% collateral requirement
+
+/// Issue #420 — flash-loan attack prevention. The minimum lockup (in
+/// ledgers) between `commit_escrow` (collateral deposit) and any release of
+/// that collateral via `reveal_escrow`. Defined once in htlc-core so every
+/// HTLC-based contract enforces the identical floor (~25s at ~5s/ledger).
+const FLASH_LOAN_COOLDOWN_LEDGERS: u32 = MIN_COLLATERAL_LOCKUP_LEDGERS;
 
 /// Default dynamic fee configuration.
 /// Prevents transaction spam when pending escrow volume is high.
@@ -738,6 +754,15 @@ impl EscrowContract {
     /// Fixed delay (in ledgers) between `pause()` and effective lock blocking.
     pub fn pause_delay_ledgers(_env: Env) -> u32 {
         PAUSE_DELAY_LEDGERS
+    }
+
+    /// Issue #420: flash-loan cooldown length (in ledgers) enforced between
+    /// a collateral deposit (`commit_escrow`) and its release
+    /// (`reveal_escrow`). Exposed so off-chain services — the API's
+    /// release-check endpoint, cooldown worker, and provider dashboards —
+    /// mirror the on-chain rule exactly instead of hardcoding it.
+    pub fn collateral_cooldown_ledgers(_env: Env) -> u32 {
+        FLASH_LOAN_COOLDOWN_LEDGERS
     }
 
     /// Issue #283: Get the total number of trades recorded.
@@ -1563,6 +1588,12 @@ impl EscrowContract {
             collateral,
             amount,
             committed_at_ledger: env.ledger().sequence(),
+            // Issue #420: collateral deposited now cannot be released until
+            // this ledger (saturating — never panic at the u32 boundary).
+            cooldown_until_ledger: env
+                .ledger()
+                .sequence()
+                .saturating_add(FLASH_LOAN_COOLDOWN_LEDGERS),
             reveal_window_min_ledgers: COMMIT_REVEAL_WINDOW_MIN_LEDGERS,
             reveal_window_max_ledgers: COMMIT_REVEAL_WINDOW_MAX_LEDGERS,
         };
@@ -1632,8 +1663,20 @@ impl EscrowContract {
             .get(&commitment_key)
             .ok_or(Error::CommitmentNotFound)?;
 
-        // Verify commitment hasn't expired
+        // Issue #420 — flash-loan attack prevention (checked BEFORE any
+        // window/expiry logic so a same-ledger release attempt always
+        // surfaces as `CooldownActive`, never as a reveal-window error).
+        // Collateral pulled by `commit_escrow` cannot flow back out — via
+        // the refund-on-reveal path or any other — until at least
+        // `MIN_COLLATERAL_LOCKUP_LEDGERS` (~5 ledgers / ~25 seconds) have
+        // elapsed, which makes single-ledger deposit→release arbitrage
+        // impossible within one atomic transaction.
         let current_ledger = env.ledger().sequence();
+        if collateral_cooldown_remaining(commitment_state.committed_at_ledger, current_ledger) > 0 {
+            return Err(Error::CooldownActive);
+        }
+
+        // Verify commitment hasn't expired
         let committed_at = commitment_state.committed_at_ledger;
         let reveal_deadline = committed_at + commitment_state.reveal_window_max_ledgers;
 
@@ -1657,7 +1700,12 @@ impl EscrowContract {
             return Err(Error::RevealWindowClosed);
         }
 
-        // Verify reveal window is open (Nmin has passed)
+        // Verify reveal window is open (Nmin has passed).
+        // Note (#420): since the flash-loan cooldown (5 ledgers) now runs
+        // first and exceeds the legacy Nmin floor (2 ledgers), standard
+        // commitments always clear this check once they clear the cooldown.
+        // Retained as defense-in-depth for commitments stored with custom
+        // per-commitment window parameters.
         let reveal_open_at = committed_at + commitment_state.reveal_window_min_ledgers;
         if current_ledger < reveal_open_at {
             return Err(Error::RevealWindowNotOpen);
@@ -4365,3 +4413,8 @@ mod unit_tests;
 
 #[cfg(test)]
 mod tranche_tests;
+
+/// Issue #420 — flash-loan attack prevention tests (commit-reveal
+/// collateral cooldown) plus general commit-reveal protocol coverage.
+#[cfg(test)]
+mod mev_protection_test;
