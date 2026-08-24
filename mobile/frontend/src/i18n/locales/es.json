@@ -71,6 +71,8 @@
     "somethingWentWrong": "algo salió mal",
     "pausedTitle": "Nuevos intercambios en pausa",
     "pausedBody": "Velo ha detenido temporalmente las nuevas solicitudes de efectivo. Este reclamo existente aún puede liberarse o reembolsarse — tus fondos bloqueados no quedan atrapados.",
+    "feeErrorTitle": "Error en el cálculo de la tarifa de la transacción",
+    "feeErrorBody": "No pudimos liberar este reclamo porque no se pudo calcular la tarifa con precisión. Tus fondos están seguros — inténtalo de nuevo o contacta a soporte.",
     "waitNormal": "Bloqueando fondos en Stellar…",
     "waitLonger": "Está tardando un poco más de lo habitual — el nodo RPC puede estar ocupado. Tus fondos están seguros.",
     "waitStill": "Seguimos trabajando. La transacción fue enviada; estamos esperando confirmación en la cadena.",
@@ -230,6 +232,15 @@
     "reasonPlaceholder": "Mínimo 10 caracteres…",
     "broadcasting": "Transmitiendo…"
   },
+  "batchAuction": {
+    "title": "Subasta por lotes",
+    "phase": "Fase",
+    "secondsRemaining": "({{seconds}}s)",
+    "submitted": "Tu orden está cifrada y comprometida en esta ronda.",
+    "notSubmitted": "Aún no se ha enviado ninguna orden para esta ronda.",
+    "history": "Precios de cierre recientes",
+    "clearingPriceStroops": "{{amount}} stroops"
+  },
   "zkSettle": {
     "modalTitle": "Liquidación Zero-Knowledge",
     "nullifierSpent": "Nullifier ya utilizado",
@@ -334,5 +345,36 @@
     "settlementInfo": "Cuando esté listo, liquida este canal en la cadena con una sola transacción. Ambas partes deben haber firmado el estado final.",
     "settling": "Liquidando...",
     "settleButton": "Cerrar y liquidar canal"
+  },
+  "zk": {
+    "credentialWallet": "Cartera de credenciales ZK",
+    "yourCredentials": "Tus credenciales",
+    "loadingCommitments": "Cargando compromisos...",
+    "noCredentialsYet": "Sin credenciales aún. Emite un compromiso para comenzar.",
+    "commitment": "Compromiso:",
+    "expires": "Expira:",
+    "generateRangeProof": "Generar prueba de rango",
+    "verifiedAttestations": "Atestaciones verificadas",
+    "loadingAttestations": "Cargando atestaciones...",
+    "noAttestationsYet": "Sin atestaciones verificadas aún. Genera y verifica una prueba.",
+    "verified": "Verificado",
+    "issuer": "Emisor:",
+    "secretValue": "Valor secreto:",
+    "enterSecretValue": "Ingresa tu valor secreto",
+    "rangeMin": "Mínimo de rango:",
+    "rangeMax": "Máximo de rango:",
+    "generationTime": "Tiempo de generación:",
+    "ms": "ms",
+    "generationExceeded": "La generación de prueba excedió 1.5 segundos",
+    "generating": "Generando...",
+    "generateAndVerifyProof": "Generar y verificar prueba",
+    "attestationQRCode": "Código QR de atestación",
+    "scanToVerify": "Escanea para verificar credencial",
+    "generatingQRCode": "Generando código QR...",
+    "attestationExpired": "Esta atestación ha expirado",
+    "copied": "¡Copiado!",
+    "copyAttestation": "Copiar atestación",
+    "download": "Descargar",
+    "id": "ID:"
   }
 }

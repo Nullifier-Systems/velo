@@ -14,7 +14,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
+use htlc_core::{
+    apply_bps, calculate_fee, net_of, Htlc, TradeState, TradeStatus, Tranche, MAX_FEE_BPS,
+};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, token, Address, Bytes,
@@ -178,6 +180,10 @@ pub enum Error {
     NoTranches = 49,
     /// Multi-tranche trade detected — use release_tranche() instead of release().
     MultiTrancheUseReleaseTranche = 50,
+    /// Fee arithmetic overflowed or lost precision (issue #381). Checked
+    /// math replaces raw `*`//` on stroop values so this surfaces as a
+    /// recoverable error instead of a WASM panic that freezes escrow.
+    FeeArithmeticOverflow = 51,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -437,7 +443,7 @@ impl EscrowContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
-        if platform_fee_bps > 10_000 {
+        if platform_fee_bps > MAX_FEE_BPS {
             return Err(Error::InvalidFee);
         }
         admin.require_auth();
@@ -951,11 +957,15 @@ impl EscrowContract {
 
         // The buyer's share is a partial refund: fee-free, exactly like
         // refund(). The remainder is the seller's share, which pays the
-        // platform fee exactly like release() does.
-        let buyer_amount = (state.amount * buyer_share_bps as i128) / 10_000;
-        let seller_gross = state.amount - buyer_amount;
-        let fee = (seller_gross * fee_bps as i128) / 10_000;
-        let seller_payout = seller_gross - fee;
+        // platform fee exactly like release() does. All split math is
+        // checked (issue #381) — a dispute on a max-size trade must
+        // resolve or fail with an error, never panic mid-payout.
+        let buyer_amount =
+            apply_bps(state.amount, buyer_share_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_gross =
+            net_of(state.amount, buyer_amount).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let fee = calculate_fee(seller_gross, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_payout = net_of(seller_gross, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Resolved;
         env.storage().persistent().set(&key, &state);
@@ -1115,6 +1125,14 @@ impl EscrowContract {
     /// signers whose signatures are on the transaction.
     pub fn set_platform_fee(env: Env, fee_bps: u32, signers: Vec<Address>) -> Result<(), Error> {
         require_multisig(&env, &signers)?;
+        // Issue #381: `initialize()` already rejected fees above 100%, but
+        // this setter silently accepted them. An out-of-range fee_bps makes
+        // `amount * fee_bps` overflow i128 on the next release — a panic
+        // that permanently freezes every locked trade. Reject it here and
+        // rely on checked math downstream for defense in depth.
+        if fee_bps > MAX_FEE_BPS {
+            return Err(Error::InvalidFee);
+        }
         env.storage()
             .instance()
             .set(&DataKey::PlatformFeeBps, &fee_bps);
@@ -1251,8 +1269,10 @@ impl EscrowContract {
                 continue;
             }
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern, same as release(): update state before external calls.
             state.status = TradeStatus::Released;
@@ -1346,8 +1366,10 @@ impl EscrowContract {
             .instance()
             .get(&DataKey::PlatformFeeBps)
             .unwrap_or(0);
-        let fee = (release_state.amount * fee_bps as i128) / 10_000;
-        let payout = release_state.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        let fee = calculate_fee(release_state.amount, fee_bps)
+            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(release_state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
         if payout <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -1469,8 +1491,10 @@ impl EscrowContract {
             let key = DataKey::Trade(item.id.clone());
             let mut state: TradeState = env.storage().persistent().get(&key).unwrap();
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern: update state before external calls.
             state.status = TradeStatus::Released;
@@ -1529,8 +1553,9 @@ impl EscrowContract {
             return Err(Error::CommitmentAlreadyExists);
         }
 
-        // Calculate collateral bond (5% of amount)
-        let collateral = (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000;
+        // Calculate collateral bond (5% of amount) — checked per issue #381.
+        let collateral =
+            apply_bps(amount, COMMIT_COLLATERAL_RATE_FP).map_err(|_| Error::InvalidAmount)?;
 
         // CEI (issue #273): record commitment + liquidity bookkeeping before pull.
         let commitment_state = CommitmentState {
@@ -1639,9 +1664,11 @@ impl EscrowContract {
         }
 
         // Verify revealed parameters match commitment
+        let expected_collateral =
+            apply_bps(amount, COMMIT_COLLATERAL_RATE_FP).map_err(|_| Error::InvalidAmount)?;
         if commitment_state.amount != amount
             || commitment_state.buyer != buyer
-            || commitment_state.collateral != (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000
+            || commitment_state.collateral != expected_collateral
         {
             return Err(Error::CommitmentMismatch);
         }
@@ -1799,8 +1826,9 @@ impl EscrowContract {
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)?;
 
-        let fee = (state.amount * fee_bps as i128) / 10_000;
-        let payout = state.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        let fee = calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
@@ -2044,8 +2072,18 @@ impl Htlc for EscrowContract {
                 .unwrap_or(0);
             let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche
+            // floor — micro-tranches can no longer settle fee-free, and
+            // max-size amounts surface overflow as a contract error
+            // (release() is `()`, so it panics with the error code).
+            let fee = match calculate_fee(state.amount, fee_bps) {
+                Ok(f) => f,
+                Err(_) => panic_with_error(&env, Error::FeeArithmeticOverflow),
+            };
+            let payout = match net_of(state.amount, fee) {
+                Ok(p) => p,
+                Err(_) => panic_with_error(&env, Error::FeeArithmeticOverflow),
+            };
 
             // CEI pattern: update state before external calls
             state.status = TradeStatus::Released;
@@ -2276,8 +2314,12 @@ impl EscrowContract {
             .unwrap_or(0);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
 
-        let fee = (tranche.amount * fee_bps as i128) / 10_000;
-        let payout = tranche.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        // This is the tranche-settlement path the issue targets: a 1-bps fee
+        // on a tiny tranche must round UP to 1 stroop, never truncate to 0.
+        let fee =
+            calculate_fee(tranche.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(tranche.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         // Mark this tranche as released
         tranche.released = true;
