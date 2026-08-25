@@ -394,5 +394,10 @@
     "selectHex": "Seleccione una celda para ver los detalles de incentivos",
     "refresh": "Actualizar Puntos Críticos",
     "loading": "Cargando mapa de demanda espacial..."
+  },
+  "tranche": {
+    "unreleasedRefunded": "Unreleased Tranches Refunded to Buyer",
+    "ledgersRemaining": "{{ledgersRemaining}} Ledgers Remaining (~{{estimatedMinutes}} mins) Until Partial Refund",
+    "tranchesReleased": "{{released}} / {{total}} Tranches Released"
   }
 }

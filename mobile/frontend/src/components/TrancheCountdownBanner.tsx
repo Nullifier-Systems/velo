@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   totalTranches: number;
@@ -15,10 +16,12 @@ export const TrancheCountdownBanner: React.FC<Props> = ({
   estimatedMinutes,
   status
 }) => {
+  const { t } = useTranslation();
+
   if (status === 'REFUND_EXECUTED') {
     return (
       <div className="bg-green-100 p-4 rounded-md text-green-800">
-        <p>Unreleased Tranches Refunded to Buyer</p>
+        <p>{t('tranche.unreleasedRefunded')}</p>
       </div>
     );
   }
@@ -31,7 +34,7 @@ export const TrancheCountdownBanner: React.FC<Props> = ({
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold flex items-center">
           {isWarning && <span className="text-yellow-500 mr-2">⚠️</span>}
-          {ledgersRemaining} Ledgers Remaining (~{estimatedMinutes} mins) Until Partial Refund
+          {t('tranche.ledgersRemaining', { ledgersRemaining, estimatedMinutes })}
         </h4>
       </div>
       
@@ -42,7 +45,10 @@ export const TrancheCountdownBanner: React.FC<Props> = ({
         />
       </div>
       <div className="text-xs text-gray-500 mt-1 text-right">
-        {totalTranches - unreleasedTranches} / {totalTranches} Tranches Released
+        {t('tranche.tranchesReleased', {
+          released: totalTranches - unreleasedTranches,
+          total: totalTranches
+        })}
       </div>
     </div>
   );
