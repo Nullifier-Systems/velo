@@ -4,8 +4,13 @@ from "vitest";
 import {
   calculateMedian,
   reconcileRates,
+  calculateTwap,
+  recordRateSample,
+  getTwap,
+  TWAP_WINDOW_SAMPLES,
   RateSource,
   ReconciledRate,
+  TwapSample,
 } from "./rates.js";
 
 // Mock the external dependencies
@@ -230,6 +235,69 @@ describe("Rates Module", () => {
 
       expect(result.confidence_score).toBeCloseTo(0.15, 2);
       expect(result.deviation_warning).toBe(false);
+    });
+  });
+
+  describe("TWAP collateral valuation (issue #420)", () => {
+    const T0 = 1_700_000_000_000;
+
+    const sample = (rate: number, offsetMs: number): TwapSample => ({
+      rate,
+      timestamp: T0 + offsetMs,
+    });
+
+    it("returns null with no samples", () => {
+      expect(calculateTwap([])).toBeNull();
+      expect(getTwap("usdc_xlm")).toBeNull();
+    });
+
+    it("weights each quote by the time it stood until the next one", () => {
+      // 3.5 stands for 90s, then 4.5 for the final 10s → TWAP ≈ 3.6, not 4.0.
+      const result = calculateTwap([sample(3.5, 0), sample(4.5, 90_000)], T0 + 100_000);
+      expect(result).not.toBeNull();
+      expect(result!.twap).toBeCloseTo(3.6, 9);
+      expect(result!.sample_count).toBe(2);
+      expect(result!.window_seconds).toBe(100);
+    });
+
+    it("damps a flash-loan-funded spot spike to near irrelevance", () => {
+      // 15 minutes of stable 30s-cadence quotes at 3.5, then one spike to
+      // 10.0 funded by a flash swap. Spot says 10.0; the TWAP barely moves:
+      // one poisoned quote out of 31 carries ~1/31 of the total weight, so
+      // the average must stay within a small band above the honest rate.
+      const samples = Array.from({ length: 30 }, (_, i) => sample(3.5, i * 30_000));
+      samples.push(sample(10.0, 900_000));
+
+      const result = calculateTwap(samples, T0 + 930_000);
+
+      expect(result!.twap).toBeGreaterThan(3.5);
+      expect(result!.twap).toBeLessThan(3.75);
+    });
+
+    it("falls back to arithmetic mean when all samples share one timestamp", () => {
+      const result = calculateTwap(
+        [sample(3.0, 0), sample(5.0, 0), sample(4.0, 0)],
+        T0,
+      );
+      expect(result!.twap).toBe(4.0);
+      expect(result!.window_seconds).toBe(0);
+    });
+
+    it("recordRateSample ignores non-finite and non-positive rates", () => {
+      recordRateSample("twap_test_pair", Number.NaN);
+      recordRateSample("twap_test_pair", 0);
+      recordRateSample("twap_test_pair", -3.5);
+      expect(getTwap("twap_test_pair")).toBeNull();
+      recordRateSample("twap_test_pair", 3.5);
+      expect(getTwap("twap_test_pair")!.twap).toBe(3.5);
+    });
+
+    it("caps the series at TWAP_WINDOW_SAMPLES entries", () => {
+      for (let i = 0; i < TWAP_WINDOW_SAMPLES + 10; i++) {
+        recordRateSample("twap_cap_pair", 1 + i * 0.001, T0 + i * 1000);
+      }
+      const snapshot = getTwap("twap_cap_pair")!;
+      expect(snapshot.sample_count).toBe(TWAP_WINDOW_SAMPLES);
     });
   });
 });

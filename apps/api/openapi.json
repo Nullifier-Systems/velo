@@ -819,6 +819,138 @@
         }
       }
     },
+    "/api/v1/cash/collateral/release-check": {
+      "post": {
+        "operationId": "checkCollateralRelease",
+        "tags": [
+          "cash"
+        ],
+        "summary": "Collateral flash-loan release gate (#420)",
+        "description": "Verifies a provider's collateral release clears the minimum 5-ledger (~25s) lockup under a SELECT ... FOR UPDATE row lock, preventing single-ledger flash-loan deposit/release cycles. Returns 200 OK when eligible, 409 Conflict while any cooldown is still active. Free — read-only safety check.",
+        "x-rate-limit": {
+          "max": 30,
+          "timeWindow": "1 minute"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "provider_id"
+                ],
+                "properties": {
+                  "provider_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Provider address whose collateral is being released."
+                  },
+                  "release_ledger": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Optional ledger to check against; defaults to the latest closed ledger."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "All cooldowns cleared — the release may proceed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "eligible",
+                    "provider_id",
+                    "current_ledger"
+                  ],
+                  "properties": {
+                    "eligible": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "provider_id": {
+                      "type": "string"
+                    },
+                    "current_ledger": {
+                      "type": "integer"
+                    },
+                    "deposits_checked": {
+                      "type": "integer"
+                    },
+                    "remaining_ledgers": {
+                      "type": "integer",
+                      "const": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Flash-loan cooldown still active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "const": "FLASH_LOAN_COOLDOWN_ACTIVE"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "remaining_ledgers": {
+                      "type": "integer"
+                    },
+                    "earliest_release_ledger": {
+                      "type": "integer"
+                    },
+                    "estimated_seconds_remaining": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The Soroban ledger sequence could not be resolved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reputation/{address}": {
       "get": {
         "operationId": "getReputation",

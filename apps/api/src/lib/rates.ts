@@ -37,6 +37,12 @@ export interface RateReference {
   usdc_xlm: ReconciledRate;
   usdc_usd: ReconciledRate;
   xlm_usd: ReconciledRate;
+  /**
+   * Issue #420: time-weighted average of recent USDC/XLM samples.
+   * Collateral valuation against the TWAP prevents flash-swap rate skewing
+   * that a single-ledger spot quote would allow. Null until samples exist.
+   */
+  usdc_xlm_twap?: TwapSnapshot | null;
 }
 
 // Simple in-memory cache for CoinGecko rates
@@ -207,6 +213,98 @@ export function reconcileRates(sources: RateSource[]): ReconciledRate {
 }
 
 /**
+ * ---------------------------------------------------------------------------
+ * TWAP — time-weighted average price (issue #420).
+ *
+ * Spot rates can be skewed for one ledger close by a flash-loan-funded
+ * swap, so collateral valuation must never trust a single observation.
+ * Every DEX/Coingecko sample is retained and the release paths value
+ * collateral against the time-weighted average over a trailing window,
+ * which damps same-ledger spikes to near irrelevance.
+ * ---------------------------------------------------------------------------
+ */
+
+/** Maximum samples retained per pair. */
+export const TWAP_WINDOW_SAMPLES = 60;
+/** Trailing window over which the average is weighted (~15 minutes). */
+export const TWAP_WINDOW_MS = 15 * 60 * 1000;
+
+export interface TwapSample {
+  rate: number;
+  /** Epoch milliseconds. */
+  timestamp: number;
+}
+
+export interface TwapSnapshot {
+  twap: number;
+  sample_count: number;
+  window_seconds: number;
+}
+
+const twapSamples = new Map<string, TwapSample[]>();
+
+/** Records a rate observation for a pair's TWAP series. Invalid rates are ignored. */
+export function recordRateSample(
+  pair: string,
+  rate: number,
+  timestamp: number = Date.now(),
+): void {
+  if (!Number.isFinite(rate) || rate <= 0) return;
+  const list = twapSamples.get(pair) ?? [];
+  list.push({ rate, timestamp });
+  while (
+    list.length > TWAP_WINDOW_SAMPLES ||
+    (list.length > 1 && timestamp - list[0].timestamp > TWAP_WINDOW_MS)
+  ) {
+    list.shift();
+  }
+  twapSamples.set(pair, list);
+}
+
+/**
+ * Time-weighted average of `samples`: each observation is weighted by how
+ * long it stood until the next one (the last until `now`). Returns null
+ * with no data; falls back to the arithmetic mean when every sample shares
+ * a single timestamp, so a burst of same-instant quotes still averages
+ * instead of collapsing to the last quote.
+ */
+export function calculateTwap(
+  samples: TwapSample[],
+  now: number = Date.now(),
+): TwapSnapshot | null {
+  if (samples.length === 0) return null;
+
+  const sorted = [...samples].sort((a, b) => a.timestamp - b.timestamp);
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const end = i === sorted.length - 1 ? Math.max(now, sorted[i].timestamp) : sorted[i + 1].timestamp;
+    const weight = Math.max(0, end - sorted[i].timestamp);
+    weightedSum += sorted[i].rate * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight <= 0) {
+    return {
+      twap: sorted.reduce((sum, s) => sum + s.rate, 0) / sorted.length,
+      sample_count: sorted.length,
+      window_seconds: 0,
+    };
+  }
+
+  return {
+    twap: weightedSum / totalWeight,
+    sample_count: sorted.length,
+    window_seconds: Math.max(0, Math.round((now - sorted[0].timestamp) / 1000)),
+  };
+}
+
+/** Current TWAP snapshot for a pair, or null if nothing has been sampled yet. */
+export function getTwap(pair: string): TwapSnapshot | null {
+  return calculateTwap(twapSamples.get(pair) ?? []);
+}
+
+/**
  * Fetch all reference rates
  */
 export async function getRateReference(): Promise<RateReference> {
@@ -226,6 +324,12 @@ export async function getRateReference(): Promise<RateReference> {
     sources.push(coinGeckoRate);
   } catch (error) {
     console.warn("Failed to fetch CoinGecko USDC/XLM rate:", error);
+  }
+
+  // Issue #420: feed every observation into the TWAP series so collateral
+  // valuation can average away flash-swap spikes instead of trusting spot.
+  for (const source of sources) {
+    recordRateSample("usdc_xlm", source.rate, source.timestamp.getTime());
   }
 
   // Reconcile USDC/XLM rate
@@ -273,5 +377,6 @@ export async function getRateReference(): Promise<RateReference> {
     usdc_xlm: usdcXlm,
     usdc_usd: usdcUsd,
     xlm_usd: xlmUsd,
+    usdc_xlm_twap: getTwap("usdc_xlm"),
   };
 }

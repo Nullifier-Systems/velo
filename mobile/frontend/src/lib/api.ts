@@ -280,3 +280,120 @@ export async function fetchEscrowPauseState(): Promise<EscrowPauseState> {
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
 }
+
+// ---------------------------------------------------------------------------
+// API client for HTTP requests with authentication
+// ---------------------------------------------------------------------------
+
+export interface IndexerStatus {
+  latestBlockHeader: {
+    ledger_sequence: number;
+    block_hash: string;
+    parent_hash: string;
+    created_at: string;
+  } | null;
+  recentReorgs: Array<{
+    id: string;
+    detected_at: string;
+    fork_ledger: number;
+    rollback_depth: number;
+    reason: string;
+    resolved_at?: string;
+  }>;
+  rpcHealth: Array<{
+    id: string;
+    rpc_url: string;
+    is_healthy: boolean;
+    last_check: string;
+    consecutive_failures: number;
+    last_failure_reason?: string;
+  }>;
+  snapshots: {
+    count: number;
+    latest: {
+      ledger_sequence: number;
+      block_hash: string;
+      created_at: string;
+    } | null;
+  };
+  currentRpcUrl: string;
+}
+
+export interface IndexerDagResponse {
+  headers: Array<{
+    ledger_sequence: number;
+    block_hash: string;
+    parent_hash: string;
+    created_at: string;
+  }>;
+  count: number;
+  range: { from: number; to: number };
+}
+
+export interface IndexerReorgsResponse {
+  reorgs: Array<{
+    id: string;
+    detected_at: string;
+    fork_ledger: number;
+    rollback_depth: number;
+    reason: string;
+    resolved_at?: string;
+  }>;
+  count: number;
+}
+
+const apiClient = {
+  async get<T>(endpoint: string, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+
+  async post<T>(endpoint: string, body?: unknown, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+
+  async delete<T>(endpoint: string, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+};
+
+export const api = apiClient;

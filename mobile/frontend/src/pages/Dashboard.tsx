@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
+import CollateralCooldownBadge from "../components/CollateralCooldownBadge.js";
 
 const STROOPS_PER_USDC = 10_000_000;
+/** Poll cadence matches one flash-loan cooldown epoch (~5 ledgers x ~5s). */
+const COOLDOWN_POLL_MS = 25_000;
 
 interface Trade {
   id: string;
@@ -32,6 +35,37 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Ledgers left on this provider's collateral flash-loan cooldown (#420). */
+  const [cooldownRemaining, setCooldownRemaining] = useState<number | null>(null);
+
+  // (#420) Poll the release-check gate so providers see when their
+  // collateral unlocks. A missing/failed endpoint just hides the badge.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    const checkCooldown = async () => {
+      try {
+        const apiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const res = await fetch(`${apiUrl}/api/v1/cash/collateral/release-check`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider_id: address })
+        });
+        const json = await res.json();
+        if (!cancelled && typeof json?.remaining_ledgers === 'number') {
+          setCooldownRemaining(json.remaining_ledgers);
+        }
+      } catch {
+        // Endpoint unavailable — leave the badge hidden rather than guessing.
+      }
+    };
+    void checkCooldown();
+    const timer = setInterval(checkCooldown, COOLDOWN_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isAuthenticated, address]);
 
   const fetchDashboard = async (providerAddress: string) => {
     setLoading(true);
@@ -132,6 +166,12 @@ export default function Dashboard() {
           <p className="mt-1 text-sm text-gray-500">{t("common.address")}: <span className="font-mono">{data?.address}</span></p>
           <button onClick={() => { setIsAuthenticated(false); setData(null); }} className="text-blue-600 text-sm mt-2">{t("dashboard.logout")}</button>
         </div>
+
+        {cooldownRemaining !== null && (
+          <div>
+            <CollateralCooldownBadge remainingLedgers={cooldownRemaining} />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div className="bg-white overflow-hidden shadow rounded-lg border border-gray-100">

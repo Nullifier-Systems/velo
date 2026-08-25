@@ -107,6 +107,33 @@ export async function getLatestLedgerSequence(): Promise<number> {
 }
 
 /**
+ * Issue #420: latest closed ledger sequence with bounded retries.
+ *
+ * The collateral release-check endpoint gates fund movements on this value,
+ * so a single transient RPC hiccup must not fail the check — but a
+ * persistent outage must surface as an error the route can translate into
+ * a 502 rather than silently treating stale state as "cooldown elapsed".
+ */
+export async function getCurrentLedgerSequenceWithRetry(
+  maxAttempts = 3,
+): Promise<number> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await rpcTimeout("getLatestLedger", RPC_TIMEOUTS.genericBuildSim, () =>
+        server.getLatestLedger(),
+      ).then((ledger) => ledger.sequence);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Loads the deployer/buyer keypair — testnet-only.
  *
  * On mainnet the API NEVER holds a signing key. Instead:
