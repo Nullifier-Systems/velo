@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import EvidenceViewer from "../components/EvidenceViewer.js";
 import { JurorVoteModal } from "../components/JurorVoteModal.js";
 
@@ -18,6 +19,7 @@ interface ActivePanel {
 }
 
 export default function JurorPortal() {
+  const { t } = useTranslation();
   const [address, setAddress] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [stake, setStake] = useState<JurorStake | null>(null);
@@ -56,14 +58,14 @@ export default function JurorPortal() {
   if (!isAuthenticated) {
     return (
       <div style={{ backgroundColor: "#11111b", color: "#cdd6f4", minHeight: "100vh", padding: "24px" }}>
-        <h1 style={{ color: "#cba6f7" }}>Jury Portal</h1>
-        <p style={{ color: "#6c7086" }}>Enter your Stellar address to access the juror dashboard.</p>
+        <h1 style={{ color: "#cba6f7" }}>{t("juryArbitration.jurorPortal.title")}</h1>
+        <p style={{ color: "#6c7086" }}>{t("juryArbitration.jurorPortal.description")}</p>
         <div style={{ display: "flex", gap: "12px", maxWidth: "600px" }}>
           <input
             type="text"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="Stellar address (G...)"
+            placeholder={t("juryArbitration.jurorPortal.placeholder")}
             style={{
               flex: 1,
               padding: "10px 14px",
@@ -86,7 +88,7 @@ export default function JurorPortal() {
               fontWeight: "bold",
             }}
           >
-            {loading ? "Loading..." : "Connect"}
+            {loading ? t("juryArbitration.jurorPortal.loading") : t("juryArbitration.jurorPortal.connect")}
           </button>
         </div>
         {error && (
@@ -98,7 +100,7 @@ export default function JurorPortal() {
 
   return (
     <div style={{ backgroundColor: "#11111b", color: "#cdd6f4", minHeight: "100vh", padding: "24px" }}>
-      <h1 style={{ color: "#cba6f7" }}>Jury Portal</h1>
+      <h1 style={{ color: "#cba6f7" }}>{t("juryArbitration.jurorPortal.title")}</h1>
 
       {/* Stake Info Card */}
       {stake && (
@@ -109,28 +111,28 @@ export default function JurorPortal() {
           marginBottom: "24px",
           border: "1px solid #313244",
         }}>
-          <h2 style={{ marginTop: 0, color: "#f9e2af" }}>Your Stake</h2>
+          <h2 style={{ marginTop: 0, color: "#f9e2af" }}>{t("juryArbitration.jurorPortal.yourStake")}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Staked Amount</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.jurorPortal.stakedAmount")}</div>
               <div style={{ fontSize: "1.2rem", fontWeight: "bold" }}>
-                {(Number(stake.stakedAmountStroops) / STROOPS_PER_USDC).toFixed(2)} USDC
+                {(Number(stake.stakedAmountStroops) / STROOPS_PER_USDC).toFixed(2)} {t("juryArbitration.jurorPortal.usdc")}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Reputation</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.jurorPortal.reputation")}</div>
               <div style={{ fontSize: "1.2rem", fontWeight: "bold" }}>
                 {stake.reputationScore}/100
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Status</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.jurorPortal.status")}</div>
               <div style={{
                 fontSize: "1rem",
                 fontWeight: "bold",
                 color: stake.active ? "#a6e3a1" : "#f38ba8",
               }}>
-                {stake.active ? "Active" : "Inactive"}
+                {stake.active ? t("juryArbitration.jurorPortal.active") : t("juryArbitration.jurorPortal.inactive")}
               </div>
             </div>
           </div>
@@ -139,9 +141,9 @@ export default function JurorPortal() {
 
       {/* Active Panels */}
       <div style={{ marginBottom: "24px" }}>
-        <h2 style={{ color: "#89b4fa" }}>Your Dispute Panels</h2>
+        <h2 style={{ color: "#89b4fa" }}>{t("juryArbitration.jurorPortal.yourPanels")}</h2>
         {panels.length === 0 && (
-          <p style={{ color: "#6c7086" }}>No active dispute panels assigned.</p>
+          <p style={{ color: "#6c7086" }}>{t("juryArbitration.jurorPortal.noPanels")}</p>
         )}
         {panels.map((panel) => (
           <div
@@ -159,13 +161,13 @@ export default function JurorPortal() {
           >
             <div>
               <div style={{ fontWeight: "bold" }}>
-                Panel {panel.panelId.slice(0, 8)}...
+                {t("juryArbitration.jurorPortal.panel")} {panel.panelId.slice(0, 8)}...
               </div>
               <div style={{ fontSize: "0.85rem", color: "#6c7086" }}>
-                Trade: {panel.tradeId.slice(0, 12)}... &middot; Status: {panel.status}
+                {t("juryArbitration.jurorPortal.tradeLabel")} {panel.tradeId.slice(0, 12)}... · {t("juryArbitration.jurorPortal.statusLabel")} {panel.status}
               </div>
               <div style={{ fontSize: "0.8rem", color: "#585b70" }}>
-                Escrow: {(Number(panel.escrowAmountStroops) / STROOPS_PER_USDC).toFixed(2)} USDC
+                {t("juryArbitration.jurorPortal.escrowLabel")} {(Number(panel.escrowAmountStroops) / STROOPS_PER_USDC).toFixed(2)} {t("juryArbitration.jurorPortal.usdc")}
               </div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -181,7 +183,7 @@ export default function JurorPortal() {
                   fontSize: "0.85rem",
                 }}
               >
-                View Evidence
+                {t("juryArbitration.jurorPortal.viewEvidence")}
               </button>
               {panel.status === "VOTING" && (
                 <button
@@ -197,7 +199,7 @@ export default function JurorPortal() {
                     fontWeight: "bold",
                   }}
                 >
-                  Cast Vote
+                  {t("juryArbitration.jurorPortal.castVote")}
                 </button>
               )}
             </div>

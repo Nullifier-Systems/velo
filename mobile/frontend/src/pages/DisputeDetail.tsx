@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import EvidenceViewer from "../components/EvidenceViewer.js";
 
 interface DisputeDetailProps {
@@ -19,6 +20,7 @@ interface DisputeInfo {
 }
 
 export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
+  const { t } = useTranslation();
   const [dispute, setDispute] = useState<DisputeInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
   if (loading) {
     return (
       <div style={{ backgroundColor: "#11111b", color: "#cdd6f4", padding: "24px" }}>
-        <p style={{ fontStyle: "italic" }}>Loading dispute details...</p>
+        <p style={{ fontStyle: "italic" }}>{t("juryArbitration.disputeDetail.loading")}</p>
       </div>
     );
   }
@@ -68,7 +70,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
           {error}
         </div>
         <button onClick={onBack} style={{ marginTop: "12px", cursor: "pointer" }}>
-          Back
+          {t("juryArbitration.disputeDetail.back")}
         </button>
       </div>
     );
@@ -87,10 +89,10 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
           marginBottom: "16px",
         }}
       >
-        &larr; Back to Dashboard
+        {t("juryArbitration.disputeDetail.backToDashboard")}
       </button>
 
-      <h1 style={{ color: "#cba6f7" }}>Dispute Detail</h1>
+      <h1 style={{ color: "#cba6f7" }}>{t("juryArbitration.disputeDetail.title")}</h1>
 
       {dispute && (
         <div style={{
@@ -102,11 +104,11 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
         }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Trade ID</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.tradeId")}</div>
               <div style={{ fontFamily: "monospace", fontSize: "0.9rem" }}>{dispute.tradeId.slice(0, 16)}...</div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Status</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.status")}</div>
               <div style={{
                 fontWeight: "bold",
                 color: dispute.status === "disputed" ? "#f9e2af" : "#a6e3a1",
@@ -115,26 +117,26 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Buyer</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.buyer")}</div>
               <div style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
                 {dispute.buyer.slice(0, 12)}...
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Seller</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.seller")}</div>
               <div style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
                 {dispute.seller.slice(0, 12)}...
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Amount</div>
+              <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.amount")}</div>
               <div style={{ fontWeight: "bold" }}>
-                {(Number(dispute.amountStroops) / STROOPS_PER_USDC).toFixed(2)} USDC
+                {(Number(dispute.amountStroops) / STROOPS_PER_USDC).toFixed(2)} {t("juryArbitration.disputeDetail.usdc")}
               </div>
             </div>
             {dispute.panelId && (
               <div>
-                <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>Jury Panel</div>
+                <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.juryPanel")}</div>
                 <div style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
                   {dispute.panelId.slice(0, 12)}...
                 </div>
@@ -149,7 +151,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
               borderRadius: "8px",
               backgroundColor: "#313244",
             }}>
-              <div style={{ fontSize: "0.85rem", color: "#6c7086" }}>Resolution</div>
+              <div style={{ fontSize: "0.85rem", color: "#6c7086" }}>{t("juryArbitration.disputeDetail.resolution")}</div>
               <div style={{
                 fontWeight: "bold",
                 fontSize: "1.1rem",
@@ -159,7 +161,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
                   ? `Resolved in favor of Buyer (${dispute.buyerShareBps ?? 10000} bps)`
                   : dispute.resolution === "SELLER"
                     ? `Resolved in favor of Seller (${((dispute.buyerShareBps ?? 0) / 100).toFixed(0)}% to Buyer)`
-                    : "Tied - Split 50/50"}
+                    : t("juryArbitration.disputeDetail.tiedSplit")}
               </div>
             </div>
           )}
@@ -178,7 +180,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
           fontWeight: "bold",
         }}
       >
-        View Evidence Files
+        {t("juryArbitration.disputeDetail.viewEvidenceFiles")}
       </button>
 
       {showEvidence && (

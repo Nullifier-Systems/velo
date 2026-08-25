@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 interface EvidenceFile {
   id: string;
@@ -17,6 +18,7 @@ interface EvidenceViewerProps {
 }
 
 export default function EvidenceViewer({ tradeId, onClose }: EvidenceViewerProps) {
+  const { t } = useTranslation();
   const [evidence, setEvidence] = useState<EvidenceFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +49,9 @@ export default function EvidenceViewer({ tradeId, onClose }: EvidenceViewerProps
       maxWidth: "600px",
       width: "100%",
     }}>
-      <h3 style={{ marginTop: 0, color: "#f9e2af" }}>Evidence Files</h3>
+      <h3 style={{ marginTop: 0, color: "#f9e2af" }}>{t("juryArbitration.evidenceViewer.title")}</h3>
 
-      {loading && <p style={{ fontStyle: "italic" }}>Loading evidence...</p>}
+      {loading && <p style={{ fontStyle: "italic" }}>{t("juryArbitration.evidenceViewer.loading")}</p>}
       {error && (
         <div style={{ color: "#f38ba8", padding: "8px", borderRadius: "6px", backgroundColor: "#45475a" }}>
           {error}
@@ -57,7 +59,7 @@ export default function EvidenceViewer({ tradeId, onClose }: EvidenceViewerProps
       )}
 
       {!loading && evidence.length === 0 && (
-        <p style={{ color: "#6c7086" }}>No evidence files uploaded for this dispute.</p>
+        <p style={{ color: "#6c7086" }}>{t("juryArbitration.evidenceViewer.empty")}</p>
       )}
 
       {evidence.map((file) => (
@@ -76,14 +78,14 @@ export default function EvidenceViewer({ tradeId, onClose }: EvidenceViewerProps
           <div>
             <div style={{ fontWeight: "bold" }}>{file.fileName}</div>
             <div style={{ fontSize: "0.8rem", color: "#6c7086" }}>
-              {file.contentType} &middot; {(file.sizeBytes / 1024).toFixed(1)} KB
+              {file.contentType} · {(file.sizeBytes / 1024).toFixed(1)} {t("juryArbitration.evidenceViewer.kb")}
             </div>
             <div style={{ fontSize: "0.75rem", color: "#585b70" }}>
-              Uploaded by: {file.uploadedBy.slice(0, 8)}... &middot; {new Date(file.createdAt).toLocaleString()}
+              {t("juryArbitration.evidenceViewer.uploadedBy")} {file.uploadedBy.slice(0, 8)}... · {new Date(file.createdAt).toLocaleString()}
             </div>
           </div>
           <div style={{ fontSize: "0.7rem", color: "#45475a", fontFamily: "monospace", maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Merkle: {file.merkleRoot.slice(0, 12)}...
+            {t("juryArbitration.evidenceViewer.merkle")} {file.merkleRoot.slice(0, 12)}...
           </div>
         </div>
       ))}
@@ -100,7 +102,7 @@ export default function EvidenceViewer({ tradeId, onClose }: EvidenceViewerProps
           cursor: "pointer",
         }}
       >
-        Close
+        {t("juryArbitration.evidenceViewer.close")}
       </button>
     </div>
   );

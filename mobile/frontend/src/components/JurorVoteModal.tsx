@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface JurorVoteModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface JurorVoteModalProps {
 type VoteStep = "IDLE" | "COMMITTING" | "COMMITTED" | "REVEALING" | "REVEALED" | "ERROR";
 
 export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: JurorVoteModalProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<VoteStep>("IDLE");
   const [selectedVote, setSelectedVote] = useState<"BUYER" | "SELLER" | "ABSTAIN" | null>(null);
   const [commitHash, setCommitHash] = useState<string | null>(null);
@@ -89,9 +91,9 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
   };
 
   const voteOptions = [
-    { value: "BUYER" as const, label: "Rule for Buyer", color: "#a6e3a1" },
-    { value: "SELLER" as const, label: "Rule for Seller", color: "#89b4fa" },
-    { value: "ABSTAIN" as const, label: "Abstain", color: "#6c7086" },
+    { value: "BUYER" as const, label: t("juryArbitration.voteModal.ruleForBuyer"), color: "#a6e3a1" },
+    { value: "SELLER" as const, label: t("juryArbitration.voteModal.ruleForSeller"), color: "#89b4fa" },
+    { value: "ABSTAIN" as const, label: t("juryArbitration.voteModal.abstain"), color: "#6c7086" },
   ];
 
   return (
@@ -116,9 +118,9 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
         width: "90%",
         boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
       }}>
-        <h3 style={{ marginTop: 0, color: "#cba6f7" }}>Cast Your Vote</h3>
+        <h3 style={{ marginTop: 0, color: "#cba6f7" }}>{t("juryArbitration.voteModal.title")}</h3>
         <p style={{ fontSize: "0.85rem", color: "#6c7086" }}>
-          Panel: {panelId.slice(0, 12)}... | Juror: {jurorAddress.slice(0, 12)}...
+          {t("juryArbitration.voteModal.panelLabel")} {panelId.slice(0, 12)}... | {t("juryArbitration.voteModal.jurorLabel")} {jurorAddress.slice(0, 12)}...
         </p>
 
         {step === "ERROR" && (
@@ -144,7 +146,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
             textAlign: "center",
             fontWeight: "bold",
           }}>
-            Vote revealed successfully. Panel will resolve when all jurors reveal.
+            {t("juryArbitration.voteModal.revealSuccess")}
           </div>
         )}
 
@@ -174,7 +176,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
 
         {step === "COMMITTING" && (
           <div style={{ padding: "16px 0", textAlign: "center", fontStyle: "italic" }}>
-            Generating commit hash and submitting...
+            {t("juryArbitration.voteModal.generatingCommit")}
           </div>
         )}
 
@@ -186,14 +188,14 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
               borderRadius: "8px",
               marginBottom: "12px",
             }}>
-              <div style={{ fontSize: "0.85rem", color: "#6c7086" }}>Your vote:</div>
+              <div style={{ fontSize: "0.85rem", color: "#6c7086" }}>{t("juryArbitration.voteModal.yourVote")}</div>
               <div style={{ fontWeight: "bold", color: "#f9e2af" }}>{selectedVote}</div>
               <div style={{ fontSize: "0.75rem", color: "#585b70", fontFamily: "monospace", marginTop: "4px" }}>
-                Commit: {commitHash?.slice(0, 16)}...
+                {t("juryArbitration.voteModal.commitLabel")} {commitHash?.slice(0, 16)}...
               </div>
             </div>
             <p style={{ fontSize: "0.85rem", color: "#6c7086" }}>
-              During the REVEAL phase, you can reveal your vote. Your commitment is locked.
+              {t("juryArbitration.voteModal.revealPhaseHint")}
             </p>
           </div>
         )}
@@ -201,7 +203,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
         {step === "REVEALING" && (
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <span style={{ display: "inline-block", marginRight: "8px" }}>&#9203;</span>
-            Revealing vote on-chain...
+            {t("juryArbitration.voteModal.revealingOnChain")}
           </div>
         )}
 
@@ -219,7 +221,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
                 fontWeight: "bold",
               }}
             >
-              Close
+              {t("juryArbitration.voteModal.close")}
             </button>
           ) : step === "COMMITTED" ? (
             <button
@@ -234,7 +236,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
                 fontWeight: "bold",
               }}
             >
-              Reveal Vote
+              {t("juryArbitration.voteModal.revealVote")}
             </button>
           ) : step === "REVEALED" ? (
             <button
@@ -249,7 +251,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
                 fontWeight: "bold",
               }}
             >
-              Done
+              {t("juryArbitration.voteModal.done")}
             </button>
           ) : (
             <button
@@ -264,7 +266,7 @@ export function JurorVoteModal({ isOpen, onClose, panelId, jurorAddress }: Juror
                 cursor: "pointer",
               }}
             >
-              Cancel
+              {t("juryArbitration.voteModal.cancel")}
             </button>
           )}
         </div>
