@@ -74,8 +74,8 @@ pub trait Htlc {
 
     /// Permissionless refund back to the buyer once timeout_ledger has
     /// passed. Anyone can call this — it does not require the buyer's
-    /// signature, only that the timeout has elapsed.
-    fn refund(env: Env, id: BytesN<32>);
+    /// signature, only that the timeout has elapsed. Returns the amount refunded.
+    fn refund(env: Env, id: BytesN<32>) -> i128;
 }
 
 /// Denominator for basis-point arithmetic: 10_000 bps == 100%.

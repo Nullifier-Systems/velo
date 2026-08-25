@@ -8,6 +8,7 @@ import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndex
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
 import { startBatchAuctionWorker } from "./lib/workers/batchAuctionWorker.js";
 import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
+import { startTrancheRefundWorker } from "./lib/workers/trancheRefundWorker.js";
 import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
 import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";

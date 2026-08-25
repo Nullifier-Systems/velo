@@ -16,6 +16,7 @@ import {
   type GatewayTimeoutError,
 } from '../lib/api';
 import './ClaimQR.css';
+import { TrancheCountdownBanner } from '../components/TrancheCountdownBanner';
 
 const POLL_INTERVAL_MS = 4000;
 

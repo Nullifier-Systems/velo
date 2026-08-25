@@ -394,5 +394,10 @@
     "selectHex": "Select a cell to view hotspot incentive details",
     "refresh": "Refresh Hotspots",
     "loading": "Loading spatial demand map..."
+  },
+  "tranche": {
+    "unreleasedRefunded": "Unreleased Tranches Refunded to Buyer",
+    "ledgersRemaining": "{{ledgersRemaining}} Ledgers Remaining (~{{estimatedMinutes}} mins) Until Partial Refund",
+    "tranchesReleased": "{{released}} / {{total}} Tranches Released"
   }
 }
