@@ -144,7 +144,9 @@
     "exportCSV": "Exportar CSV",
     "exportJSON": "Exportar JSON",
     "chat": "Chat",
-    "amount": "Cantidad: ${{amount}}"
+    "amount": "Cantidad: ${{amount}}",
+    "collateralLocked": "Bloqueado: quedan {{ledgers}} ledgers (~{{seconds}}s)",
+    "collateralUnlocked": "Colateral desbloqueado"
   },
   "register": {
     "title": "Registrarse como proveedor",

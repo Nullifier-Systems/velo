@@ -38,6 +38,8 @@ import { enterpriseOrgsRoutes } from "./routes/enterprise-orgs.js";
 import { enterprisePoliciesRoutes } from "./routes/enterprise-policies.js";
 import { enterpriseApprovalsRoutes } from "./routes/enterprise-approvals.js";
 import { stateChannelRoutes } from "./routes/state-channels.js";
+import { collateralRoutes } from "./routes/collateral.js";
+import { CollateralGuardStore } from "./lib/collateralGuard.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
@@ -416,4 +418,10 @@ app.register(stateChannelRoutes, {
   prefix: "/api/v1",
   db: pgPool,
   redis: undefined,
+});
+// (#420) Collateral flash-loan protection: release-check gate. Shares the
+// API's Postgres pool when configured; degrades to an in-memory store in dev.
+app.register(collateralRoutes, {
+  prefix: "/api/v1",
+  store: new CollateralGuardStore(pgPool ?? undefined),
 });
