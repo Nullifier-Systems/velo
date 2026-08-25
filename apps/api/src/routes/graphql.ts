@@ -3,6 +3,7 @@ import { buildSchema, graphql, parse, subscribe } from "graphql";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { escrowDeltaFeed, type EscrowDelta } from "../lib/escrow-deltas.js";
+import { tradeEventFeed, type TradeUpdate } from "../lib/store.js";
 import type { EventStore } from "../lib/stellar-event-store.js";
 
 const schema = buildSchema(`
@@ -18,8 +19,14 @@ const schema = buildSchema(`
   type Query {
     indexedEscrow(contractId: ID!, escrowId: ID!): IndexedEscrow
   }
+  type TradeUpdate {
+    tradeId: ID!
+    status: String!
+    updatedAt: String!
+  }
   type Subscription {
     escrowChanged(contractId: ID!, escrowId: ID!): IndexedEscrow!
+    tradeUpdated(tradeId: ID!): TradeUpdate!
   }
 `);
 
@@ -52,6 +59,50 @@ class DeltaIterator implements AsyncIterableIterator<{ escrowChanged: EscrowDelt
   }
 }
 
+/**
+ * Store statuses with no further transitions (#379): "released" is a
+ * completed trade (buyer claimed, seller paid out) and "refunded" is the
+ * timeout/dispute refund path. Subscriptions end gracefully once either
+ * lands so clients stop listening instead of holding dead sockets open.
+ */
+const TERMINAL_TRADE_STATUSES: ReadonlySet<string> = new Set(["released", "refunded"]);
+
+class TradeIterator implements AsyncIterableIterator<{ tradeUpdated: TradeUpdate }> {
+  private pending?: (value: IteratorResult<{ tradeUpdated: TradeUpdate }>) => void;
+  private queue: Array<{ tradeUpdated: TradeUpdate }> = [];
+  /** Set once the terminal event has been seen; drained events then finish. */
+  private ended = false;
+  private readonly detach: () => void;
+
+  constructor(tradeId: string) {
+    this.detach = tradeEventFeed.subscribe(tradeId, (update) => {
+      const payload = { tradeUpdated: update };
+      if (TERMINAL_TRADE_STATUSES.has(update.status)) {
+        this.ended = true;
+        this.detach();
+      }
+      if (this.pending) {
+        const resolve = this.pending;
+        this.pending = undefined;
+        resolve({ value: payload, done: false });
+      } else {
+        this.queue.push(payload);
+      }
+    });
+  }
+  [Symbol.asyncIterator]() { return this; }
+  next(): Promise<IteratorResult<{ tradeUpdated: TradeUpdate }>> {
+    const value = this.queue.shift();
+    if (value) return Promise.resolve({ value, done: false });
+    if (this.ended) return Promise.resolve({ value: undefined, done: true });
+    return new Promise((resolve) => { this.pending = resolve; });
+  }
+  return(): Promise<IteratorResult<{ tradeUpdated: TradeUpdate }>> {
+    this.detach();
+    return Promise.resolve({ value: undefined, done: true });
+  }
+}
+
 const bodySchema = z.object({
   query: z.string().min(1),
   variables: z.record(z.unknown()).optional(),
@@ -64,6 +115,7 @@ export async function graphqlRoutes(app: FastifyInstance, options: { store: Even
       options.store.escrow(contractId, escrowId),
     escrowChanged: ({ contractId, escrowId }: { contractId: string; escrowId: string }) =>
       new DeltaIterator(contractId, escrowId),
+    tradeUpdated: ({ tradeId }: { tradeId: string }) => new TradeIterator(tradeId),
   };
 
   app.post("/graphql", async (request, reply) => {
