@@ -394,5 +394,22 @@
     "selectHex": "Seleccione una celda para ver los detalles de incentivos",
     "refresh": "Actualizar Puntos Críticos",
     "loading": "Cargando mapa de demanda espacial..."
+  },
+  "shieldedStaking": {
+    "title": "Stake Protegido",
+    "description": "Deposite colateral en el pool protegido sin revelar su dirección de billetera pública.",
+    "stakeActive": "Stake Protegido Activo",
+    "commitment": "Compromiso:",
+    "merkleRoot": "Raíz de Merkle:",
+    "verifiedMessage": "Su stake está verificado sin revelar su identidad.",
+    "amountLabel": "Monto del Stake (USDC):",
+    "anonymousHint": "Su dirección permanecerá anónima mediante prueba ZK.",
+    "generatingProof": "Generando prueba ZK de stake con WebAssembly...",
+    "depositing": "Depositando en el pool protegido...",
+    "verifying": "Verificando prueba ZK en cadena...",
+    "close": "Cerrar",
+    "done": "Listo",
+    "cancel": "Cancelar",
+    "depositVerify": "Depositar y Verificar"
   }
 }

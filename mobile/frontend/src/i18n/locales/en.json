@@ -394,5 +394,22 @@
     "selectHex": "Select a cell to view hotspot incentive details",
     "refresh": "Refresh Hotspots",
     "loading": "Loading spatial demand map..."
+  },
+  "shieldedStaking": {
+    "title": "Shielded Stake",
+    "description": "Deposit collateral into the shielded pool without revealing your public wallet address.",
+    "stakeActive": "Shielded Stake Active",
+    "commitment": "Commitment:",
+    "merkleRoot": "Merkle Root:",
+    "verifiedMessage": "Your stake is now verified without revealing your identity.",
+    "amountLabel": "Stake Amount (USDC):",
+    "anonymousHint": "Your address will remain anonymous via ZK proof.",
+    "generatingProof": "Generating ZK stake proof via WebAssembly...",
+    "depositing": "Depositing into shielded pool...",
+    "verifying": "Verifying ZK proof on-chain...",
+    "close": "Close",
+    "done": "Done",
+    "cancel": "Cancel",
+    "depositVerify": "Deposit & Verify"
   }
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ShieldedStakingModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export function ShieldedStakingModal({
   onClose,
   providerId = "",
 }: ShieldedStakingModalProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<StakingStep>("IDLE");
   const [stakeAmount, setStakeAmount] = useState("");
   const [commitmentHash, setCommitmentHash] = useState<string | null>(null);
@@ -158,9 +160,9 @@ export function ShieldedStakingModal({
           boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
         }}
       >
-        <h3 style={{ marginTop: 0, color: "#94e2d5" }}>Shielded Stake</h3>
+        <h3 style={{ marginTop: 0, color: "#94e2d5" }}>{t("shieldedStaking.title")}</h3>
         <p style={{ fontSize: "0.85rem", color: "#6c7086", marginTop: 0 }}>
-          Deposit collateral into the shielded pool without revealing your public wallet address.
+          {t("shieldedStaking.description")}
         </p>
 
         {step === "ERROR" && (
@@ -189,16 +191,16 @@ export function ShieldedStakingModal({
             }}
           >
             <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
-              Shielded Stake Active
+              {t("shieldedStaking.stakeActive")}
             </div>
             <div style={{ fontSize: "0.8rem", fontFamily: "monospace" }}>
-              Commitment: {commitmentHash?.slice(0, 16)}...
+              {t("shieldedStaking.commitment")} {commitmentHash?.slice(0, 16)}...
             </div>
             <div style={{ fontSize: "0.8rem", fontFamily: "monospace" }}>
-              Merkle Root: {merkleRoot?.slice(0, 16)}...
+              {t("shieldedStaking.merkleRoot")} {merkleRoot?.slice(0, 16)}...
             </div>
             <div style={{ fontSize: "0.8rem", marginTop: "8px", color: "#1e1e2e" }}>
-              Your stake is now verified without revealing your identity.
+              {t("shieldedStaking.verifiedMessage")}
             </div>
           </div>
         )}
@@ -212,7 +214,7 @@ export function ShieldedStakingModal({
                 fontSize: "0.9rem",
               }}
             >
-              Stake Amount (USDC):
+              {t("shieldedStaking.amountLabel")}
             </label>
             <input
               type="number"
@@ -231,28 +233,28 @@ export function ShieldedStakingModal({
               }}
             />
             <div style={{ fontSize: "0.75rem", color: "#585b70", marginTop: "4px" }}>
-              Your address will remain anonymous via ZK proof.
+              {t("shieldedStaking.anonymousHint")}
             </div>
           </div>
         )}
 
         {step === "GENERATING_PROOF" && (
           <div style={{ padding: "16px 0", textAlign: "center", fontStyle: "italic" }}>
-            Generating ZK stake proof via WebAssembly...
+            {t("shieldedStaking.generatingProof")}
           </div>
         )}
 
         {step === "DEPOSITING" && (
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <span style={{ display: "inline-block", marginRight: "8px" }}>&#9203;</span>
-            Depositing into shielded pool...
+            {t("shieldedStaking.depositing")}
           </div>
         )}
 
         {step === "VERIFYING" && (
           <div style={{ padding: "16px 0", textAlign: "center" }}>
             <span style={{ display: "inline-block", marginRight: "8px" }}>&#9203;</span>
-            Verifying ZK proof on-chain...
+            {t("shieldedStaking.verifying")}
           </div>
         )}
 
@@ -277,7 +279,7 @@ export function ShieldedStakingModal({
                 fontWeight: "bold",
               }}
             >
-              Close
+              {t("shieldedStaking.close")}
             </button>
           ) : step === "COMPLETE" ? (
             <button
@@ -292,7 +294,7 @@ export function ShieldedStakingModal({
                 fontWeight: "bold",
               }}
             >
-              Done
+              {t("shieldedStaking.done")}
             </button>
           ) : (
             <>
@@ -308,7 +310,7 @@ export function ShieldedStakingModal({
                   cursor: "pointer",
                 }}
               >
-                Cancel
+                {t("shieldedStaking.cancel")}
               </button>
               {step === "IDLE" && (
                 <button
@@ -323,7 +325,7 @@ export function ShieldedStakingModal({
                     fontWeight: "bold",
                   }}
                 >
-                  Deposit & Verify
+                  {t("shieldedStaking.depositVerify")}
                 </button>
               )}
             </>
