@@ -378,5 +378,20 @@
     "copyAttestation": "Copiar atestación",
     "download": "Descargar",
     "id": "ID:"
+  },
+  "spatialNetting": {
+    "header": "Compensación espacial",
+    "activeH3Cell": "Celda H3 activa: [{{cell}}] (Resolución {{resolution}})",
+    "abortNetting": "Abortar compensación",
+    "executeAtomicSwap": "Ejecutar intercambio atómico",
+    "htlcTimeout": "Tiempo de espera HTLC",
+    "revertCollateral": "Revertir colateral",
+    "errors": {
+      "invalidSecret": "Secreto inválido"
+    },
+    "nettingLoop": "Bucle de neteo",
+    "clearedBalance": "Saldo liquidado",
+    "htlcLabel": "HTLC",
+    "relayerState": "Estado del relayer"
   }
 }

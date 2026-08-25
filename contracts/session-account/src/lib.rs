@@ -303,6 +303,13 @@ impl SessionAccount {
             .ok_or(Error::SessionKeyNotFound)
     }
 
+    /// Get the remaining quota for a session key.
+    pub fn get_remaining_quota(env: Env, session_key: Address) -> Result<i128, Error> {
+        let info = Self::get_session_key(env.clone(), session_key.clone())?;
+        let spent = Self::get_spent(env, session_key)?;
+        Ok(info.spending_cap.saturating_sub(spent))
+    }
+
     /// Get the main account address.
     pub fn get_main_account(env: Env) -> Result<Address, Error> {
         env.storage()

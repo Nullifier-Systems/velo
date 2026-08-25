@@ -1,0 +1,26 @@
+.spatial-netting-dashboard {
+    font-family: monospace;
+    padding: 20px;
+    border: 1px solid #ccc;
+}
+
+.header {
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.error {
+    color: red;
+}
+
+.actions button {
+    margin-right: 10px;
+}
+
+.warning-banner {
+    background-color: #ffcccc;
+    color: #cc0000;
+    padding: 10px;
+    border: 1px solid #cc0000;
+    margin-top: 10px;
+}

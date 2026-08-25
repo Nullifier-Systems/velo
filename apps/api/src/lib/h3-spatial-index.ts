@@ -188,3 +188,7 @@ export class H3SpatialIndex {
 
 // Global Singleton Spatial Index Instance
 export const globalH3SpatialIndex = new H3SpatialIndex();
+
+export function getH3Index(lat: number, lng: number, resolution: number): string {
+    return latLngToCell(lat, lng, resolution);
+}

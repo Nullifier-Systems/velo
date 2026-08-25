@@ -70,10 +70,10 @@ describe("clearBatch — uniform clearing price", () => {
 
     expect(result.clearingPriceStroops).not.toBeNull();
     expect(result.fills.length).toBeGreaterThan(0);
-    const distinctPrices = new Set(result.fills.map((f) => f.clearingPriceStroops));
+    const distinctPrices = new Set(result.fills.map((f: any) => f.clearingPriceStroops));
     expect(distinctPrices.size).toBe(1);
     // The two lowest asks and two highest bids should clear; the extremes should not.
-    const filledIds = new Set(result.fills.map((f) => f.orderId));
+    const filledIds = new Set(result.fills.map((f: any) => f.orderId));
     expect(filledIds.has(bids[2].orderId)).toBe(false);
     expect(filledIds.has(asks[2].orderId)).toBe(false);
   });
@@ -86,11 +86,11 @@ describe("clearBatch — uniform clearing price", () => {
 
     const result = clearBatch(committed, revealed);
     const totalBuyFill = result.fills
-      .filter((f) => f.side === "BUY")
-      .reduce((sum, f) => sum + BigInt(f.filledAmountStroops), 0n);
+      .filter((f: any) => f.side === "BUY")
+      .reduce((sum: bigint, f: any) => sum + BigInt(f.filledAmountStroops), 0n);
     const totalSellFill = result.fills
-      .filter((f) => f.side === "SELL")
-      .reduce((sum, f) => sum + BigInt(f.filledAmountStroops), 0n);
+      .filter((f: any) => f.side === "SELL")
+      .reduce((sum: bigint, f: any) => sum + BigInt(f.filledAmountStroops), 0n);
 
     expect(totalBuyFill).toBe(300n);
     expect(totalSellFill).toBe(300n);
@@ -126,7 +126,7 @@ describe("clearBatch — un-revealed commitment forfeiture", () => {
 
     const result = clearBatch(committed, revealed);
     expect(result.forfeitedOrderIds).toEqual([neverRevealed.orderId]);
-    expect(result.fills.some((f) => f.orderId === neverRevealed.orderId)).toBe(false);
+    expect(result.fills.some((f: any) => f.orderId === neverRevealed.orderId)).toBe(false);
   });
 
   it("does not re-forfeit a commitment already marked forfeited", () => {

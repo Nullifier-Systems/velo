@@ -21,6 +21,7 @@ import { sessionRotationRoutes } from "./routes/session-rotation.js";
 import { ratesRoutes } from "./routes/rates.js";
 import { statusRoutes } from "./routes/status.js";
 import { disputeEvidenceRoutes } from "./routes/dispute-evidence.js";
+import nettingRoutes from "./routes/netting.js";
 import { server, NETWORK_PASSPHRASE } from "./lib/stellar.js";
 import {
   TransactionBuilder,
