@@ -66,14 +66,56 @@ export interface ProviderRecord {
     payoutMode?: "immediate" | "batched";
 }
 
+import { EventEmitter } from "node:events";
 import { globalH3SpatialIndex } from "./h3-spatial-index.js";
 import { globalOrderAllocator } from "./order-allocator.js";
 
 const store = new Map<string, CashRequestRecord>();
 const providersStore = new Map<string, ProviderRecord>();
 
+/**
+ * Live trade update broadcast (#379). Every time a stored trade's status
+ * changes (lock -> release -> settle/refund), a TradeUpdate event is pushed
+ * here so the GraphQL subscription gateway can fan it out over WebSocket
+ * instead of clients polling GET /api/v1/cash/request/:id.
+ */
+export interface TradeUpdate {
+    tradeId: string;
+    status: CashRequestRecord["status"];
+    /** ISO timestamp of when the store observed the change. */
+    updatedAt: string;
+}
+
+class TradeEventFeed {
+    private readonly emitter = new EventEmitter();
+
+    publish(update: TradeUpdate): void {
+        this.emitter.emit(update.tradeId, update);
+    }
+
+    /** Returns an unsubscribe function, mirroring escrowDeltaFeed.subscribe. */
+    subscribe(tradeId: string, listener: (update: TradeUpdate) => void): () => void {
+        this.emitter.on(tradeId, listener);
+        return () => this.emitter.off(tradeId, listener);
+    }
+}
+
+export const tradeEventFeed = new TradeEventFeed();
+
+function publishTradeStatus(record: CashRequestRecord): void {
+    tradeEventFeed.publish({
+        tradeId: record.id,
+        status: record.status,
+        updatedAt: new Date().toISOString(),
+    });
+}
+
 export function saveCashRequest(record: CashRequestRecord) {
+    const existing = store.get(record.id);
     store.set(record.id, record);
+    // Creation (or a re-save that flips status) is the first observable
+    // transition — e.g. pending_signature -> locked.
+    if (!existing || existing.status !== record.status) publishTradeStatus(record);
 }
 
 export function clearStore() {
@@ -139,7 +181,10 @@ export function getAllCashRequests(): CashRequestRecord[] {
 
 export function updateStatus(id: string, status: CashRequestRecord["status"]) {
     const record = store.get(id);
-    if (record) record.status = status;
+    if (record && record.status !== status) {
+        record.status = status;
+        publishTradeStatus(record);
+    }
 }
 
 /**
@@ -156,6 +201,7 @@ export function expireCashRequest(
         currentLedger >= record.timeoutLedger
     ) {
         record.status = "expired";
+        publishTradeStatus(record);
     }
     return record;
 }
@@ -206,6 +252,7 @@ export function enqueueForBatch(id: string, secretHex: string): CashRequestRecor
     record.secretHex = secretHex;
     record.status = "pending_batch";
     record.batchQueuedAt = new Date().toISOString();
+    publishTradeStatus(record);
     return record;
 }
 
@@ -267,4 +314,43 @@ export function getRecentActivity(limit = 10): RecentActivityItem[] {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, limit)
         .map(({ id, status, createdAt }) => ({ id, status, createdAt }));
+}
+
+export interface TimeoutIncidentLog {
+    id: string;
+    endpoint: string;
+    clientUserAgent?: string;
+    responseTimeMs: number;
+    createdAt: string;
+}
+
+const timeoutLogs: TimeoutIncidentLog[] = [];
+
+/**
+ * Log an API timeout incident for monitoring and debugging.
+ * In production, this should write to the api_timeout_incident_logs table.
+ */
+export function logTimeoutIncident(
+    endpoint: string,
+    clientUserAgent: string | undefined,
+    responseTimeMs: number
+): void {
+    const log: TimeoutIncidentLog = {
+        id: crypto.randomUUID(),
+        endpoint,
+        clientUserAgent,
+        responseTimeMs,
+        createdAt: new Date().toISOString(),
+    };
+    timeoutLogs.push(log);
+    
+    // In production, this would insert into the database:
+    // await db.query(`
+    //   INSERT INTO api_timeout_incident_logs (endpoint, client_user_agent, response_time_ms)
+    //   VALUES ($1, $2, $3)
+    // `, [endpoint, clientUserAgent, responseTimeMs]);
+}
+
+export function getTimeoutLogs(): TimeoutIncidentLog[] {
+    return Array.from(timeoutLogs);
 }

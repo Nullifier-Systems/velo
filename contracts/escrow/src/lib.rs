@@ -14,7 +14,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 extern crate std;
 
-use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
+use htlc_core::{
+    apply_bps, calculate_fee, collateral_cooldown_remaining, net_of, Htlc, TradeState, TradeStatus,
+    Tranche, MAX_FEE_BPS, MIN_COLLATERAL_LOCKUP_LEDGERS,
+};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, token, Address, Bytes,
@@ -178,6 +181,15 @@ pub enum Error {
     NoTranches = 49,
     /// Multi-tranche trade detected — use release_tranche() instead of release().
     MultiTrancheUseReleaseTranche = 50,
+    /// Fee arithmetic overflowed or lost precision (issue #381). Checked
+    /// math replaces raw `*`//` on stroop values so this surfaces as a
+    /// recoverable error instead of a WASM panic that freezes escrow.
+    FeeArithmeticOverflow = 51,
+    /// Collateral release attempted while the flash-loan cooldown is still
+    /// active (issue #420). A deposit can never be released in the same
+    /// ledger it was created — at least `MIN_COLLATERAL_LOCKUP_LEDGERS`
+    /// (~25s) must elapse first.
+    CooldownActive = 52,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -237,6 +249,10 @@ pub struct CommitmentState {
     pub amount: i128,
     /// Ledger when commitment was created (for window enforcement).
     pub committed_at_ledger: u32,
+    /// Issue #420: ledger at which the collateral's flash-loan cooldown
+    /// expires. Releases before this ledger are rejected with
+    /// `Error::CooldownActive` (minimum ~5 ledgers / ~25 seconds).
+    pub cooldown_until_ledger: u32,
     /// Reveal window must open after Nmin blocks.
     pub reveal_window_min_ledgers: u32,
     /// Reveal window must close before Nmax blocks (commits expire after this).
@@ -411,6 +427,12 @@ const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100; // ~15 minutes (same as lock 
 /// Stored as fixed-point (10000 = 100%, 500 = 5%).
 const COMMIT_COLLATERAL_RATE_FP: u32 = 500; // 5% collateral requirement
 
+/// Issue #420 — flash-loan attack prevention. The minimum lockup (in
+/// ledgers) between `commit_escrow` (collateral deposit) and any release of
+/// that collateral via `reveal_escrow`. Defined once in htlc-core so every
+/// HTLC-based contract enforces the identical floor (~25s at ~5s/ledger).
+const FLASH_LOAN_COOLDOWN_LEDGERS: u32 = MIN_COLLATERAL_LOCKUP_LEDGERS;
+
 /// Default dynamic fee configuration.
 /// Prevents transaction spam when pending escrow volume is high.
 const DEFAULT_DYNAMIC_FEE_BASE_BPS: u32 = 100; // 1% base fee
@@ -437,7 +459,7 @@ impl EscrowContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
-        if platform_fee_bps > 10_000 {
+        if platform_fee_bps > MAX_FEE_BPS {
             return Err(Error::InvalidFee);
         }
         admin.require_auth();
@@ -734,6 +756,15 @@ impl EscrowContract {
         PAUSE_DELAY_LEDGERS
     }
 
+    /// Issue #420: flash-loan cooldown length (in ledgers) enforced between
+    /// a collateral deposit (`commit_escrow`) and its release
+    /// (`reveal_escrow`). Exposed so off-chain services — the API's
+    /// release-check endpoint, cooldown worker, and provider dashboards —
+    /// mirror the on-chain rule exactly instead of hardcoding it.
+    pub fn collateral_cooldown_ledgers(_env: Env) -> u32 {
+        FLASH_LOAN_COOLDOWN_LEDGERS
+    }
+
     /// Issue #283: Get the total number of trades recorded.
     pub fn get_trade_count(env: Env) -> u32 {
         env.storage()
@@ -951,11 +982,15 @@ impl EscrowContract {
 
         // The buyer's share is a partial refund: fee-free, exactly like
         // refund(). The remainder is the seller's share, which pays the
-        // platform fee exactly like release() does.
-        let buyer_amount = (state.amount * buyer_share_bps as i128) / 10_000;
-        let seller_gross = state.amount - buyer_amount;
-        let fee = (seller_gross * fee_bps as i128) / 10_000;
-        let seller_payout = seller_gross - fee;
+        // platform fee exactly like release() does. All split math is
+        // checked (issue #381) — a dispute on a max-size trade must
+        // resolve or fail with an error, never panic mid-payout.
+        let buyer_amount =
+            apply_bps(state.amount, buyer_share_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_gross =
+            net_of(state.amount, buyer_amount).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let fee = calculate_fee(seller_gross, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let seller_payout = net_of(seller_gross, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Resolved;
         env.storage().persistent().set(&key, &state);
@@ -1115,6 +1150,14 @@ impl EscrowContract {
     /// signers whose signatures are on the transaction.
     pub fn set_platform_fee(env: Env, fee_bps: u32, signers: Vec<Address>) -> Result<(), Error> {
         require_multisig(&env, &signers)?;
+        // Issue #381: `initialize()` already rejected fees above 100%, but
+        // this setter silently accepted them. An out-of-range fee_bps makes
+        // `amount * fee_bps` overflow i128 on the next release — a panic
+        // that permanently freezes every locked trade. Reject it here and
+        // rely on checked math downstream for defense in depth.
+        if fee_bps > MAX_FEE_BPS {
+            return Err(Error::InvalidFee);
+        }
         env.storage()
             .instance()
             .set(&DataKey::PlatformFeeBps, &fee_bps);
@@ -1251,8 +1294,10 @@ impl EscrowContract {
                 continue;
             }
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern, same as release(): update state before external calls.
             state.status = TradeStatus::Released;
@@ -1346,8 +1391,10 @@ impl EscrowContract {
             .instance()
             .get(&DataKey::PlatformFeeBps)
             .unwrap_or(0);
-        let fee = (release_state.amount * fee_bps as i128) / 10_000;
-        let payout = release_state.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        let fee = calculate_fee(release_state.amount, fee_bps)
+            .map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(release_state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
         if payout <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -1469,8 +1516,10 @@ impl EscrowContract {
             let key = DataKey::Trade(item.id.clone());
             let mut state: TradeState = env.storage().persistent().get(&key).unwrap();
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+            let fee =
+                calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+            let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
             // CEI pattern: update state before external calls.
             state.status = TradeStatus::Released;
@@ -1529,8 +1578,9 @@ impl EscrowContract {
             return Err(Error::CommitmentAlreadyExists);
         }
 
-        // Calculate collateral bond (5% of amount)
-        let collateral = (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000;
+        // Calculate collateral bond (5% of amount) — checked per issue #381.
+        let collateral =
+            apply_bps(amount, COMMIT_COLLATERAL_RATE_FP).map_err(|_| Error::InvalidAmount)?;
 
         // CEI (issue #273): record commitment + liquidity bookkeeping before pull.
         let commitment_state = CommitmentState {
@@ -1538,6 +1588,12 @@ impl EscrowContract {
             collateral,
             amount,
             committed_at_ledger: env.ledger().sequence(),
+            // Issue #420: collateral deposited now cannot be released until
+            // this ledger (saturating — never panic at the u32 boundary).
+            cooldown_until_ledger: env
+                .ledger()
+                .sequence()
+                .saturating_add(FLASH_LOAN_COOLDOWN_LEDGERS),
             reveal_window_min_ledgers: COMMIT_REVEAL_WINDOW_MIN_LEDGERS,
             reveal_window_max_ledgers: COMMIT_REVEAL_WINDOW_MAX_LEDGERS,
         };
@@ -1607,8 +1663,20 @@ impl EscrowContract {
             .get(&commitment_key)
             .ok_or(Error::CommitmentNotFound)?;
 
-        // Verify commitment hasn't expired
+        // Issue #420 — flash-loan attack prevention (checked BEFORE any
+        // window/expiry logic so a same-ledger release attempt always
+        // surfaces as `CooldownActive`, never as a reveal-window error).
+        // Collateral pulled by `commit_escrow` cannot flow back out — via
+        // the refund-on-reveal path or any other — until at least
+        // `MIN_COLLATERAL_LOCKUP_LEDGERS` (~5 ledgers / ~25 seconds) have
+        // elapsed, which makes single-ledger deposit→release arbitrage
+        // impossible within one atomic transaction.
         let current_ledger = env.ledger().sequence();
+        if collateral_cooldown_remaining(commitment_state.committed_at_ledger, current_ledger) > 0 {
+            return Err(Error::CooldownActive);
+        }
+
+        // Verify commitment hasn't expired
         let committed_at = commitment_state.committed_at_ledger;
         let reveal_deadline = committed_at + commitment_state.reveal_window_max_ledgers;
 
@@ -1632,16 +1700,23 @@ impl EscrowContract {
             return Err(Error::RevealWindowClosed);
         }
 
-        // Verify reveal window is open (Nmin has passed)
+        // Verify reveal window is open (Nmin has passed).
+        // Note (#420): since the flash-loan cooldown (5 ledgers) now runs
+        // first and exceeds the legacy Nmin floor (2 ledgers), standard
+        // commitments always clear this check once they clear the cooldown.
+        // Retained as defense-in-depth for commitments stored with custom
+        // per-commitment window parameters.
         let reveal_open_at = committed_at + commitment_state.reveal_window_min_ledgers;
         if current_ledger < reveal_open_at {
             return Err(Error::RevealWindowNotOpen);
         }
 
         // Verify revealed parameters match commitment
+        let expected_collateral =
+            apply_bps(amount, COMMIT_COLLATERAL_RATE_FP).map_err(|_| Error::InvalidAmount)?;
         if commitment_state.amount != amount
             || commitment_state.buyer != buyer
-            || commitment_state.collateral != (amount * COMMIT_COLLATERAL_RATE_FP as i128) / 10_000
+            || commitment_state.collateral != expected_collateral
         {
             return Err(Error::CommitmentMismatch);
         }
@@ -1799,8 +1874,9 @@ impl EscrowContract {
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)?;
 
-        let fee = (state.amount * fee_bps as i128) / 10_000;
-        let payout = state.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        let fee = calculate_fee(state.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(state.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         state.status = TradeStatus::Released;
         env.storage().persistent().set(&key, &state);
@@ -2044,8 +2120,18 @@ impl Htlc for EscrowContract {
                 .unwrap_or(0);
             let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
 
-            let fee = (state.amount * fee_bps as i128) / 10_000;
-            let payout = state.amount - fee;
+            // Issue #381: checked fee math with the 1-stroop micro-tranche
+            // floor — micro-tranches can no longer settle fee-free, and
+            // max-size amounts surface overflow as a contract error
+            // (release() is `()`, so it panics with the error code).
+            let fee = match calculate_fee(state.amount, fee_bps) {
+                Ok(f) => f,
+                Err(_) => panic_with_error(&env, Error::FeeArithmeticOverflow),
+            };
+            let payout = match net_of(state.amount, fee) {
+                Ok(p) => p,
+                Err(_) => panic_with_error(&env, Error::FeeArithmeticOverflow),
+            };
 
             // CEI pattern: update state before external calls
             state.status = TradeStatus::Released;
@@ -2278,8 +2364,12 @@ impl EscrowContract {
             .unwrap_or(0);
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
 
-        let fee = (tranche.amount * fee_bps as i128) / 10_000;
-        let payout = tranche.amount - fee;
+        // Issue #381: checked fee math with the 1-stroop micro-tranche floor.
+        // This is the tranche-settlement path the issue targets: a 1-bps fee
+        // on a tiny tranche must round UP to 1 stroop, never truncate to 0.
+        let fee =
+            calculate_fee(tranche.amount, fee_bps).map_err(|_| Error::FeeArithmeticOverflow)?;
+        let payout = net_of(tranche.amount, fee).map_err(|_| Error::FeeArithmeticOverflow)?;
 
         // Mark this tranche as released
         tranche.released = true;
@@ -4325,3 +4415,8 @@ mod unit_tests;
 
 #[cfg(test)]
 mod tranche_tests;
+
+/// Issue #420 — flash-loan attack prevention tests (commit-reveal
+/// collateral cooldown) plus general commit-reveal protocol coverage.
+#[cfg(test)]
+mod mev_protection_test;

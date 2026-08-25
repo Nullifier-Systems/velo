@@ -54,9 +54,37 @@ export function isUncertainReleaseError(error: unknown): error is ReleaseRequest
   return error instanceof ReleaseRequestError && error.kind === "uncertain";
 }
 
+export class GatewayTimeoutError extends Error {
+  constructor(
+    message: string,
+    readonly requestId: string,
+    readonly operation?: string,
+    readonly elapsedMs?: number,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = "GatewayTimeoutError";
+  }
+}
+
+export function isGatewayTimeoutError(error: unknown): error is GatewayTimeoutError {
+  return error instanceof GatewayTimeoutError;
+}
+
 export async function fetchCashRequest(id: string): Promise<CashRequestStatus> {
   const res = await fetch(`${API_BASE}/api/v1/cash/request/${id}`);
   if (!res.ok) {
+    if (res.status === 504) {
+      const body = await res.json().catch(() => ({} as { error?: { code?: string; message?: string; requestId?: string } }));
+      if (body.error?.code === "GATEWAY_TIMEOUT") {
+        throw new GatewayTimeoutError(
+          body.error.message || "The payment network request timed out. Please retry your operation.",
+          body.error.requestId || "unknown",
+          body.error.operation,
+          body.error.elapsed_ms
+        );
+      }
+    }
     throw new Error(res.status === 404 ? "not-found" : `request failed (${res.status})`);
   }
   return res.json();
@@ -195,6 +223,21 @@ export function formatStroops(stroops: string): string {
   return `${whole}.${frac}`;
 }
 
+/**
+ * Formats a stroop amount with exact precision — up to all 7 decimals of
+ * the stroop scale, using BigInt math only so micro-fees never lose
+ * precision to float rounding or display truncation (issue #381).
+ */
+export function formatStroopsPrecise(stroops: string | bigint, decimals = 7): string {
+  const n = BigInt(stroops);
+  const negative = n < 0n;
+  const abs = negative ? -n : n;
+  const base = 10n ** BigInt(decimals);
+  const whole = abs / base;
+  const frac = (abs % base).toString().padStart(decimals, "0");
+  return `${negative ? "-" : ""}${whole}.${frac}`;
+}
+
 export interface StatusResponse {
   api: { status: string; uptime_seconds: number; timestamp: string };
   chain: { network: string; status: string; latest_ledger: number | null };
@@ -237,3 +280,120 @@ export async function fetchEscrowPauseState(): Promise<EscrowPauseState> {
 export function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 5)}…${addr.slice(-5)}` : addr;
 }
+
+// ---------------------------------------------------------------------------
+// API client for HTTP requests with authentication
+// ---------------------------------------------------------------------------
+
+export interface IndexerStatus {
+  latestBlockHeader: {
+    ledger_sequence: number;
+    block_hash: string;
+    parent_hash: string;
+    created_at: string;
+  } | null;
+  recentReorgs: Array<{
+    id: string;
+    detected_at: string;
+    fork_ledger: number;
+    rollback_depth: number;
+    reason: string;
+    resolved_at?: string;
+  }>;
+  rpcHealth: Array<{
+    id: string;
+    rpc_url: string;
+    is_healthy: boolean;
+    last_check: string;
+    consecutive_failures: number;
+    last_failure_reason?: string;
+  }>;
+  snapshots: {
+    count: number;
+    latest: {
+      ledger_sequence: number;
+      block_hash: string;
+      created_at: string;
+    } | null;
+  };
+  currentRpcUrl: string;
+}
+
+export interface IndexerDagResponse {
+  headers: Array<{
+    ledger_sequence: number;
+    block_hash: string;
+    parent_hash: string;
+    created_at: string;
+  }>;
+  count: number;
+  range: { from: number; to: number };
+}
+
+export interface IndexerReorgsResponse {
+  reorgs: Array<{
+    id: string;
+    detected_at: string;
+    fork_ledger: number;
+    rollback_depth: number;
+    reason: string;
+    resolved_at?: string;
+  }>;
+  count: number;
+}
+
+const apiClient = {
+  async get<T>(endpoint: string, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+
+  async post<T>(endpoint: string, body?: unknown, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+
+  async delete<T>(endpoint: string, adminKey?: string): Promise<{ data: T }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (adminKey) {
+      headers["x-admin-api-key"] = adminKey;
+    }
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`API request failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return { data };
+  },
+};
+
+export const api = apiClient;

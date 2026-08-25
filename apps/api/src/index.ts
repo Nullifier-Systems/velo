@@ -6,6 +6,7 @@ import { CONTRACTS, CIRCUIT_BREAKER } from "@velo/shared";
 import { server } from "./lib/stellar.js";
 import { StellarIndexerWorker, PgAdvisoryLock } from "./lib/workers/stellarIndexerWorker.js";
 import { startChatCleanupWorker } from "./lib/workers/chatCleanupWorker.js";
+import { startBatchAuctionWorker } from "./lib/workers/batchAuctionWorker.js";
 import { startSessionRotationWorker } from "./lib/workers/sessionRotationWorker.js";
 import { startTrancheRefundWorker } from "./lib/workers/trancheRefundWorker.js";
 import { createSessionKeyRegistryStore } from "./lib/session-registry-store.js";
@@ -13,6 +14,10 @@ import { createClient } from "redis";
 import { CircuitBreakerStore } from "./lib/circuit-breaker-store.js";
 import { broadcastCircuitBreakerPause, readEscrowTokenBalance } from "./lib/stellar.js";
 import { evaluateReserveConservation } from "./lib/invariant-checker.js";
+import { createEnterpriseStore } from "./lib/enterprise-store.js";
+import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
+import { startCollateralCooldownWorker } from "./lib/workers/cooldownWorker.js";
+import { CollateralGuardStore } from "./lib/collateralGuard.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -23,7 +28,7 @@ async function startServer() {
 
     startPayoutBatchScheduler();
     startChatCleanupWorker();
-    startTrancheRefundWorker();
+    startBatchAuctionWorker();
 
     // (#380) Watch locked trades for approaching refund timeouts: warn 100
     // ledgers before expiry, auto-refund once the timeout is breached, and
@@ -81,6 +86,19 @@ async function startServer() {
       app.log.warn("DATABASE_URL is not configured; Stellar indexer, circuit breaker and GraphQL are disabled");
     }
 
+    // (#420) Collateral cooldown monitor: unlock escrow collateral deposits
+    // once their flash-loan lockup (~5 ledgers / ~25s) has elapsed. Needs
+    // Postgres for deposit rows; ledger sequences come from Soroban RPC.
+    if (pgPool) {
+      startCollateralCooldownWorker({
+        store: new CollateralGuardStore(pgPool),
+        onUnlocked: (count) => app.log.info({ count }, "collateral cooldowns expired"),
+        onError: (error) => app.log.error(error, "collateral cooldown worker tick failed"),
+      });
+    } else {
+      app.log.warn("DATABASE_URL is not configured; collateral cooldown worker is disabled");
+    }
+
     // (#375) Session-key multi-sig emergency rotation: drain
     // velo:session-rotation-queue, confirm each proposal on-chain and retire
     // the old key. Needs both the registry (Postgres) and the queue (Redis).
@@ -99,6 +117,14 @@ async function startServer() {
       }
     } else {
       app.log.warn("DATABASE_URL or REDIS_URL is not configured; session-key rotation worker is disabled");
+    }
+
+    // (#401) Dual-control expiration: expire PENDING approvals after 24h, poll 60s
+    try {
+      const enterpriseStore = createEnterpriseStore(pgPool as never);
+      startApprovalTimeoutWorker({ store: enterpriseStore });
+    } catch (error) {
+      app.log.error(error, "approval timeout worker failed to start");
     }
   } catch (err) {
     app.log.error(err);

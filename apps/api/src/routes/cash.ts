@@ -40,6 +40,7 @@ import {
   getProviderByAddress,
   enqueueForBatch,
   getPendingBatchesByProvider,
+  logTimeoutIncident,
 } from "../lib/store.js";
 import { parseBody } from "../lib/validation.js";
 import { sendNotification } from "../lib/notification.js";
@@ -57,7 +58,12 @@ import {
 import { t, type Locale } from "../lib/i18n.js";
 import { issueChatCapability } from "../lib/chat-capability.js";
 import { registerTradeForChat } from "../lib/chat-infrastructure.js";
-import { ApiError } from "../lib/errors.js";
+import { ApiError, ErrorCode } from "../lib/errors.js";
+import {
+  applyNetPayout,
+  computeTrancheFeeStroops,
+  FeeArithmeticOverflowError,
+} from "../lib/fee-math.js";
 import { globalH3SpatialIndex, type H3Resolution } from "../lib/h3-spatial-index.js";
 import { globalMatchingEngine } from "../lib/matching-engine.js";
 import { globalOrderAllocator } from "../lib/order-allocator.js";
@@ -65,8 +71,61 @@ import { globalOrderAllocator } from "../lib/order-allocator.js";
 const ESCROW_CONTRACT_ID =
   process.env.ESCROW_CONTRACT_ID ?? CONTRACTS.testnet.escrow;
 
+/**
+ * Platform fee in basis points used for the off-chain safe-math pre-check
+ * (issue #381). Must mirror the value configured on the escrow contract.
+ * Out-of-range values are rejected so the pre-check can never disagree
+ * with the contract's own bounds.
+ */
+const PLATFORM_FEE_BPS = (() => {
+  const raw = process.env.PLATFORM_FEE_BPS;
+  const parsed = raw === undefined ? 0 : Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10_000) {
+    throw new Error(
+      `PLATFORM_FEE_BPS must be an integer in [0, 10000], got: ${raw}`,
+    );
+  }
+  return parsed;
+})();
+
 const PAUSED_NEW_TRADE_MESSAGE =
   "New trades are temporarily paused. Existing locked trades can still be released or refunded.";
+
+const REQUEST_TIMEOUT_MS = 10_000; // 10 second timeout for downstream RPC calls
+
+/**
+ * Wraps an async operation with a strict timeout. If the operation exceeds
+ * REQUEST_TIMEOUT_MS, it throws an RpcTimeoutError and logs the incident.
+ */
+async function withRequestTimeout<T>(
+  operation: string,
+  fn: () => Promise<T>,
+  req: { log: { error: (err: unknown, msg: string) => void }; headers?: { 'user-agent'?: string } }
+): Promise<T> {
+  const start = Date.now();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const elapsed = Date.now() - start;
+      logTimeoutIncident(
+        operation,
+        req.headers?.['user-agent'],
+        elapsed
+      );
+      reject(new RpcTimeoutError(operation, elapsed));
+    }, REQUEST_TIMEOUT_MS);
+
+    fn().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 /** Reject new locks when the on-chain circuit breaker is effective (issue #266). */
 async function rejectIfEscrowPaused(
@@ -578,37 +637,52 @@ export async function cashRoutes(app: FastifyInstance) {
       if (mode === "custodial") {
         let lockedAtLedger: number;
         try {
-          if (rawTranches && rawTranches.length > 0) {
-            lockedAtLedger = await lockEscrowWithTranches({
-              contractId: ESCROW_CONTRACT_ID,
-              tradeId,
-              seller,
-              buyer,
-              amountStroops: BigInt(amount_stroops),
-              tranches: rawTranches.map((t) => ({
-                amountStroops: BigInt(t.amount_stroops),
-                secretHashHex: t.secret_hash,
-              })),
-              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-            });
-          } else {
-            lockedAtLedger = await lockEscrow({
-              contractId: ESCROW_CONTRACT_ID,
-              tradeId,
-              seller,
-              buyer,
-              amountStroops: BigInt(amount_stroops),
-              secretHashHex: secret_hash,
-              timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-            });
-          }
+          // Both the tranche and single-secret lock paths go through the
+          // shared RPC timeout wrapper so a slow/hanging Horizon call
+          // surfaces as a 504 with a proper incident log instead of hanging
+          // the request indefinitely.
+          lockedAtLedger = await withRequestTimeout(
+            "POST /cash/request/prepare (custodial lock)",
+            () => {
+              if (rawTranches && rawTranches.length > 0) {
+                return lockEscrowWithTranches({
+                  contractId: ESCROW_CONTRACT_ID,
+                  tradeId,
+                  seller,
+                  buyer,
+                  amountStroops: BigInt(amount_stroops),
+                  tranches: rawTranches.map((t) => ({
+                    amountStroops: BigInt(t.amount_stroops),
+                    secretHashHex: t.secret_hash,
+                  })),
+                  timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+                });
+              }
+              return lockEscrow({
+                contractId: ESCROW_CONTRACT_ID,
+                tradeId,
+                seller,
+                buyer,
+                amountStroops: BigInt(amount_stroops),
+                secretHashHex: secret_hash,
+                timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+              });
+            },
+            req,
+          );
         } catch (err) {
           req.log.error(err, "lockEscrow failed");
           if (err instanceof RpcTimeoutError) {
-            throw new ApiError(504, "RPC_TIMEOUT", "RPC timeout", {
-              extra: { operation: err.operation, elapsed_ms: err.elapsedMs },
-              detail: err.message,
+            reply.code(504).send({
+              error: {
+                code: "GATEWAY_TIMEOUT",
+                message: "The payment network request timed out. Please retry your operation.",
+                requestId: `req-tout-504-${tradeId}`,
+                operation: err.operation,
+                elapsed_ms: err.elapsedMs,
+              }
             });
+            return;
           }
           throw new ApiError(502, "ESCROW_LOCK_FAILED", "Escrow lock failed", {
             detail: String(err),
@@ -768,24 +842,32 @@ export async function cashRoutes(app: FastifyInstance) {
       let lockedAtLedger: number;
 
       try {
-        lockedAtLedger = await lockEscrow({
-          contractId: ESCROW_CONTRACT_ID,
-          tradeId,
-          seller,
-          buyer,
-          amountStroops: BigInt(amount_stroops),
-          secretHashHex: secret_hash,
-          timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
-        });
+        lockedAtLedger = await withRequestTimeout(
+          "POST /cash/request (custodial lock)",
+          () => lockEscrow({
+            contractId: ESCROW_CONTRACT_ID,
+            tradeId,
+            seller,
+            buyer,
+            amountStroops: BigInt(amount_stroops),
+            secretHashHex: secret_hash,
+            timeoutLedgers: CASH_DEFAULT_TIMEOUT_LEDGERS,
+          }),
+          req
+        );
       } catch (err) {
         req.log.error(err, "lockEscrow failed");
         if (err instanceof RpcTimeoutError) {
           reply.code(504).send({
-            error: "rpc_timeout",
-            detail: err.message,
-            operation: err.operation,
-            elapsed_ms: err.elapsedMs,
+            error: {
+              code: "GATEWAY_TIMEOUT",
+              message: "The payment network request timed out. Please retry your operation.",
+              requestId: `req-tout-504-${tradeId}`,
+              operation: err.operation,
+              elapsed_ms: err.elapsedMs,
+            }
           });
+          return;
         } else {
           reply.code(502).send({
             error: "escrow lock failed",
@@ -1163,6 +1245,37 @@ export async function cashRoutes(app: FastifyInstance) {
       if (tranche.released) {
         reply.code(409).send({ error: "tranche already released" });
         return;
+      }
+
+      // Issue #381: validate the tranche fee against safe-math bounds
+      // BEFORE submitting on-chain, mirroring the contract's checked
+      // arithmetic (checked_mul / checked_div + 1-stroop micro-tranche
+      // floor). A computation that would overflow i128 or lose precision
+      // fails here with 422 instead of trapping funds in a panicking call.
+      try {
+        const grossStroops = BigInt(tranche.amountStroops);
+        const feeStroops = computeTrancheFeeStroops(grossStroops, PLATFORM_FEE_BPS);
+        const netStroops = applyNetPayout(grossStroops, feeStroops);
+        req.log.info(
+          {
+            tradeId: record.id,
+            tranche_index,
+            gross: grossStroops.toString(),
+            fee: feeStroops.toString(),
+            net: netStroops.toString(),
+          },
+          "tranche fee safe-math pre-check passed",
+        );
+      } catch (err) {
+        if (err instanceof FeeArithmeticOverflowError) {
+          throw new ApiError(
+            422,
+            ErrorCode.FEE_ARITHMETIC_OVERFLOW,
+            "Tranche fee calculation resulted in arithmetic overflow or invalid precision.",
+            { detail: err.message },
+          );
+        }
+        throw err;
       }
 
       try {

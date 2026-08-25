@@ -1,5 +1,9 @@
 use super::*;
-use soroban_sdk::{testutils::Ledger, token, vec, Address, BytesN, Env};
+use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    token, vec, Address, BytesN, Env,
+};
 
 /// Test fixture for commit-reveal protocol tests.
 struct CommitRevealFixture {
@@ -10,6 +14,7 @@ struct CommitRevealFixture {
     contract_id: Address,
     client: EscrowContractClient<'static>,
     token: token::Client<'static>,
+    token_admin: token::StellarAssetClient<'static>,
 }
 
 fn setup_commit_reveal() -> CommitRevealFixture {
@@ -23,6 +28,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
     let sac = env.register_stellar_asset_contract_v2(admin.clone());
     let token_addr = sac.address();
     let token = token::Client::new(&env, &token_addr);
+    let token_admin = token::StellarAssetClient::new(&env, &token_addr);
 
     // Mint to buyer so they can pay collateral + amount
     token::StellarAssetClient::new(&env, &token_addr).mint(&buyer, &100_000_000_000); // 1B stroops for testing
@@ -50,6 +56,7 @@ fn setup_commit_reveal() -> CommitRevealFixture {
         contract_id,
         client,
         token,
+        token_admin,
     }
 }
 
@@ -73,10 +80,12 @@ fn commit_reveal_happy_path() {
     let commitment_hash = f
         .env
         .crypto()
-        .sha256(&(commitment_input,).into())
+        .sha256(&commitment_input.to_xdr(&f.env))
         .to_bytes();
 
-    let result = f.client.try_commit_escrow(&commitment_hash, &amount);
+    let result = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash, &amount);
     assert!(result.is_ok());
 
     // Verify collateral (5%) was transferred
@@ -86,9 +95,15 @@ fn commit_reveal_happy_path() {
     // Phase 2: Reveal within window
     f.env.ledger().with_mut(|li| li.sequence_number += 10); // Advance 10 ledgers (within window)
 
-    let result =
-        f.client
-            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
     assert!(result.is_ok());
 
     // Verify collateral was refunded, amount moved to escrow
@@ -118,15 +133,19 @@ fn commit_prevents_replay_attacks() {
     let commitment_hash = f
         .env
         .crypto()
-        .sha256(&(commitment_input,).into())
+        .sha256(&commitment_input.to_xdr(&f.env))
         .to_bytes();
 
     // First commit succeeds
-    let result = f.client.try_commit_escrow(&commitment_hash, &amount);
+    let result = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash, &amount);
     assert!(result.is_ok());
 
     // Second commit with same hash fails (CommitmentAlreadyExists)
-    let result = f.client.try_commit_escrow(&commitment_hash, &amount);
+    let result = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash, &amount);
     assert!(result.is_err());
 }
 
@@ -149,11 +168,11 @@ fn reveal_window_closed_forfeits_collateral() {
     let commitment_hash = f
         .env
         .crypto()
-        .sha256(&(commitment_input,).into())
+        .sha256(&commitment_input.to_xdr(&f.env))
         .to_bytes();
 
     // Commit
-    f.client.commit_escrow(&commitment_hash, &amount);
+    f.client.commit_escrow(&f.buyer, &commitment_hash, &amount);
 
     let collateral = (amount * 500) / 10_000;
     let initial_contract_balance = f.token.balance(&f.contract_id);
@@ -163,9 +182,15 @@ fn reveal_window_closed_forfeits_collateral() {
     f.env.ledger().with_mut(|li| li.sequence_number += 105);
 
     // Attempt reveal — should fail with RevealWindowClosed
-    let result =
-        f.client
-            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
     assert!(result.is_err());
 
     // Collateral is NOT refunded (forfeited to protocol)
@@ -175,7 +200,7 @@ fn reveal_window_closed_forfeits_collateral() {
 }
 
 #[test]
-fn reveal_window_not_open_prevents_early_reveal() {
+fn same_ledger_release_rejected_with_cooldown_active() {
     let f = setup_commit_reveal();
     let amount = 1_000_000;
     let secret = BytesN::from_array(&f.env, &[7u8; 32]);
@@ -193,18 +218,134 @@ fn reveal_window_not_open_prevents_early_reveal() {
     let commitment_hash = f
         .env
         .crypto()
-        .sha256(&(commitment_input,).into())
+        .sha256(&commitment_input.to_xdr(&f.env))
         .to_bytes();
 
-    // Commit at ledger 1000
-    f.client.commit_escrow(&commitment_hash, &amount);
+    // Deposit collateral at ledger L.
+    f.client.commit_escrow(&f.buyer, &commitment_hash, &amount);
 
-    // Try to reveal immediately (before Nmin=2 ledgers)
-    // Window opens at ledger 1002, so ledger 1000 or 1001 should fail
-    let result =
-        f.client
-            .try_reveal_escrow(&trade_id, &f.seller, &amount, &secret_hash, &salt, &100);
-    assert!(result.is_err()); // RevealWindowNotOpen
+    // Attempt release in the EXACT same ledger sequence (L) — the core
+    // flash-loan pattern. Must be rejected with `Error::CooldownActive`
+    // (issue #420), never a reveal-window error.
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
+
+    // No state was mutated by the failed release: the collateral is still
+    // escrowed and no trade was created.
+    assert_eq!(f.token.balance(&f.contract_id), (amount * 500) / 10_000);
+}
+
+#[test]
+fn cooldown_blocks_release_until_full_five_ledger_lockup() {
+    let f = setup_commit_reveal();
+    let amount = 1_000_000;
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let secret_hash = f.env.crypto().sha256(&secret.clone().into()).to_bytes();
+    let salt = BytesN::from_array(&f.env, &[99u8; 32]);
+    let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
+
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&commitment_input.to_xdr(&f.env))
+        .to_bytes();
+
+    f.client.commit_escrow(&f.buyer, &commitment_hash, &amount);
+
+    // Ledger L+4: one ledger short of the 5-ledger minimum lockup.
+    f.env.ledger().with_mut(|li| li.sequence_number += 4);
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
+    assert_eq!(result, Err(Ok(Error::CooldownActive)));
+
+    // Ledger L+5: the full ~25s lockup has elapsed — release succeeds and
+    // the collateral is refunded to the buyer per the normal reveal path.
+    f.env.ledger().with_mut(|li| li.sequence_number += 1);
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
+    assert!(result.is_ok());
+    assert_eq!(f.token.balance(&f.buyer), 100_000_000_000 - amount);
+    let trade = f.client.get_trade(&trade_id).unwrap();
+    assert_eq!(trade.status, TradeStatus::Locked);
+}
+
+#[test]
+fn cooldown_does_not_supersede_expiry_forfeit() {
+    let f = setup_commit_reveal();
+    let amount = 1_000_000;
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let secret_hash = f.env.crypto().sha256(&secret.clone().into()).to_bytes();
+    let salt = BytesN::from_array(&f.env, &[99u8; 32]);
+    let trade_id = BytesN::from_array(&f.env, &[1u8; 32]);
+
+    let commitment_input = (
+        f.buyer.clone(),
+        f.seller.clone(),
+        amount,
+        secret_hash.clone(),
+        salt.clone(),
+    );
+    let commitment_hash = f
+        .env
+        .crypto()
+        .sha256(&commitment_input.to_xdr(&f.env))
+        .to_bytes();
+
+    f.client.commit_escrow(&f.buyer, &commitment_hash, &amount);
+
+    // Long past both the cooldown AND the reveal window: the commitment
+    // expires and the collateral is forfeited (RevealWindowClosed).
+    f.env.ledger().with_mut(|li| li.sequence_number += 105);
+    let result = f.client.try_reveal_escrow(
+        &f.buyer,
+        &trade_id,
+        &f.seller,
+        &amount,
+        &secret_hash,
+        &salt,
+        &100,
+    );
+    assert_eq!(result, Err(Ok(Error::RevealWindowClosed)));
+    assert_eq!(
+        f.token.balance(&f.buyer),
+        100_000_000_000 - (amount * 500) / 10_000
+    );
+}
+
+#[test]
+fn contract_exposes_collateral_cooldown_ledgers() {
+    let f = setup_commit_reveal();
+    // Off-chain services mirror the on-chain rule via this accessor (#420).
+    assert_eq!(f.client.collateral_cooldown_ledgers(), 5);
 }
 
 #[test]
@@ -226,15 +367,16 @@ fn reveal_with_mismatched_parameters_fails() {
     let commitment_hash = f
         .env
         .crypto()
-        .sha256(&(commitment_input,).into())
+        .sha256(&commitment_input.to_xdr(&f.env))
         .to_bytes();
 
-    f.client.commit_escrow(&commitment_hash, &amount);
+    f.client.commit_escrow(&f.buyer, &commitment_hash, &amount);
 
     f.env.ledger().with_mut(|li| li.sequence_number += 10);
 
     // Try to reveal with wrong amount (1_500_000 instead of 1_000_000)
     let result = f.client.try_reveal_escrow(
+        &f.buyer,
         &trade_id,
         &f.seller,
         &1_500_000, // WRONG
@@ -252,7 +394,8 @@ fn collateral_amount_scales_with_trade_amount() {
     // Test 1: 1M stroops → 5% collateral = 50K
     let amount1 = 1_000_000;
     let commitment_hash1 = BytesN::from_array(&f.env, &[1u8; 32]);
-    f.client.commit_escrow(&commitment_hash1, &amount1);
+    f.client
+        .commit_escrow(&f.buyer, &commitment_hash1, &amount1);
     let collateral1 = f.token.balance(&f.contract_id);
     assert_eq!(collateral1, (amount1 * 500) / 10_000);
 
@@ -261,20 +404,13 @@ fn collateral_amount_scales_with_trade_amount() {
 
     // Test 2: 10M stroops → 5% collateral = 500K
     let buyer2 = Address::generate(&f.env);
-    f.token.mint(&buyer2, &100_000_000_000);
-    f.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &buyer2,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &f.contract_id,
-            fn_name: &soroban_sdk::Symbol::new(&f.env, "commit_escrow"),
-            args: &(BytesN::from_array(&f.env, &[2u8; 32]), 10_000_000i128).into_val(&f.env),
-            sub_invokes: &vec![&f.env],
-        },
-    }]);
+    f.token_admin.mint(&buyer2, &100_000_000_000);
 
     let amount2 = 10_000_000;
     let commitment_hash2 = BytesN::from_array(&f.env, &[2u8; 32]);
-    let result = f.client.try_commit_escrow(&commitment_hash2, &amount2);
+    let result = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash2, &amount2);
     assert!(result.is_ok());
 }
 
@@ -297,7 +433,7 @@ fn salt_collision_produces_different_commitment_hashes() {
     let commitment_hash1 = f
         .env
         .crypto()
-        .sha256(&(commitment_input1,).into())
+        .sha256(&commitment_input1.to_xdr(&f.env))
         .to_bytes();
 
     let commitment_input2 = (
@@ -310,12 +446,16 @@ fn salt_collision_produces_different_commitment_hashes() {
     let commitment_hash2 = f
         .env
         .crypto()
-        .sha256(&(commitment_input2,).into())
+        .sha256(&commitment_input2.to_xdr(&f.env))
         .to_bytes();
 
     // Both commits should succeed (different salts → different hashes)
-    let result1 = f.client.try_commit_escrow(&f.buyer, &commitment_hash1, &amount);
-    let result2 = f.client.try_commit_escrow(&f.buyer, &commitment_hash2, &amount);
+    let result1 = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash1, &amount);
+    let result2 = f
+        .client
+        .try_commit_escrow(&f.buyer, &commitment_hash2, &amount);
     assert!(result1.is_ok());
     assert!(result2.is_ok());
 
@@ -331,7 +471,9 @@ fn dynamic_fee_increases_with_locked_liquidity() {
     for i in 0..5 {
         let amount = 1_000_000;
         let commitment_hash = BytesN::from_array(&f.env, &[(i as u8); 32]);
-        let result = f.client.try_commit_escrow(&f.buyer, &commitment_hash, &amount);
+        let result = f
+            .client
+            .try_commit_escrow(&f.buyer, &commitment_hash, &amount);
         assert!(result.is_ok());
 
         f.env.ledger().with_mut(|li| li.sequence_number += 200); // Expire each

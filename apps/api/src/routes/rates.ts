@@ -12,6 +12,9 @@ const getHistorySchema = z.object({
 });
 
 export async function ratesRoutes(app: FastifyInstance) {
+  // Rate pairs exposed per-key; excludes derived fields like usdc_xlm_twap (#420).
+  type RatePairKey = "usdc_xlm" | "usdc_usd" | "xlm_usd";
+
   // Get current reference rates
   app.get<{ Querystring: z.infer<typeof getRatesSchema> }>(
     "/rates/reference",
@@ -27,7 +30,7 @@ export async function ratesRoutes(app: FastifyInstance) {
         // If specific pair requested, return only that pair
         const { pair } = req.query;
         if (pair) {
-          const pairData = rates[pair as keyof RateReference];
+          const pairData = rates[pair as RatePairKey];
           if (!pairData) {
             reply.code(400).send({ error: `Invalid pair: ${pair}` });
             return;
@@ -65,7 +68,7 @@ export async function ratesRoutes(app: FastifyInstance) {
       // For now, return current rate as a single data point
       try {
         const rates = await getRateReference();
-        const pairData = rates[pair as keyof RateReference];
+        const pairData = rates[pair as RatePairKey];
         
         if (!pairData || typeof pairData === "string") {
           reply.code(400).send({ error: `Invalid pair: ${pair}` });
