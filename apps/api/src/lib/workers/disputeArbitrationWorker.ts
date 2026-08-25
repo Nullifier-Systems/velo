@@ -5,7 +5,7 @@
  * and on-chain slashing executions. Runs as a background process.
  */
 
-import { DISPUTE_JURY, type JurorPanelStatus, type JuryVoteChoice } from "@velo/shared";
+import { DISPUTE_JURY, type JurorPanelStatus, type JurorVoteChoice } from "@velo/shared";
 import { selectJurors, type JurorCandidate } from "../jury-selection.js";
 
 export interface DisputeCase {
@@ -21,7 +21,7 @@ export interface PanelRecord {
   jurorAddresses: string[];
   status: JurorPanelStatus;
   escrowAmountStroops: string;
-  resolution?: JuryVoteChoice;
+  resolution?: JurorVoteChoice;
   buyerShareBps?: number;
   createdAt: string;
   resolvedAt?: string;
@@ -30,7 +30,7 @@ export interface PanelRecord {
 // In-memory store for panels (dev/test mode — production uses Postgres)
 export const panelStore = new Map<string, PanelRecord>();
 export const voteCommitStore = new Map<string, Map<string, string>>(); // panelId -> (juror -> commitHash)
-export const voteRevealStore = new Map<string, Map<string, { vote: JuryVoteChoice; saltHex: string }>>();
+export const voteRevealStore = new Map<string, Map<string, { vote: JurorVoteChoice; saltHex: string }>>();
 
 /**
  * Create a dispute panel by selecting 5 jurors via VRF.
@@ -99,7 +99,7 @@ export function startRevealPhase(panelId: string): void {
 export function submitVoteReveal(
   panelId: string,
   jurorAddress: string,
-  vote: JuryVoteChoice,
+  vote: JurorVoteChoice,
   saltHex: string,
 ): void {
   const panel = panelStore.get(panelId);
@@ -119,9 +119,9 @@ export function submitVoteReveal(
  * Resolve a panel: count votes, determine majority, apply slashing.
  */
 export function resolvePanel(panelId: string): {
-  resolution: JuryVoteChoice;
+  resolution: JurorVoteChoice;
   buyerShareBps: number;
-  voteBreakdown: Record<JuryVoteChoice, number>;
+  voteBreakdown: Record<JurorVoteChoice, number>;
   slashedJurors: string[];
 } {
   const panel = panelStore.get(panelId);
@@ -129,7 +129,7 @@ export function resolvePanel(panelId: string): {
   if (panel.status !== "REVEALING") throw new Error("Panel not in REVEALING phase");
 
   const reveals = voteRevealStore.get(panelId)!;
-  const breakdown: Record<JuryVoteChoice, number> = { BUYER: 0, SELLER: 0, ABSTAIN: 0 };
+  const breakdown: Record<JurorVoteChoice, number> = { BUYER: 0, SELLER: 0, ABSTAIN: 0 };
   const revealedJurors: string[] = [];
   const slashedJurors: string[] = [];
 
@@ -146,7 +146,7 @@ export function resolvePanel(panelId: string): {
   }
 
   // Determine majority
-  let resolution: JuryVoteChoice;
+  let resolution: JurorVoteChoice;
   if (breakdown.BUYER > breakdown.SELLER) {
     resolution = "BUYER";
   } else if (breakdown.SELLER > breakdown.BUYER) {
