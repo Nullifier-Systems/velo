@@ -378,5 +378,21 @@
     "copyAttestation": "Copiar atestación",
     "download": "Descargar",
     "id": "ID:"
+  },
+  "hotspots": {
+    "title": "Puntos Críticos de Demanda",
+    "subtitle": "Zonas de alta demanda con mayores ganancias de tarifas para proveedores",
+    "liveDemand": "Demanda Espacial en Vivo",
+    "multiplier": "{{multiplier}}x Multiplicador de Tarifa",
+    "multiplierShort": "{{multiplier}}x",
+    "boost": "+{{boost}}% Bonificación",
+    "relocatePrompt": "Reubíquese aquí para ganar una mayor parte de las tarifas en solicitudes entrantes.",
+    "demandRatio": "Proporción de Demanda: {{ratio}}",
+    "activeRequests": "Solicitudes Activas: {{count}}",
+    "availableProviders": "Proveedores Disponibles: {{count}}",
+    "noHotspots": "No se detectaron puntos críticos cercanos. Todas las zonas están equilibradas.",
+    "selectHex": "Seleccione una celda para ver los detalles de incentivos",
+    "refresh": "Actualizar Puntos Críticos",
+    "loading": "Cargando mapa de demanda espacial..."
   }
 }
