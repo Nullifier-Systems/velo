@@ -6,15 +6,16 @@ export async function startSpatialNettingWorker() {
   // A mock worker that listens to redis stream
   while (true) {
     try {
-      const messages = await redisClient.xreadgroup('GROUP', 'spatial-netting-group', 'worker-1', 'COUNT', 1, 'BLOCK', 5000, 'STREAMS', 'velo:netting-execution-queue', '>');
-      if (messages) {
-        for (const [stream, streamMessages] of messages) {
+      const messages: any = await (redisClient as any).xReadGroup('GROUP', 'spatial-netting-group', 'worker-1', 'COUNT', 1, 'BLOCK', 5000, 'STREAMS', 'velo:netting-execution-queue', '>');
+      if (messages && Array.isArray(messages)) {
+        for (const { name: stream, messages: streamMessages } of messages as any[]) {
           for (const message of streamMessages) {
-            const [id, fields] = message;
+            const id = message.id;
+            const fields = message.message;
             console.log(`Processing message ${id}:`, fields);
             // Simulate propagating preimage across atomic swaps legs
             // Acknowledge message
-            await redisClient.xack('velo:netting-execution-queue', 'spatial-netting-group', id);
+            await (redisClient as any).xAck('velo:netting-execution-queue', 'spatial-netting-group', id);
           }
         }
       }
