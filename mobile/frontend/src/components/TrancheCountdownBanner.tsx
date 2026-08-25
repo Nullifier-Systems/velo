@@ -26,8 +26,10 @@ export const TrancheCountdownBanner: React.FC<Props> = ({
     );
   }
 
-  const releasedFraction = (totalTranches - unreleasedTranches) / totalTranches;
+  const releasedFraction =
+    totalTranches > 0 ? (totalTranches - unreleasedTranches) / totalTranches : 0;
   const isWarning = ledgersRemaining < 50;
+  const progressWidth = `${releasedFraction * 100}%`;
 
   return (
     <div className="bg-blue-50 p-4 rounded-md text-blue-900 shadow">
@@ -37,11 +39,11 @@ export const TrancheCountdownBanner: React.FC<Props> = ({
           {t('tranche.ledgersRemaining', { ledgersRemaining, estimatedMinutes })}
         </h4>
       </div>
-      
+
       <div className="w-full bg-gray-200 rounded-full h-2.5">
-        <div 
-          className="bg-blue-600 h-2.5 rounded-full transition-all" 
-          style={{ width: \`\${releasedFraction * 100}%\` }}
+        <div
+          className="bg-blue-600 h-2.5 rounded-full transition-all"
+          style={{ width: progressWidth }}
         />
       </div>
       <div className="text-xs text-gray-500 mt-1 text-right">
