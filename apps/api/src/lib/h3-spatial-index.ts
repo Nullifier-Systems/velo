@@ -38,17 +38,48 @@ export const H3_HEX_RADIUS_KM: Record<H3Resolution, number> = {
   9: 0.38, // ~0.7 km diameter cell
 };
 
+export interface SpatialMetricsConfig {
+  BASE_FEE_MULTIPLIER: number;
+  MAX_FEE_MULTIPLIER: number;
+  DEMAND_RATIO_SLOPE: number;
+  HOTSPOT_DEMAND_RATIO_THRESHOLD: number;
+  DEFAULT_RESOLUTION: H3Resolution;
+  MAX_GEOFENCE_RING_DISTANCE: number;
+  METRIC_TTL_MS: number;
+}
+
+/**
+ * Centralized configurable thresholds and weights for spatial hotspot incentive engine.
+ */
+export const SPATIAL_METRICS_CONFIG: SpatialMetricsConfig = {
+  BASE_FEE_MULTIPLIER: 1.0,
+  MAX_FEE_MULTIPLIER: 2.0,
+  DEMAND_RATIO_SLOPE: 0.1, // formula: min(BASE + (demand_ratio * SLOPE), MAX)
+  HOTSPOT_DEMAND_RATIO_THRESHOLD: 2.0,
+  DEFAULT_RESOLUTION: 7,
+  MAX_GEOFENCE_RING_DISTANCE: 1, // allows 1-ring neighbor tolerance for GPS drift
+  METRIC_TTL_MS: 300_000, // 5 minutes TTL for stale metric pruning
+};
+
 /**
  * Calculate dynamic fee multiplier based on demand ratio.
- * Formula: min(1.0 + (demand_ratio * 0.1), 2.0)
- * Min: 1.00, Max: 2.00
+ * Formula: min(BASE_FEE_MULTIPLIER + (demand_ratio * DEMAND_RATIO_SLOPE), MAX_FEE_MULTIPLIER)
+ * Base: 1.00, Max: 2.00, Slope: 0.10
  */
-export function calculateFeeMultiplier(demandRatio: number): number {
-  if (demandRatio <= 1.0) {
-    return 1.0;
+export function calculateFeeMultiplier(
+  demandRatio: number,
+  customConfig?: Partial<SpatialMetricsConfig>
+): number {
+  const base = customConfig?.BASE_FEE_MULTIPLIER ?? SPATIAL_METRICS_CONFIG.BASE_FEE_MULTIPLIER;
+  const max = customConfig?.MAX_FEE_MULTIPLIER ?? SPATIAL_METRICS_CONFIG.MAX_FEE_MULTIPLIER;
+  const slope = customConfig?.DEMAND_RATIO_SLOPE ?? SPATIAL_METRICS_CONFIG.DEMAND_RATIO_SLOPE;
+
+  if (isNaN(demandRatio) || demandRatio <= 1.0 || !isFinite(demandRatio)) {
+    return base;
   }
-  const calculated = 1.0 + demandRatio * 0.1;
-  const clamped = Math.min(2.0, Math.max(1.0, calculated));
+
+  const calculated = base + demandRatio * slope;
+  const clamped = Math.min(max, Math.max(base, calculated));
   return Math.round(clamped * 100) / 100;
 }
 
@@ -60,7 +91,8 @@ export function calculateDemandRatio(
   activeRequestsCount: number,
   availableProvidersCount: number
 ): number {
-  const denominator = Math.max(1, availableProvidersCount);
+  if (isNaN(activeRequestsCount) || activeRequestsCount <= 0) return 0;
+  const denominator = Math.max(1, isNaN(availableProvidersCount) ? 1 : availableProvidersCount);
   const ratio = activeRequestsCount / denominator;
   return Math.round(ratio * 100) / 100;
 }
@@ -304,19 +336,53 @@ export class H3SpatialIndex {
   }
 
   /**
+   * Prune stale cached metrics that have no active requests, no providers,
+   * or have not been updated within ttlMs.
+   */
+  public pruneStaleMetrics(ttlMs: number = SPATIAL_METRICS_CONFIG.METRIC_TTL_MS): number {
+    const now = Date.now();
+    let prunedCount = 0;
+    for (const [cell7, metrics] of this.cellMetricsMap.entries()) {
+      const activeCount = this.getActiveRequestsCount(cell7);
+      const providerCount = this.getAvailableProvidersCount(cell7);
+      const updatedAtMs = new Date(metrics.updatedAt).getTime();
+      if (activeCount === 0 && providerCount === 0 && (now - updatedAtMs > ttlMs)) {
+        this.cellMetricsMap.delete(cell7);
+        prunedCount++;
+      }
+    }
+    return prunedCount;
+  }
+
+  /**
    * Geofence Verification: Verify provider GPS coordinates match an H3 cell.
-   * Contributor Note: ALWAYS verify provider GPS coordinates against H3 cell boundaries
-   * before granting hotspot fee multipliers.
+   * By default, allows a 1-ring neighbor tolerance (maxRingDistance = 1) to accommodate
+   * natural GPS drift and border crossing at hexagonal boundaries while preventing arbitrary spoofing.
+   * If strict cell equality is desired, pass maxRingDistance = 0.
    */
   public verifyProviderGeofence(
     lat: number,
     lng: number,
     targetH3Index: string,
-    resolution: H3Resolution = 7
+    resolution: H3Resolution = 7,
+    maxRingDistance: number = SPATIAL_METRICS_CONFIG.MAX_GEOFENCE_RING_DISTANCE
   ): boolean {
     if (isNaN(lat) || isNaN(lng) || !targetH3Index) return false;
-    const computedCell = latLngToCell(lat, lng, resolution);
-    return computedCell.toLowerCase() === targetH3Index.toLowerCase();
+    try {
+      const computedCell = latLngToCell(lat, lng, resolution);
+      if (computedCell.toLowerCase() === targetH3Index.toLowerCase()) {
+        return true;
+      }
+      if (maxRingDistance > 0) {
+        const neighborRing = gridDisk(targetH3Index, maxRingDistance);
+        return neighborRing.some(
+          (cell) => cell.toLowerCase() === computedCell.toLowerCase()
+        );
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   /**

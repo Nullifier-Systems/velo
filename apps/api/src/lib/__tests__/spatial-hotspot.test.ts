@@ -97,10 +97,57 @@ describe("Dynamic Geo-Spatial Liquidity Provider Rebalancing & Hotspot Incentive
     const lng = -0.1278;
     const cell7 = latLngToCell(lat, lng, 7);
 
-    expect(index.verifyProviderGeofence(lat, lng, cell7, 7)).toBe(true);
+    expect(index.verifyProviderGeofence(lat, lng, cell7, 7, 0)).toBe(true);
+
+    // Adjacent coordinate within 1-ring should pass when maxRingDistance >= 1
+    const adjacentLat = lat + 0.02; // slightly offset
+    const adjacentCell = latLngToCell(adjacentLat, lng, 7);
+    expect(index.verifyProviderGeofence(adjacentLat, lng, cell7, 7, 1)).toBe(true);
 
     // Far away coordinate should fail verification
-    expect(index.verifyProviderGeofence(40.7128, -74.006, cell7, 7)).toBe(false);
+    expect(index.verifyProviderGeofence(40.7128, -74.006, cell7, 7, 1)).toBe(false);
+
+    // Invalid coordinates / NaN should fail gracefully
+    expect(index.verifyProviderGeofence(NaN, lng, cell7, 7, 1)).toBe(false);
+    expect(index.verifyProviderGeofence(lat, NaN, "", 7, 1)).toBe(false);
+  });
+
+  it("handles multiplier edge cases and custom configuration correctly", () => {
+    // Edge case: NaN, negative, or Infinity
+    expect(calculateFeeMultiplier(NaN)).toBe(1.0);
+    expect(calculateFeeMultiplier(-5.0)).toBe(1.0);
+    expect(calculateFeeMultiplier(Infinity)).toBe(1.0);
+
+    // Edge case: custom configurable slope and cap
+    const customConfig = {
+      BASE_FEE_MULTIPLIER: 1.1,
+      MAX_FEE_MULTIPLIER: 2.5,
+      DEMAND_RATIO_SLOPE: 0.2,
+    };
+    expect(calculateFeeMultiplier(3.0, customConfig)).toBe(1.7);
+    expect(calculateFeeMultiplier(10.0, customConfig)).toBe(2.5); // capped at 2.5
+  });
+
+  it("prunes stale metrics after TTL expires for inactive cells", () => {
+    const lat = 34.0522;
+    const lng = -118.2437;
+    const cell7 = latLngToCell(lat, lng, 7);
+
+    index.recordActiveRequest(lat, lng);
+    expect(index.getCellMetrics(cell7)).toBeDefined();
+
+    // Remove active request so cell is inactive
+    index.removeActiveRequest(lat, lng);
+    expect(index.getActiveRequestsCount(cell7)).toBe(0);
+
+    // Mock old timestamp
+    const metrics = index.getCellMetrics(cell7)!;
+    metrics.updatedAt = new Date(Date.now() - 400_000).toISOString();
+
+    // Prune metrics with 300s (5 min) TTL
+    const pruned = index.pruneStaleMetrics(300_000);
+    expect(pruned).toBe(1);
+    expect(index.getCellMetrics(cell7)).toBeUndefined();
   });
 
   it("prioritizes candidates in high-demand hotspot cells in the matching engine", () => {
@@ -122,11 +169,10 @@ describe("Dynamic Geo-Spatial Liquidity Provider Rebalancing & Hotspot Incentive
     expect(scored[1].breakdown.hotspotIncentiveScore).toBe(0.0);
   });
 
-  it("recalculation worker aggregates active cells and detects hotspots", async () => {
+  it("recalculation worker aggregates active cells, prunes stale, and handles distributed locking", async () => {
     const store = createInMemorySpatialMetricsStore();
     const lat = 48.8566;
     const lng = 2.3522;
-    const cell7 = latLngToCell(lat, lng, 7);
 
     // 1 provider, 3 requests -> demand ratio 3.0 > 2.0 (Hotspot)
     index.indexProvider(createMockProvider("paris-p1", lat, lng));
@@ -139,6 +185,13 @@ describe("Dynamic Geo-Spatial Liquidity Provider Rebalancing & Hotspot Incentive
 
     const storedMetrics = await store.getHotspotMetrics(2.0);
     expect(storedMetrics.length).toBeGreaterThanOrEqual(1);
+
+    // Test distributed lock acquisition
+    const lock1 = await store.acquireDistributedLock?.();
+    expect(lock1).toBe(true);
+    const lock2 = await store.acquireDistributedLock?.();
+    expect(lock2).toBe(false); // Second concurrent instance blocked
+    await store.releaseDistributedLock?.();
   });
 
   it("converts H3 index to closed GeoJSON polygon ring", async () => {

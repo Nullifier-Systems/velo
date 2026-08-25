@@ -1,15 +1,16 @@
 import type { Pool } from "pg";
 import {
   globalH3SpatialIndex,
-  calculateDemandRatio,
-  calculateFeeMultiplier,
+  SPATIAL_METRICS_CONFIG,
   type H3CellMetrics,
+  type H3SpatialIndex,
 } from "../h3-spatial-index.js";
 
 export interface RecalculationReport {
   timestamp: string;
   cellsProcessed: number;
   hotspotsDetected: number;
+  staleMetricsPruned: number;
   metrics: H3CellMetrics[];
 }
 
@@ -18,6 +19,8 @@ export interface SpatialMetricsStore {
   getCellMetrics(h3Index: string): Promise<H3CellMetrics | undefined>;
   getHotspotMetrics(minDemandRatio?: number): Promise<H3CellMetrics[]>;
   getAllCellMetrics(): Promise<H3CellMetrics[]>;
+  acquireDistributedLock?(): Promise<boolean>;
+  releaseDistributedLock?(): Promise<void>;
 }
 
 /**
@@ -25,6 +28,7 @@ export interface SpatialMetricsStore {
  */
 export function createInMemorySpatialMetricsStore(): SpatialMetricsStore {
   const store = new Map<string, H3CellMetrics>();
+  let locked = false;
 
   return {
     async saveCellMetrics(metrics: H3CellMetrics): Promise<void> {
@@ -33,7 +37,7 @@ export function createInMemorySpatialMetricsStore(): SpatialMetricsStore {
     async getCellMetrics(h3Index: string): Promise<H3CellMetrics | undefined> {
       return store.get(h3Index);
     },
-    async getHotspotMetrics(minDemandRatio: number = 2.0): Promise<H3CellMetrics[]> {
+    async getHotspotMetrics(minDemandRatio: number = SPATIAL_METRICS_CONFIG.HOTSPOT_DEMAND_RATIO_THRESHOLD): Promise<H3CellMetrics[]> {
       return Array.from(store.values())
         .filter((m) => m.demandRatio > minDemandRatio)
         .sort((a, b) => b.demandRatio - a.demandRatio);
@@ -41,14 +45,45 @@ export function createInMemorySpatialMetricsStore(): SpatialMetricsStore {
     async getAllCellMetrics(): Promise<H3CellMetrics[]> {
       return Array.from(store.values());
     },
+    async acquireDistributedLock(): Promise<boolean> {
+      if (locked) return false;
+      locked = true;
+      return true;
+    },
+    async releaseDistributedLock(): Promise<void> {
+      locked = false;
+    },
   };
 }
 
 /**
- * PostgreSQL-backed metrics store with SELECT FOR UPDATE row locking.
+ * PostgreSQL-backed metrics store with multi-instance advisory locking and row-level locking.
  */
 export function createPostgresSpatialMetricsStore(pool: Pool): SpatialMetricsStore {
+  const ADVISORY_LOCK_ID = 4210421; // Unique 32-bit ID for spatial metrics recalculation
+
   return {
+    async acquireDistributedLock(): Promise<boolean> {
+      try {
+        const { rows } = await pool.query(
+          "SELECT pg_try_advisory_lock($1) AS acquired;",
+          [ADVISORY_LOCK_ID]
+        );
+        return Boolean(rows[0]?.acquired);
+      } catch (err) {
+        console.warn("[SpatialMetricsWorker] Advisory lock acquire failed:", err);
+        return true; // Fallback to allowing execution if advisory locks unsupported
+      }
+    },
+
+    async releaseDistributedLock(): Promise<void> {
+      try {
+        await pool.query("SELECT pg_advisory_unlock($1);", [ADVISORY_LOCK_ID]);
+      } catch (err) {
+        console.warn("[SpatialMetricsWorker] Advisory lock release warning:", err);
+      }
+    },
+
     async saveCellMetrics(metrics: H3CellMetrics): Promise<void> {
       const client = await pool.connect();
       try {
@@ -112,7 +147,7 @@ export function createPostgresSpatialMetricsStore(pool: Pool): SpatialMetricsSto
       };
     },
 
-    async getHotspotMetrics(minDemandRatio: number = 2.0): Promise<H3CellMetrics[]> {
+    async getHotspotMetrics(minDemandRatio: number = SPATIAL_METRICS_CONFIG.HOTSPOT_DEMAND_RATIO_THRESHOLD): Promise<H3CellMetrics[]> {
       const { rows } = await pool.query(
         `SELECT h3_index, active_requests_count, available_providers_count, 
                 demand_ratio, fee_multiplier, updated_at
@@ -151,17 +186,22 @@ export function createPostgresSpatialMetricsStore(pool: Pool): SpatialMetricsSto
 }
 
 /**
- * Standalone calculation function: recalculate demand and fee multipliers across all active H3 cells.
+ * Standalone calculation function: recalculate demand, prune stale entries,
+ * and persist fee multipliers across all active H3 cells.
  */
 export async function runSpatialMetricsRecalculation(
   store?: SpatialMetricsStore,
-  index = globalH3SpatialIndex
+  index: H3SpatialIndex = globalH3SpatialIndex,
+  minDemandRatioHotspot = SPATIAL_METRICS_CONFIG.HOTSPOT_DEMAND_RATIO_THRESHOLD
 ): Promise<RecalculationReport> {
+  // Prune inactive metrics older than TTL
+  const staleMetricsPruned = index.pruneStaleMetrics(SPATIAL_METRICS_CONFIG.METRIC_TTL_MS);
+
   const recalculated = index.recalculateAllCellMetrics();
   let hotspotsDetected = 0;
 
   for (const metric of recalculated) {
-    if (metric.demandRatio > 2.0) {
+    if (metric.demandRatio > minDemandRatioHotspot) {
       hotspotsDetected++;
     }
     if (store) {
@@ -177,22 +217,34 @@ export async function runSpatialMetricsRecalculation(
     timestamp: new Date().toISOString(),
     cellsProcessed: recalculated.length,
     hotspotsDetected,
+    staleMetricsPruned,
     metrics: recalculated,
   };
 }
 
+export interface SpatialMetricsWorkerOptions {
+  intervalMs?: number;
+  store?: SpatialMetricsStore;
+  dbPool?: Pool;
+  minDemandRatioHotspot?: number;
+}
+
 /**
  * H3 Spatial Metrics Recalculator Worker.
- * Runs every 30 seconds to refresh demand density and dynamic fee multipliers.
+ * Runs periodically (default 30 seconds) to refresh demand density and dynamic fee multipliers.
+ * Uses distributed advisory locking for safe multi-instance cluster operation.
  */
 export class SpatialMetricsWorker {
   private timer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private intervalMs: number;
   private store: SpatialMetricsStore;
+  private minDemandRatioHotspot: number;
 
-  constructor(options?: { intervalMs?: number; store?: SpatialMetricsStore; dbPool?: Pool }) {
+  constructor(options?: SpatialMetricsWorkerOptions) {
     this.intervalMs = options?.intervalMs ?? 30_000; // default 30s as per Issue #421
+    this.minDemandRatioHotspot = options?.minDemandRatioHotspot ?? SPATIAL_METRICS_CONFIG.HOTSPOT_DEMAND_RATIO_THRESHOLD;
+
     if (options?.store) {
       this.store = options.store;
     } else if (options?.dbPool) {
@@ -210,8 +262,22 @@ export class SpatialMetricsWorker {
     return this.store;
   }
 
-  public async tick(): Promise<RecalculationReport> {
-    return runSpatialMetricsRecalculation(this.store);
+  public async tick(): Promise<RecalculationReport | null> {
+    // Multi-instance distributed locking check
+    if (this.store.acquireDistributedLock) {
+      const lockAcquired = await this.store.acquireDistributedLock();
+      if (!lockAcquired) {
+        return null;
+      }
+    }
+
+    try {
+      return await runSpatialMetricsRecalculation(this.store, globalH3SpatialIndex, this.minDemandRatioHotspot);
+    } finally {
+      if (this.store.releaseDistributedLock) {
+        await this.store.releaseDistributedLock();
+      }
+    }
   }
 
   public start(): void {
