@@ -111,7 +111,7 @@ export async function startTrancheRefundWorker() {
                 // Perform the on-chain refund. In a real app we need the trade details.
                 const trade = getCashRequest(tradeId);
                 if (trade) {
-                   await refundEscrow(trade.contractId, tradeId, trade.seller, trade.buyer, trade.amountStroops);
+                   await refundEscrow({ contractId: trade.contractId, tradeId });
                 }
                 
                 // Update DB via the trigger route logic (or directly here if it was automated).
