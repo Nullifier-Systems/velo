@@ -25,6 +25,10 @@ export function fromBase64(b64: string): Uint8Array {
   return bytes;
 }
 
+function toBuffer(arr: Uint8Array): ArrayBuffer {
+  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer;
+}
+
 export function generateX25519KeyPair(): KeyPairBytes {
   const pair = nacl.box.keyPair();
   return { publicKey: pair.publicKey, secretKey: pair.secretKey };
@@ -43,13 +47,13 @@ export async function hkdfSha256(
   const textEncoder = new TextEncoder();
   const info = textEncoder.encode(infoStr);
   
-  const hkdfKey = await crypto.subtle.importKey("raw", ikm, { name: "HKDF" }, false, ["deriveBits"]);
+  const hkdfKey = await crypto.subtle.importKey("raw", toBuffer(ikm), { name: "HKDF" }, false, ["deriveBits"]);
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt,
-      info,
+      salt: toBuffer(salt),
+      info: toBuffer(info),
     },
     hkdfKey,
     lengthBytes * 8
@@ -219,8 +223,8 @@ export async function ratchetEncryptClient(
   state.Ns += 1;
 
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const aesKey = await crypto.subtle.importKey("raw", MK, { name: "AES-GCM" }, false, ["encrypt"]);
-  const encryptedBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, plaintextBytes);
+  const aesKey = await crypto.subtle.importKey("raw", toBuffer(MK), { name: "AES-GCM" }, false, ["encrypt"]);
+  const encryptedBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toBuffer(nonce) }, aesKey, toBuffer(plaintextBytes));
 
   return {
     header,
@@ -265,8 +269,23 @@ export async function ratchetDecryptClient(
   state.CKr = CK;
   state.Nr += 1;
 
-  const aesKey = await crypto.subtle.importKey("raw", MK, { name: "AES-GCM" }, false, ["decrypt"]);
-  const decryptedBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, fullCiphertext);
+  const aesKey = await crypto.subtle.importKey("raw", toBuffer(MK), { name: "AES-GCM" }, false, ["decrypt"]);
+  const decryptedBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuffer(nonce) }, aesKey, toBuffer(fullCiphertext));
 
   return new Uint8Array(decryptedBuf);
+}
+
+export async function computeSafetyNumberClient(pubKeyA: string, pubKeyB: string): Promise<string> {
+  const bufA = fromBase64(pubKeyA);
+  const bufB = fromBase64(pubKeyB);
+  const [first, second] = [bufA, bufB].sort((a, b) => toBase64(a).localeCompare(toBase64(b)));
+  const combined = new Uint8Array(first.length + second.length);
+  combined.set(first, 0);
+  combined.set(second, first.length);
+
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", toBuffer(combined)));
+  const hex = Array.from(digest.subarray(0, 6))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`.toUpperCase();
 }

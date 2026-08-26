@@ -394,5 +394,22 @@
     "selectHex": "Select a cell to view hotspot incentive details",
     "refresh": "Refresh Hotspots",
     "loading": "Loading spatial demand map..."
+  },
+  "e2ee": {
+    "tradeChat": "Trade Chat",
+    "protocolBadge": "X3DH + Double Ratchet",
+    "peerLabel": "Peer: {{address}}",
+    "verifyFingerprint": "Verify Security Fingerprint",
+    "safetyCode": "🔑 Safety Code",
+    "sessionInitialized": "End-to-End Encrypted Session Initialized",
+    "sessionDescription": "Messages and media chunks are encrypted with Double Ratchet PFS.",
+    "sendMediaTitle": "Send 64KB Chunk Encrypted Image",
+    "send": "Send",
+    "mediaAlt": "Encrypted media payload",
+    "encryptedChunkBadge": "64KB Encrypted Chunk",
+    "fingerprintTitle": "Security Fingerprint",
+    "comparePrompt": "Compare this safety number out loud or side-by-side with your peer ({{address}}) to verify end-to-end encryption integrity and prevent machine-in-the-middle attacks.",
+    "fingerprintSubtext": "Signal Double Ratchet Constant-Time Safety Number",
+    "verifiedDone": "Verified & Done"
   }
 }

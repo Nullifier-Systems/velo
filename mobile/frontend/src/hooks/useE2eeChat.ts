@@ -8,10 +8,10 @@ import {
   ratchetEncryptClient,
   ratchetDecryptClient,
   type ClientRatchetState,
+  computeSafetyNumberClient,
   fromBase64,
   toBase64,
 } from "../lib/crypto/ratchet-engine";
-import { computeSafetyNumber, verifySafetyNumberConstantTime } from "../../apps/api/src/lib/crypto/double-ratchet";
 import { encryptMediaInChunks, decryptMediaChunks } from "../lib/crypto/media-encryptor";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL ?? "http://localhost:3000";
@@ -79,7 +79,7 @@ export function useE2eeChat({ tradeId, ownAddress, peerAddress, token }: UseE2ee
         ratchetStateRef.current = state;
 
         // 5. Compute Safety Number Fingerprint
-        const fp = computeSafetyNumber(
+        const fp = await computeSafetyNumberClient(
           deviceBundle.uploadRequest.identityPublicKey,
           peerBundle.identityPublicKey
         );

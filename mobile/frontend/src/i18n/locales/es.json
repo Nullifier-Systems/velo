@@ -394,5 +394,22 @@
     "selectHex": "Seleccione una celda para ver los detalles de incentivos",
     "refresh": "Actualizar Puntos Críticos",
     "loading": "Cargando mapa de demanda espacial..."
+  },
+  "e2ee": {
+    "tradeChat": "Chat de comercio",
+    "protocolBadge": "X3DH + Double Ratchet",
+    "peerLabel": "Par: {{address}}",
+    "verifyFingerprint": "Verificar huella de seguridad",
+    "safetyCode": "🔑 Código de seguridad",
+    "sessionInitialized": "Sesión cifrada de extremo a extremo inicializada",
+    "sessionDescription": "Los mensajes y fragmentos de medios están cifrados con Double Ratchet PFS.",
+    "sendMediaTitle": "Enviar imagen cifrada en fragmentos de 64KB",
+    "send": "Enviar",
+    "mediaAlt": "Carga útil de medios cifrados",
+    "encryptedChunkBadge": "Fragmento cifrado de 64KB",
+    "fingerprintTitle": "Huella de seguridad",
+    "comparePrompt": "Compara este número de seguridad en voz alta o lado a lado con tu par ({{address}}) para verificar la integridad del cifrado de extremo a extremo y evitar ataques de intermediario.",
+    "fingerprintSubtext": "Número de seguridad de tiempo constante de Signal Double Ratchet",
+    "verifiedDone": "Verificado y listo"
   }
 }
