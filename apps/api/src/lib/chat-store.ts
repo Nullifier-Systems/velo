@@ -1,9 +1,13 @@
+import type { DoubleRatchetHeader, X3DHSessionInit } from "@velo/shared";
+
 export interface ChatMessage {
   id: string;
   tradeId: string;
   sender: string;
+  header?: DoubleRatchetHeader;
   ciphertext: string;
   nonce: string;
+  x3dhInit?: X3DHSessionInit;
   createdAt: string;
 }
 
@@ -38,5 +42,3 @@ export function deleteMessagesForTrade(tradeId: string): number {
 export function clearChatStore(): void {
   messages.clear();
 }
-
-
