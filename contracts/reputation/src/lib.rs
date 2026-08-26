@@ -503,5 +503,9 @@ fn compute_score_internal(
     (base as u64 * time_decay as u64 / 1_000_000) as u32
 }
 
+pub mod jury_arbitration;
+
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod jury_tests;
