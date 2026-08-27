@@ -43,7 +43,7 @@ import { globalSpatialMetricsWorker } from "./lib/workers/spatialMetricsWorker.j
 import { collateralRoutes } from "./routes/collateral.js";
 import { CollateralGuardStore } from "./lib/collateralGuard.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
-import { shieldedStakingRoutes } from "./routes/shielded-staking.js";
+import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -429,6 +429,6 @@ app.register(collateralRoutes, {
   prefix: "/api/v1",
   store: new CollateralGuardStore(pgPool ?? undefined),
 });
-// (#427) Zero-Knowledge Anonymous Provider Staking: shielded pool with
-// zk-SNARK Merkle membership proofs and nullifier double-spend prevention.
-app.register(shieldedStakingRoutes, { prefix: "/api/v1" });
+// (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
+// VRF juror selection, and automated escrow resolution with stake slashing.
+app.register(juryArbitrationRoutes, { prefix: "/api/v1" });
