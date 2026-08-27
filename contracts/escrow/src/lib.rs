@@ -18,6 +18,7 @@ use htlc_core::{
     apply_bps, calculate_fee, collateral_cooldown_remaining, net_of, Htlc, TradeState, TradeStatus,
     Tranche, MAX_FEE_BPS, MIN_COLLATERAL_LOCKUP_LEDGERS,
 };
+use htlc_core::mst::{self, LeafProof, MstSibling, ReputationLeaf, ScoreProof};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, token, Address, Bytes,
@@ -38,6 +39,16 @@ pub struct ArbitratorSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisputeInfo {
     pub start_ledger: u32,
+}
+
+/// Persistent storage representation of one reputation MST node (issue #387).
+/// Named distinctly from `DataKey::MstNode` (the storage key) to avoid the
+/// name clash between key and value.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MstNodeValue {
+    pub hash: BytesN<32>,
+    pub sum: i128,
 }
 
 #[contracttype]
@@ -98,6 +109,21 @@ enum DataKey {
     /// Maximum escrow USD value allowed at lock time, in oracle base units
     /// (same scale as `price / 10^decimals`). `0` disables the limit.
     MaxUsdLimit,
+    /// Reputation MST (issue #387): reverse lookup from a trade id to the
+    /// sequential index it was assigned at `lock()` time — the same index
+    /// doubles as the trade's leaf position in the tree.
+    TradeIndex(BytesN<32>),
+    /// Reputation MST (issue #387): one tree node, keyed by (depth, index).
+    /// Depth 0 holds leaf nodes; depth `mst::MST_DEPTH` holds the single
+    /// root at index 0. Absent entries are treated as the zero node.
+    MstNode(u32, u32),
+    /// Reputation MST (issue #387): the current root hash, mirroring
+    /// `MstNode(mst::MST_DEPTH, 0)` for a cheap read via `get_reputation_root`.
+    ReputationRoot,
+    /// Reputation MST (issue #387): leaf data recorded for a trade the
+    /// first time it reaches a terminal state (Released / Refunded /
+    /// Resolved). Absent for trades still Locked or Disputed.
+    ReputationLeaf(BytesN<32>),
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -778,6 +804,79 @@ impl EscrowContract {
         env.storage().persistent().get(&DataKey::TradeId(index))
     }
 
+    /// Issue #387: current reputation MST root. Zero (all-32-bytes) if no
+    /// trade has ever reached a terminal state.
+    pub fn get_reputation_root(env: Env) -> BytesN<32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReputationRoot)
+            .unwrap_or_else(|| BytesN::from_array(&env, &[0; 32]))
+    }
+
+    /// Issue #387: builds a `ScoreProof` covering up to `max_trades` of
+    /// `address`'s most recent trades that have reached a terminal state
+    /// (i.e. have a recorded `ReputationLeaf`). Read-only and
+    /// permissionless — this replaces the old pattern of the reputation
+    /// contract calling `get_trade_by_index` + `get_trade` once per trade.
+    pub fn get_reputation_proof(env: Env, address: Address, max_trades: u32) -> ScoreProof {
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeCounter)
+            .unwrap_or(0);
+        let scan_max = core::cmp::min(count, max_trades);
+
+        let mut proofs = Vec::new(&env);
+        if scan_max == 0 {
+            return ScoreProof { proofs };
+        }
+
+        for idx in 1..=scan_max {
+            let Some(trade_id) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, BytesN<32>>(&DataKey::TradeId(idx))
+            else {
+                continue;
+            };
+
+            let Some(leaf) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, ReputationLeaf>(&DataKey::ReputationLeaf(trade_id.clone()))
+            else {
+                continue; // still Locked/Disputed — no leaf yet
+            };
+
+            let Some(state) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, TradeState>(&DataKey::Trade(trade_id))
+            else {
+                continue;
+            };
+            if state.seller != address && state.buyer != address {
+                continue;
+            }
+
+            let mut siblings = Vec::new(&env);
+            let mut index = idx;
+            for depth in 0..mst::MST_DEPTH {
+                let (hash, sum) = read_mst_node(&env, depth, index ^ 1);
+                siblings.push_back(MstSibling { hash, sum });
+                index /= 2;
+            }
+
+            proofs.push_back(LeafProof {
+                leaf,
+                leaf_index: idx,
+                siblings,
+            });
+        }
+
+        ScoreProof { proofs }
+    }
+
     /// Flag a trade as disputed before its timeout. Can be called by either
     /// the buyer or the seller. Blocks normal release and refund. Opens a
     /// `DISPUTE_RESOLUTION_WINDOW_LEDGERS`-ledger window for the arbitrator
@@ -1001,6 +1100,17 @@ impl EscrowContract {
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
 
+        // Issue #387: fold this terminal-state transition into the
+        // reputation MST before any external calls.
+        update_reputation_root(
+            &env,
+            &id,
+            TradeStatus::Resolved,
+            state.amount,
+            &state.seller,
+            &state.buyer,
+        );
+
         if buyer_amount > 0 {
             client.transfer(&env.current_contract_address(), &state.buyer, &buyer_amount);
         }
@@ -1086,6 +1196,17 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .remove(&DataKey::Dispute(id.clone()));
+
+        // Issue #387: fold this terminal-state transition into the
+        // reputation MST before any external calls.
+        update_reputation_root(
+            &env,
+            &id,
+            TradeStatus::Refunded,
+            state.amount,
+            &state.seller,
+            &state.buyer,
+        );
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
@@ -1305,6 +1426,17 @@ impl EscrowContract {
             env.storage()
                 .persistent()
                 .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+
+            // Issue #387: fold this terminal-state transition into the
+            // reputation MST before any external calls.
+            update_reputation_root(
+                &env,
+                &item.id,
+                TradeStatus::Released,
+                state.amount,
+                &state.seller,
+                &state.buyer,
+            );
 
             client.transfer(&env.current_contract_address(), &state.seller, &payout);
             if fee > 0 {
@@ -2070,6 +2202,14 @@ impl Htlc for EscrowContract {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::TradeId(next_idx), TTL_EXTEND, TTL_EXTEND);
+        // Issue #387: reverse lookup so terminal-state transitions can find
+        // this trade's MST leaf position without a scan.
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeIndex(id.clone()), &next_idx);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::TradeIndex(id.clone()), TTL_EXTEND, TTL_EXTEND);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&buyer, &env.current_contract_address(), &amount);
@@ -2137,6 +2277,17 @@ impl Htlc for EscrowContract {
             state.status = TradeStatus::Released;
             env.storage().persistent().set(&key, &state);
 
+            // Issue #387: fold this terminal-state transition into the
+            // reputation MST before any external calls.
+            update_reputation_root(
+                &env,
+                &id,
+                TradeStatus::Released,
+                state.amount,
+                &state.seller,
+                &state.buyer,
+            );
+
             Self::complete_with_bond_refund(&env, &id, &state.buyer, state.amount);
 
             let client = token::Client::new(&env, &token_addr);
@@ -2192,6 +2343,17 @@ impl Htlc for EscrowContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+
+        // Issue #387: fold this terminal-state transition into the
+        // reputation MST before any external calls.
+        update_reputation_root(
+            &env,
+            &id,
+            TradeStatus::Refunded,
+            state.amount,
+            &state.seller,
+            &state.buyer,
+        );
 
         // Only transfer if there's an unreleased amount to refund
         if refund_amount > 0 {
@@ -2305,6 +2467,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::TradeId(next_idx), &id);
+        // Issue #387: reverse lookup so terminal-state transitions can find
+        // this trade's MST leaf position without a scan.
+        env.storage()
+            .persistent()
+            .set(&DataKey::TradeIndex(id.clone()), &next_idx);
 
         let client = token::Client::new(&env, &token_addr);
         client.transfer(&buyer, &env.current_contract_address(), &amount);
@@ -2466,6 +2633,94 @@ fn eligible_arbitrators(env: &Env, at_ledger: u32) -> Vec<Address> {
 /// stops refusing them once their draw is settled. Called from both
 /// `resolve_dispute()` (on success) and `refund_after_dispute_timeout()` (on
 /// an arbitrator who never resolved).
+// ---------------------------------------------------------------------------
+// Reputation Merkle-sum tree (issue #387)
+// ---------------------------------------------------------------------------
+
+/// Reads MST node `(depth, index)`, defaulting to the zero node when unset
+/// (no leaf has ever been written under that path yet).
+fn read_mst_node(env: &Env, depth: u32, index: u32) -> (BytesN<32>, i128) {
+    env.storage()
+        .persistent()
+        .get::<DataKey, MstNodeValue>(&DataKey::MstNode(depth, index))
+        .map(|n| (n.hash, n.sum))
+        .unwrap_or_else(|| mst::zero_node(env))
+}
+
+fn write_mst_node(env: &Env, depth: u32, index: u32, node: (BytesN<32>, i128)) {
+    let key = DataKey::MstNode(depth, index);
+    env.storage().persistent().set(
+        &key,
+        &MstNodeValue {
+            hash: node.0,
+            sum: node.1,
+        },
+    );
+    env.storage().persistent().extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+}
+
+/// Updates the reputation MST after `trade_id` transitions into a terminal
+/// state. Recomputes the leaf at the trade's sequential index and rewrites
+/// every ancestor up to the root — `mst::MST_DEPTH` storage writes, instead
+/// of the ~200 cross-contract calls the old linear `compute_score` scan
+/// required per call (issue #387).
+///
+/// A no-op for trades with no recorded `TradeIndex` — i.e. trades locked
+/// before this upgrade shipped. There is no on-chain way to retroactively
+/// assign them a consistent MST leaf position, so they simply remain outside
+/// the tree; the reputation contract's proof-based scoring only ever counts
+/// trades that made it into the tree.
+fn update_reputation_root(
+    env: &Env,
+    trade_id: &BytesN<32>,
+    new_status: TradeStatus,
+    amount: i128,
+    seller: &Address,
+    buyer: &Address,
+) {
+    let Some(leaf_index) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, u32>(&DataKey::TradeIndex(trade_id.clone()))
+    else {
+        return;
+    };
+
+    let leaf = ReputationLeaf {
+        trade_id_hash: trade_id.clone(),
+        amount,
+        status_bits: mst::status_bits(new_status),
+        counterparty_hash: mst::counterparty_hash(env, seller, buyer),
+        ledger: env.ledger().sequence(),
+    };
+
+    let leaf_key = DataKey::ReputationLeaf(trade_id.clone());
+    env.storage().persistent().set(&leaf_key, &leaf);
+    env.storage()
+        .persistent()
+        .extend_ttl(&leaf_key, TTL_EXTEND, TTL_EXTEND);
+
+    let mut node = mst::leaf_node(env, &leaf);
+    write_mst_node(env, 0, leaf_index, node.clone());
+
+    let mut index = leaf_index;
+    for depth in 0..mst::MST_DEPTH {
+        let sibling = read_mst_node(env, depth, index ^ 1);
+        node = if index % 2 == 0 {
+            mst::combine(env, &node, &sibling)
+        } else {
+            mst::combine(env, &sibling, &node)
+        };
+        index /= 2;
+        write_mst_node(env, depth + 1, index, node.clone());
+    }
+
+    env.storage().persistent().set(&DataKey::ReputationRoot, &node.0);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::ReputationRoot, TTL_EXTEND, TTL_EXTEND);
+}
+
 fn release_arbitrator_slot(env: &Env, arbitrator: &Address) {
     let meta_key = DataKey::ArbitratorMember(arbitrator.clone());
     if let Some(mut meta) = env
