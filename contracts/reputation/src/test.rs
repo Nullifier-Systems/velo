@@ -1,8 +1,81 @@
 use super::*;
+use htlc_core::mst::{LeafProof, MstSibling};
+use htlc_core::{TradeState, TradeStatus};
 use soroban_sdk::testutils::Address as _;
 
+extern crate std;
+
+/// Test double for the escrow contract (issue #387). Rather than
+/// incrementally maintaining MST node storage the way the real escrow
+/// contract does, this mock rebuilds the whole tree from its stored
+/// `TradeState`s on every call — simpler to get right for a test fixture,
+/// and functionally equivalent since nothing here cares about update cost.
 #[contract]
 pub struct MockEscrowContract;
+
+fn trade_key_bytes(index: u32) -> [u8; 32] {
+    let idx_bytes = (index as u128).to_le_bytes();
+    let mut full = [0u8; 32];
+    full[..16].copy_from_slice(&idx_bytes);
+    full
+}
+
+/// Builds a `ReputationLeaf` for a trade that has reached a terminal state,
+/// or `None` if it's still `Locked`/`Disputed` (no leaf yet).
+fn leaf_for_trade(env: &Env, id_bytes: &[u8; 32], state: &TradeState) -> Option<mst::ReputationLeaf> {
+    if state.status == TradeStatus::Locked || state.status == TradeStatus::Disputed {
+        return None;
+    }
+    Some(mst::ReputationLeaf {
+        trade_id_hash: BytesN::from_array(env, id_bytes),
+        amount: state.amount,
+        status_bits: mst::status_bits(state.status.clone()),
+        counterparty_hash: mst::counterparty_hash(env, &state.seller, &state.buyer),
+        ledger: env.ledger().sequence(),
+    })
+}
+
+/// Rebuilds the full MST (one level per depth, `mst::MAX_LEAVES` slots at
+/// depth 0) from whatever trades are currently in storage. Index 0 is
+/// always the zero node — trades are 1-indexed, matching the real escrow
+/// contract's `TradeId`/`TradeIndex` scheme.
+fn build_full_tree(env: &Env) -> std::vec::Vec<std::vec::Vec<(BytesN<32>, i128)>> {
+    let count = MockEscrowContract::get_trade_count(env.clone());
+    let total_slots = mst::MAX_LEAVES as usize;
+
+    let mut level0: std::vec::Vec<(BytesN<32>, i128)> = std::vec::Vec::with_capacity(total_slots);
+    for slot in 0..total_slots {
+        let idx = slot as u32;
+        if idx == 0 || idx > count {
+            level0.push(mst::zero_node(env));
+            continue;
+        }
+        let id_bytes = trade_key_bytes(idx);
+        let key = RepDataKey::Trade(BytesN::from_array(env, &id_bytes));
+        let node = match env.storage().persistent().get::<RepDataKey, TradeState>(&key) {
+            Some(state) => match leaf_for_trade(env, &id_bytes, &state) {
+                Some(leaf) => mst::leaf_node(env, &leaf),
+                None => mst::zero_node(env),
+            },
+            None => mst::zero_node(env),
+        };
+        level0.push(node);
+    }
+
+    let mut levels: std::vec::Vec<std::vec::Vec<(BytesN<32>, i128)>> = std::vec::Vec::new();
+    levels.push(level0);
+    for _ in 0..mst::MST_DEPTH {
+        let cur = levels.last().unwrap();
+        let mut next: std::vec::Vec<(BytesN<32>, i128)> = std::vec::Vec::with_capacity(cur.len() / 2);
+        let mut i = 0;
+        while i < cur.len() {
+            next.push(mst::combine(env, &cur[i], &cur[i + 1]));
+            i += 2;
+        }
+        levels.push(next);
+    }
+    levels
+}
 
 #[contractimpl]
 impl MockEscrowContract {
@@ -38,9 +111,64 @@ impl MockEscrowContract {
         let key = RepDataKey::Trade(id);
         env.storage().persistent().get(&key)
     }
+
+    /// Issue #387: mirrors escrow's `get_reputation_root`.
+    pub fn get_reputation_root(env: Env) -> BytesN<32> {
+        let levels = build_full_tree(&env);
+        levels[mst::MST_DEPTH as usize][0].0.clone()
+    }
+
+    /// Issue #387: mirrors escrow's `get_reputation_proof`.
+    pub fn get_reputation_proof(env: Env, address: Address, max_trades: u32) -> ScoreProof {
+        let count = Self::get_trade_count(env.clone());
+        let scan_max = core::cmp::min(count, max_trades);
+
+        let mut proofs = Vec::new(&env);
+        if scan_max == 0 {
+            return ScoreProof { proofs };
+        }
+
+        let levels = build_full_tree(&env);
+
+        for idx in 1..=scan_max {
+            let id_bytes = trade_key_bytes(idx);
+            let key = RepDataKey::Trade(BytesN::from_array(&env, &id_bytes));
+            let Some(state) = env.storage().persistent().get::<RepDataKey, TradeState>(&key) else {
+                continue;
+            };
+            if state.seller != address && state.buyer != address {
+                continue;
+            }
+            let Some(leaf) = leaf_for_trade(&env, &id_bytes, &state) else {
+                continue; // still Locked/Disputed
+            };
+
+            let mut siblings = Vec::new(&env);
+            let mut index = idx;
+            for depth in 0..mst::MST_DEPTH {
+                let sib = levels[depth as usize][(index ^ 1) as usize].clone();
+                siblings.push_back(MstSibling {
+                    hash: sib.0,
+                    sum: sib.1,
+                });
+                index /= 2;
+            }
+
+            proofs.push_back(LeafProof {
+                leaf,
+                leaf_index: idx,
+                siblings,
+            });
+        }
+
+        ScoreProof { proofs }
+    }
 }
 
-fn setup_env() -> (Env, Address, Address) {
+/// `pub(crate)` (rather than private) so the sibling `mst_test` and
+/// `benchmarks` test modules can reuse the same fixtures instead of
+/// duplicating the mock-escrow setup dance.
+pub(crate) fn setup_env() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     env.budget().reset_unlimited();
@@ -49,7 +177,7 @@ fn setup_env() -> (Env, Address, Address) {
     (env, admin, escrow)
 }
 
-fn setup_contract<'a>(
+pub(crate) fn setup_contract<'a>(
     env: &'a Env,
     admin: &'a Address,
     escrow: &'a Address,
@@ -60,7 +188,7 @@ fn setup_contract<'a>(
     client
 }
 
-fn setup_escrow_trades(env: &Env, escrow: &Address, trades: &[(Address, Address, TradeStatus)]) {
+pub(crate) fn setup_escrow_trades(env: &Env, escrow: &Address, trades: &[(Address, Address, TradeStatus)]) {
     for (i, (seller, buyer, status)) in trades.iter().enumerate() {
         let idx = i as u32 + 1;
         let id_bytes = (idx as u128).to_le_bytes();

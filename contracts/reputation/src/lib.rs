@@ -5,9 +5,9 @@
 //! with epoch nullifiers preventing double claims.
 #![no_std]
 
-use htlc_core::{TradeState, TradeStatus};
+use htlc_core::mst::{self, ScoreProof};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN,
     Env, IntoVal, Map, Symbol, Vec,
 };
 
@@ -16,7 +16,10 @@ use soroban_sdk::{
 // ---------------------------------------------------------------------------
 
 const LEDGERS_PER_DAY: u32 = 17_280;
-const MAX_TRADES: u32 = 200;
+/// Issue #387: raised from 200 to 10,000 now that scoring verifies O(log n)
+/// Merkle-sum proofs instead of scanning every trade via cross-contract
+/// calls.
+const MAX_TRADES: u32 = 10_000;
 
 /// TTL extension (in ledgers) for persistent storage entries. ~5.8 days at
 /// ~5s/ledger. Applied on every active interaction that writes a persistent key.
@@ -84,6 +87,26 @@ pub enum RepDataKey {
     Trade(BytesN<32>),
     SpentNullifier(BytesN<32>),
     VerifiedRoot(BytesN<32>),
+    /// Issue #387: cached score components for `compute_score_incremental`,
+    /// so a repeat call only has to verify and fold in leaves newer than
+    /// `last_index_scanned` rather than re-verifying everything.
+    CachedBreakdown(Address),
+}
+
+/// Issue #387: incremental scoring state cached per address. `counterparties`
+/// stores each distinct counterparty commitment seen so far — a plain count
+/// can't be merged incrementally without either double-counting a repeat
+/// counterparty or under-counting a new one.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CachedBreakdown {
+    pub total: u32,
+    pub completed: u32,
+    pub disputed: u32,
+    pub volume: i128,
+    pub counterparties: Vec<BytesN<32>>,
+    pub last_trade_ledger: u32,
+    pub last_index_scanned: u32,
 }
 
 #[contracterror]
@@ -249,6 +272,13 @@ impl ReputationContract {
     }
 
     /// Compute and cache the reputation score for an address.
+    ///
+    /// Issue #387: instead of scanning up to `MAX_TRADES` trades via a
+    /// `get_trade_by_index` + `get_trade` cross-contract call pair per
+    /// trade, this fetches one `ScoreProof` (a batch of Merkle-sum-tree
+    /// membership proofs) and the current `ReputationRoot` — two
+    /// cross-contract calls total — then verifies each proof locally.
+    /// External API is unchanged: still `compute_score(address) -> u32`.
     pub fn compute_score(env: Env, address: Address) -> u32 {
         let escrow = env
             .storage()
@@ -256,74 +286,123 @@ impl ReputationContract {
             .get::<RepDataKey, Address>(&RepDataKey::EscrowContract)
             .expect("escrow contract not set");
 
-        let count = call_escrow_u32(&env, &escrow, "get_trade_count");
-        let scan_max = core::cmp::min(count, MAX_TRADES);
-        if scan_max == 0 {
-        env.storage()
-            .persistent()
-            .set(&RepDataKey::CachedScore(address.clone()), &0u32);
-        env.storage()
-            .persistent()
-            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
-            return 0;
-        }
+        let root = call_escrow_root(&env, &escrow);
+        let proof = call_escrow_proof(&env, &escrow, &address, MAX_TRADES);
 
-        let mut total: u32 = 0;
-        let mut completed: u32 = 0;
-        let mut disputed: u32 = 0;
-        let mut volume: i128 = 0;
-        let mut counterparties: Map<Address, bool> = Map::new(&env);
-        let mut last_trade_seq: u32 = 0;
-
-        for idx in 1..=scan_max {
-            let trade_id: Option<BytesN<32>> = call_escrow_get_trade_id(&env, &escrow, idx);
-            let Some(tid) = trade_id else { continue };
-
-            let trade: Option<TradeState> = call_escrow_get_trade(&env, &escrow, &tid);
-            let Some(t) = trade else { continue };
-
-            let is_seller = t.seller == address;
-            let is_buyer = t.buyer == address;
-            if !is_seller && !is_buyer {
-                continue;
-            }
-            if t.seller == t.buyer {
-                continue;
-            }
-
-            total += 1;
-            if t.timeout_ledger > last_trade_seq {
-                last_trade_seq = t.timeout_ledger;
-            }
-            let counterparty = if is_seller {
-                t.buyer.clone()
-            } else {
-                t.seller.clone()
-            };
-            counterparties.set(counterparty, true);
-
-            match t.status {
-                TradeStatus::Released | TradeStatus::Resolved => {
-                    completed += 1;
-                    volume = volume.saturating_add(t.amount);
-                }
-                TradeStatus::Disputed => {
-                    disputed += 1;
-                }
-                _ => {}
-            }
-        }
+        let (total, completed, disputed, volume, counterparty_count, last_trade_seq) =
+            verify_and_aggregate(&env, &proof, &root, &address);
 
         let score = compute_score_internal(
             total,
             completed,
             disputed,
             volume,
-            counterparties.len(),
+            counterparty_count,
             last_trade_seq,
             &env,
         );
 
+        env.storage()
+            .persistent()
+            .set(&RepDataKey::CachedScore(address.clone()), &score);
+        env.storage()
+            .persistent()
+            .extend_ttl(&RepDataKey::CachedScore(address), TTL_EXTEND, TTL_EXTEND);
+        score
+    }
+
+    /// Issue #387: incremental variant of `compute_score`. Fetches the same
+    /// `ScoreProof` batch as `compute_score` (the escrow's read-only
+    /// `get_reputation_proof(address, max_trades)` signature has no
+    /// "since index" parameter to fetch), but only verifies and folds in
+    /// leaves past the address's cached `last_index_scanned` — the O(n)
+    /// local verification/aggregation work is skipped for leaves already
+    /// accounted for, rather than reprocessing every trade on every call.
+    pub fn compute_score_incremental(env: Env, address: Address) -> u32 {
+        let escrow = env
+            .storage()
+            .persistent()
+            .get::<RepDataKey, Address>(&RepDataKey::EscrowContract)
+            .expect("escrow contract not set");
+
+        let root = call_escrow_root(&env, &escrow);
+        let proof = call_escrow_proof(&env, &escrow, &address, MAX_TRADES);
+
+        let key = RepDataKey::CachedBreakdown(address.clone());
+        let mut breakdown: CachedBreakdown =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(CachedBreakdown {
+                    total: 0,
+                    completed: 0,
+                    disputed: 0,
+                    volume: 0,
+                    counterparties: Vec::new(&env),
+                    last_trade_ledger: 0,
+                    last_index_scanned: 0,
+                });
+
+        // A self-trade (seller == buyer == address) hashes its
+        // counterparty commitment deterministically from `address` alone —
+        // computing that same value lets us exclude self-trades without
+        // the leaf ever revealing raw addresses (issue #387).
+        let self_counterparty_hash = mst::counterparty_hash(&env, &address, &address);
+
+        for lp in proof.proofs.iter() {
+            if lp.leaf_index <= breakdown.last_index_scanned {
+                continue; // already folded into the cached breakdown
+            }
+            let Some((hash, _sum)) = mst::recompute_root(&env, &lp.leaf, lp.leaf_index, &lp.siblings)
+            else {
+                continue;
+            };
+            if hash != root {
+                continue;
+            }
+            if lp.leaf.counterparty_hash == self_counterparty_hash {
+                // Self-trade — excluded from scoring, but still marks this
+                // index as scanned so it isn't reprocessed next time.
+                if lp.leaf_index > breakdown.last_index_scanned {
+                    breakdown.last_index_scanned = lp.leaf_index;
+                }
+                continue;
+            }
+
+            breakdown.total += 1;
+            if lp.leaf.ledger > breakdown.last_trade_ledger {
+                breakdown.last_trade_ledger = lp.leaf.ledger;
+            }
+            if !breakdown.counterparties.contains(&lp.leaf.counterparty_hash) {
+                breakdown.counterparties.push_back(lp.leaf.counterparty_hash.clone());
+            }
+            match lp.leaf.status_bits {
+                mst::STATUS_RELEASED | mst::STATUS_RESOLVED => {
+                    breakdown.completed += 1;
+                    breakdown.volume = breakdown.volume.saturating_add(lp.leaf.amount);
+                }
+                mst::STATUS_DISPUTED => breakdown.disputed += 1,
+                _ => {}
+            }
+            if lp.leaf_index > breakdown.last_index_scanned {
+                breakdown.last_index_scanned = lp.leaf_index;
+            }
+        }
+
+        let score = compute_score_internal(
+            breakdown.total,
+            breakdown.completed,
+            breakdown.disputed,
+            breakdown.volume,
+            breakdown.counterparties.len(),
+            breakdown.last_trade_ledger,
+            &env,
+        );
+
+        env.storage().persistent().set(&key, &breakdown);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
         env.storage()
             .persistent()
             .set(&RepDataKey::CachedScore(address.clone()), &score);
@@ -339,6 +418,8 @@ impl ReputationContract {
             .get(&RepDataKey::CachedScore(address))
     }
 
+    /// Issue #387: same proof-fetch-and-verify approach as `compute_score`,
+    /// returning the full breakdown instead of just the final score.
     pub fn get_score_breakdown(env: Env, address: Address) -> ScoreBreakdown {
         let escrow = env
             .storage()
@@ -346,72 +427,18 @@ impl ReputationContract {
             .get::<RepDataKey, Address>(&RepDataKey::EscrowContract)
             .expect("escrow contract not set");
 
-        let count = call_escrow_u32(&env, &escrow, "get_trade_count");
-        let scan_max = core::cmp::min(count, MAX_TRADES);
-        if scan_max == 0 {
-            return ScoreBreakdown {
-                total_trades: 0,
-                completed_trades: 0,
-                disputed_trades: 0,
-                total_volume: 0,
-                unique_counterparties: 0,
-                score: 0,
-                last_trade_ledger: 0,
-            };
-        }
+        let root = call_escrow_root(&env, &escrow);
+        let proof = call_escrow_proof(&env, &escrow, &address, MAX_TRADES);
 
-        let mut total: u32 = 0;
-        let mut completed: u32 = 0;
-        let mut disputed: u32 = 0;
-        let mut volume: i128 = 0;
-        let mut counterparties: Map<Address, bool> = Map::new(&env);
-        let mut last_trade_seq: u32 = 0;
-
-        for idx in 1..=scan_max {
-            let trade_id: Option<BytesN<32>> = call_escrow_get_trade_id(&env, &escrow, idx);
-            let Some(tid) = trade_id else { continue };
-
-            let trade: Option<TradeState> = call_escrow_get_trade(&env, &escrow, &tid);
-            let Some(t) = trade else { continue };
-
-            let is_seller = t.seller == address;
-            let is_buyer = t.buyer == address;
-            if !is_seller && !is_buyer {
-                continue;
-            }
-            if t.seller == t.buyer {
-                continue;
-            }
-
-            total += 1;
-            if t.timeout_ledger > last_trade_seq {
-                last_trade_seq = t.timeout_ledger;
-            }
-            let counterparty = if is_seller {
-                t.buyer.clone()
-            } else {
-                t.seller.clone()
-            };
-            counterparties.set(counterparty, true);
-
-            match t.status {
-                TradeStatus::Released | TradeStatus::Resolved => {
-                    completed += 1;
-                    volume = volume.saturating_add(t.amount);
-                }
-                TradeStatus::Disputed => {
-                    disputed += 1;
-                }
-                _ => {}
-            }
-        }
+        let (total, completed, disputed, volume, counterparty_count, last_trade_seq) =
+            verify_and_aggregate(&env, &proof, &root, &address);
 
         let score = compute_score_internal(
             total,
             completed,
             disputed,
             volume,
-            counterparties.len(),
+            counterparty_count,
             last_trade_seq,
             &env,
         );
@@ -421,7 +448,7 @@ impl ReputationContract {
             completed_trades: completed,
             disputed_trades: disputed,
             total_volume: volume,
-            unique_counterparties: counterparties.len(),
+            unique_counterparties: counterparty_count,
             score,
             last_trade_ledger: last_trade_seq,
         }
@@ -429,27 +456,83 @@ impl ReputationContract {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-contract invocations
+// Cross-contract invocations (issue #387)
 // ---------------------------------------------------------------------------
 
-fn call_escrow_u32(env: &Env, escrow: &Address, func: &str) -> u32 {
-    env.invoke_contract(escrow, &Symbol::new(env, func), Vec::new(env))
-}
-
-fn call_escrow_get_trade_id(env: &Env, escrow: &Address, index: u32) -> Option<BytesN<32>> {
+fn call_escrow_root(env: &Env, escrow: &Address) -> BytesN<32> {
     env.invoke_contract(
         escrow,
-        &Symbol::new(env, "get_trade_by_index"),
-        vec![env, index.into_val(env)],
+        &Symbol::new(env, "get_reputation_root"),
+        Vec::new(env),
     )
 }
 
-fn call_escrow_get_trade(env: &Env, escrow: &Address, id: &BytesN<32>) -> Option<TradeState> {
-    env.invoke_contract(
-        escrow,
-        &Symbol::new(env, "get_trade"),
-        vec![env, id.into_val(env)],
-    )
+fn call_escrow_proof(env: &Env, escrow: &Address, address: &Address, max_trades: u32) -> ScoreProof {
+    let mut args = Vec::new(env);
+    args.push_back(address.into_val(env));
+    args.push_back(max_trades.into_val(env));
+    env.invoke_contract(escrow, &Symbol::new(env, "get_reputation_proof"), args)
+}
+
+// ---------------------------------------------------------------------------
+// Proof verification and aggregation (issue #387)
+// ---------------------------------------------------------------------------
+
+/// Verifies every `LeafProof` in `proof` against `root` and aggregates the
+/// score components from whichever leaves survive verification. A leaf that
+/// fails to recompute to `root` (tampered, or a structurally malformed
+/// proof) is silently skipped rather than aborting the whole computation —
+/// the score is simply based on the leaves that *do* verify.
+///
+/// Self-trades (seller == buyer == `address`) are excluded the same way the
+/// original linear scan excluded them, without the leaf ever disclosing raw
+/// addresses: a self-trade's `counterparty_hash` is a value the caller can
+/// compute independently from `address` alone.
+fn verify_and_aggregate(
+    env: &Env,
+    proof: &ScoreProof,
+    root: &BytesN<32>,
+    address: &Address,
+) -> (u32, u32, u32, i128, u32, u32) {
+    let mut total: u32 = 0;
+    let mut completed: u32 = 0;
+    let mut disputed: u32 = 0;
+    let mut volume: i128 = 0;
+    let mut last_trade_seq: u32 = 0;
+    let mut counterparties: Map<BytesN<32>, bool> = Map::new(env);
+
+    let self_counterparty_hash = mst::counterparty_hash(env, address, address);
+
+    for lp in proof.proofs.iter() {
+        let Some((recomputed_hash, _sum)) =
+            mst::recompute_root(env, &lp.leaf, lp.leaf_index, &lp.siblings)
+        else {
+            continue;
+        };
+        if recomputed_hash != *root {
+            continue;
+        }
+        if lp.leaf.counterparty_hash == self_counterparty_hash {
+            continue;
+        }
+
+        total += 1;
+        if lp.leaf.ledger > last_trade_seq {
+            last_trade_seq = lp.leaf.ledger;
+        }
+        counterparties.set(lp.leaf.counterparty_hash.clone(), true);
+
+        match lp.leaf.status_bits {
+            mst::STATUS_RELEASED | mst::STATUS_RESOLVED => {
+                completed += 1;
+                volume = volume.saturating_add(lp.leaf.amount);
+            }
+            mst::STATUS_DISPUTED => disputed += 1,
+            _ => {}
+        }
+    }
+
+    (total, completed, disputed, volume, counterparties.len(), last_trade_seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -509,3 +592,7 @@ pub mod jury_arbitration;
 mod test;
 #[cfg(test)]
 mod jury_tests;
+#[cfg(test)]
+mod mst_test;
+#[cfg(test)]
+mod benchmarks;

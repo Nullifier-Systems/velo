@@ -7,6 +7,10 @@
 
 use soroban_sdk::{contracttype, Address, BytesN, Env, Vec};
 
+/// Reputation Merkle-sum tree shared by `escrow` (writer) and `reputation`
+/// (verifier) — see module doc for the design (issue #387).
+pub mod mst;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum TradeStatus {
