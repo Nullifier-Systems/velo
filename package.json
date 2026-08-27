@@ -26,7 +26,7 @@
   "devDependencies": {
     "tsx": "^4.16.2",
     "typescript": "^5.5.4",
-    "turbo": "^2.1.0"
+    "turbo": "^2.10.11"
   },
   "packageManager": "npm@10.0.0"
 }
