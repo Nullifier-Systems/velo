@@ -166,7 +166,7 @@ export default function EvidenceRedactionPreview({
       maxHeight: "90vh",
       overflowY: "auto",
     }}>
-      <h3 style={{ marginTop: 0, color: "#f9e2af" }}>Upload Evidence (Redaction Preview)</h3>
+      <h3 style={{ marginTop: 0, color: "#f9e2af" }}>{t('disputeEvidence.uploadPreview.title')}</h3>
 
       {!file && (
         <div style={{ marginBottom: "20px" }}>
@@ -179,7 +179,7 @@ export default function EvidenceRedactionPreview({
             cursor: "pointer",
             border: "1px solid #45475a",
           }}>
-            Select Image
+            {t('disputeEvidence.uploadPreview.selectImage')}
             <input 
               type="file" 
               accept="image/jpeg, image/png, image/webp"
@@ -205,24 +205,24 @@ export default function EvidenceRedactionPreview({
                 color: "#f9e2af",
                 fontWeight: "bold"
               }}>
-                Scanning for sensitive information...
+                {t('disputeEvidence.uploadPreview.scanning')}
               </div>
             )}
           </div>
 
           {!isProcessing && redactionsCount > 0 && (
             <div style={{ color: "#a6e3a1", marginBottom: "16px", fontWeight: "bold" }}>
-              ✓ Detected and redacted {redactionsCount} sensitive item(s).
+              {t('disputeEvidence.uploadPreview.detectedPart1')} {redactionsCount} {t('disputeEvidence.uploadPreview.detectedPart2')}
               <div style={{ fontSize: "0.85rem", color: "#a6adc8", fontWeight: "normal", marginTop: "4px" }}>
-                Note: Server will strip EXIF data and apply final redactions automatically.
+                {t('disputeEvidence.uploadPreview.noteServerRedact')}
               </div>
             </div>
           )}
           {!isProcessing && redactionsCount === 0 && (
             <div style={{ color: "#a6adc8", marginBottom: "16px" }}>
-              No sensitive information detected. 
+              {t('disputeEvidence.uploadPreview.noSensitive')} 
               <br/>
-              <span style={{ fontSize: "0.85rem" }}>Server will strip EXIF data automatically.</span>
+              <span style={{ fontSize: "0.85rem" }}>{t('disputeEvidence.uploadPreview.serverWillStrip')}</span>
             </div>
           )}
         </div>
@@ -247,7 +247,7 @@ export default function EvidenceRedactionPreview({
             cursor: (isUploading || isProcessing) ? "not-allowed" : "pointer",
           }}
         >
-          Cancel
+          {t('disputeEvidence.uploadPreview.cancel')}
         </button>
         {file && (
           <button
@@ -263,7 +263,7 @@ export default function EvidenceRedactionPreview({
               cursor: (isUploading || isProcessing) ? "not-allowed" : "pointer",
             }}
           >
-            {isUploading ? "Uploading..." : "Confirm & Upload"}
+            {isUploading ? t('disputeEvidence.uploadPreview.uploading') : t('disputeEvidence.uploadPreview.confirmUpload')}
           </button>
         )}
       </div>

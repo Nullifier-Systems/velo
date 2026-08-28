@@ -461,5 +461,21 @@
       "viewEvidence": "View Evidence",
       "castVote": "Cast Vote"
     }
+  },
+  "disputeEvidence": {
+    "uploadPreview": {
+      "title": "Upload Evidence (Redaction Preview)",
+      "selectImage": "Select Image",
+      "scanning": "Scanning for sensitive information...",
+      "detectedPart1": "✓ Detected and redacted",
+      "detectedPart2": "sensitive item(s).",
+      "noteServerRedact": "Note: Server will strip EXIF data and apply final redactions automatically.",
+      "noSensitive": "No sensitive information detected.",
+      "serverWillStrip": "Server will strip EXIF data automatically.",
+      "cancel": "Cancel",
+      "uploading": "Uploading...",
+      "confirmUpload": "Confirm & Upload",
+      "uploadEvidenceBtn": "Upload Evidence"
+    }
   }
 }

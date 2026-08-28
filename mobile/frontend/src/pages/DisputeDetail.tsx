@@ -197,7 +197,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
             fontWeight: "bold",
           }}
         >
-          Upload Evidence
+          {t('disputeEvidence.uploadPreview.uploadEvidenceBtn')}
         </button>
       </div>
 
