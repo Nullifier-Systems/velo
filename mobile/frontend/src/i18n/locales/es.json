@@ -481,5 +481,21 @@
       "viewEvidence": "Ver Evidencia",
       "castVote": "Emitir Voto"
     }
+  },
+  "disputeEvidence": {
+    "uploadPreview": {
+      "title": "Subir evidencia (Vista previa de redacción)",
+      "selectImage": "Seleccionar imagen",
+      "scanning": "Buscando información confidencial...",
+      "detectedPart1": "✓ Detectado y redactado",
+      "detectedPart2": "elemento(s) confidencial(es).",
+      "noteServerRedact": "Nota: El servidor eliminará los datos EXIF y aplicará las redacciones finales automáticamente.",
+      "noSensitive": "No se detectó información confidencial.",
+      "serverWillStrip": "El servidor eliminará los datos EXIF automáticamente.",
+      "cancel": "Cancelar",
+      "uploading": "Subiendo...",
+      "confirmUpload": "Confirmar y subir",
+      "uploadEvidenceBtn": "Subir evidencia"
+    }
   }
 }
