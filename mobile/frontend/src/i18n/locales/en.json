@@ -273,6 +273,26 @@
     "failed": "Rotation Failed: Signature Mismatch",
     "retry": "Retry Proposal"
   },
+  "multisigApproval": {
+    "dialogLabel": "Approve threshold release",
+    "title": "Multi-Sig Escrow Release",
+    "subtitle": "This trade releases via a {{threshold}}-of-{{signers}} signer quorum instead of the buyer's secret.",
+    "recipientLabel": "Recipient",
+    "amountLabel": "Amount",
+    "signerAddressLabel": "Your signer address",
+    "signatureLabel": "Signature",
+    "invalidAddress": "Invalid Stellar public key address",
+    "invalidSignature": "Signature must be 128 hex characters",
+    "approve": "Submit Approval",
+    "submitting": "Submitting approval...",
+    "progressLabel": "Signature threshold progress",
+    "progress": "{{collected}} of {{required}} Signatures Collected",
+    "released": "Escrow Released On-Chain",
+    "viewTx": "View transaction",
+    "failed": "Approval Failed",
+    "retry": "Retry",
+    "loadError": "Could not load this trade's recovery signer set"
+  },
   "indexer": {
     "monitorDashboard": "Indexer Monitor Dashboard",
     "loadingStatus": "Loading indexer status...",

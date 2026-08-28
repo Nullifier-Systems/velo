@@ -56,6 +56,8 @@ export const ErrorCode = {
   REGISTRATION_LIMIT_EXCEEDED: "REGISTRATION_LIMIT_EXCEEDED",
   LOCATION_NOT_REVEALED: "LOCATION_NOT_REVEALED",
   NOT_TRADE_PARTICIPANT: "NOT_TRADE_PARTICIPANT",
+  /** Issue #433 — signer address is not part of the trade's registered threshold quorum. */
+  NOT_A_REGISTERED_SIGNER: "NOT_A_REGISTERED_SIGNER",
 
   /* 404 — Not found */
   NOT_FOUND: "NOT_FOUND",
@@ -70,6 +72,8 @@ export const ErrorCode = {
   STATE_ALREADY_SET: "STATE_ALREADY_SET",
   DOCUMENT_REQUIRED: "DOCUMENT_REQUIRED",
   KEY_ALREADY_INACTIVE: "KEY_ALREADY_INACTIVE",
+  /** Issue #433 — trade has no on-chain `TradeSignerSet` yet (`register_trade_signers` not called). */
+  TRADE_SIGNERS_NOT_CONFIGURED: "TRADE_SIGNERS_NOT_CONFIGURED",
 
   /* 415 — Unsupported media */
   UNSUPPORTED_MEDIA_TYPE: "UNSUPPORTED_MEDIA_TYPE",
