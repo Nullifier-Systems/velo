@@ -27,6 +27,8 @@
     "h3-js": "^4.5.0",
     "pg": "^8.22.0",
     "redis": "^5.12.1",
+    "sharp": "^0.35.4",
+    "tesseract.js": "^7.0.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

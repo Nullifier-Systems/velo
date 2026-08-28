@@ -1,4 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { ApiError } from "../lib/errors.js";
 import {
   ALLOWED_EVIDENCE_TYPES,
@@ -21,6 +24,29 @@ import {
   verifyFileIntegrity,
 } from "../lib/crypto/evidence-vault.js";
 import { verifyGrantToken, kekFromBlindedSecret } from "../lib/crypto/grant-token.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function runSanitizationWorker(buffer: Buffer): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const isTs = __filename.endsWith(".ts");
+    const workerPath = join(__dirname, "../lib/workers/ocrSanitizationWorker." + (isTs ? "ts" : "js"));
+    const execArgv = isTs ? ["--import", "tsx"] : [];
+    const worker = new Worker(workerPath, { execArgv });
+    
+    worker.on("message", (msg) => {
+      if (msg.success) resolve(msg.result);
+      else reject(new Error(msg.error));
+      worker.terminate();
+    });
+    worker.on("error", (err) => {
+      reject(err);
+      worker.terminate();
+    });
+    worker.postMessage(buffer);
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /*  Headers                                                            */
@@ -110,12 +136,15 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
         .replace(/[\\/\r\n]/g, "_")
         .slice(0, 255);
 
+      // Run OCR sanitization worker to redact PII and strip EXIF
+      const sanitizationResult = await runSanitizationWorker(request.body);
+
       // Generate DEK and encrypt the file server-side (or accept client-encrypted).
       // Server-side encryption ensures consistent protection even if the client
       // doesn't implement encryption. The DEK is wrapped with a KEK derived from
       // the trade secret at download time.
       const dek = generateDEK();
-      const encrypted = encryptFile(request.body, dek);
+      const encrypted = encryptFile(sanitizationResult.sanitizedBuffer, dek);
 
       // Compute Merkle root for file integrity verification.
       const root = merkleRoot(encrypted.ciphertext);
@@ -152,6 +181,14 @@ export async function disputeEvidenceRoutes(app: FastifyInstance) {
             record.sizeBytes, encB64, encrypted.nonce.toString("hex"),
             encrypted.tag.toString("hex"), wrapped.wrappedKey.toString("hex"),
             wrapped.nonce.toString("hex"), root, record.createdAt],
+        );
+
+        // Also insert the sanitization log
+        await (app as any).pg.query(
+          `INSERT INTO dispute_evidence_sanitization_logs
+             (evidence_id, trade_id, exif_removed, pii_redactions_count, sanitized_file_hash)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [record.id, record.tradeId, sanitizationResult.exifRemoved, sanitizationResult.piiRedactionsCount, sanitizationResult.sanitizedFileHash]
         );
       }
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import EvidenceViewer from "../components/EvidenceViewer.js";
+import EvidenceRedactionPreview from "../components/EvidenceRedactionPreview.js";
 
 interface DisputeDetailProps {
   tradeId: string;
@@ -25,6 +26,7 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEvidence, setShowEvidence] = useState(false);
+  const [showUploadPreview, setShowUploadPreview] = useState(false);
 
   const STROOPS_PER_USDC = 10_000_000;
 
@@ -168,20 +170,36 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
         </div>
       )}
 
-      <button
-        onClick={() => setShowEvidence(true)}
-        style={{
-          padding: "10px 20px",
-          borderRadius: "8px",
-          border: "1px solid #f9e2af",
-          backgroundColor: "transparent",
-          color: "#f9e2af",
-          cursor: "pointer",
-          fontWeight: "bold",
-        }}
-      >
-        {t("juryArbitration.disputeDetail.viewEvidenceFiles")}
-      </button>
+      <div style={{ display: "flex", gap: "12px" }}>
+        <button
+          onClick={() => setShowEvidence(true)}
+          style={{
+            padding: "10px 20px",
+            borderRadius: "8px",
+            border: "1px solid #f9e2af",
+            backgroundColor: "transparent",
+            color: "#f9e2af",
+            cursor: "pointer",
+            fontWeight: "bold",
+          }}
+        >
+          {t("juryArbitration.disputeDetail.viewEvidenceFiles")}
+        </button>
+        <button
+          onClick={() => setShowUploadPreview(true)}
+          style={{
+            padding: "10px 20px",
+            borderRadius: "8px",
+            border: "none",
+            backgroundColor: "#89b4fa",
+            color: "#11111b",
+            cursor: "pointer",
+            fontWeight: "bold",
+          }}
+        >
+          Upload Evidence
+        </button>
+      </div>
 
       {showEvidence && (
         <div style={{
@@ -197,6 +215,27 @@ export default function DisputeDetail({ tradeId, onBack }: DisputeDetailProps) {
           zIndex: 9998,
         }}>
           <EvidenceViewer tradeId={tradeId} onClose={() => setShowEvidence(false)} />
+        </div>
+      )}
+
+      {showUploadPreview && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0,0,0,0.8)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999,
+        }}>
+          <EvidenceRedactionPreview 
+            tradeId={tradeId} 
+            onCancel={() => setShowUploadPreview(false)} 
+            onUploadSuccess={() => setShowUploadPreview(false)} 
+          />
         </div>
       )}
     </div>
