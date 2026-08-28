@@ -395,21 +395,87 @@
     "refresh": "Refresh Hotspots",
     "loading": "Loading spatial demand map..."
   },
-  "e2ee": {
-    "tradeChat": "Trade Chat",
-    "protocolBadge": "X3DH + Double Ratchet",
-    "peerLabel": "Peer: {{address}}",
-    "verifyFingerprint": "Verify Security Fingerprint",
-    "safetyCode": "🔑 Safety Code",
-    "sessionInitialized": "End-to-End Encrypted Session Initialized",
-    "sessionDescription": "Messages and media chunks are encrypted with Double Ratchet PFS.",
-    "sendMediaTitle": "Send 64KB Chunk Encrypted Image",
-    "send": "Send",
-    "mediaAlt": "Encrypted media payload",
-    "encryptedChunkBadge": "64KB Encrypted Chunk",
-    "fingerprintTitle": "Security Fingerprint",
-    "comparePrompt": "Compare this safety number out loud or side-by-side with your peer ({{address}}) to verify end-to-end encryption integrity and prevent machine-in-the-middle attacks.",
-    "fingerprintSubtext": "Signal Double Ratchet Constant-Time Safety Number",
-    "verifiedDone": "Verified & Done"
+  "juryArbitration": {
+    "evidenceViewer": {
+      "title": "Evidence Files",
+      "loading": "Loading evidence...",
+      "empty": "No evidence files uploaded for this dispute.",
+      "kb": "KB",
+      "uploadedBy": "Uploaded by:",
+      "merkle": "Merkle:",
+      "close": "Close"
+    },
+    "voteModal": {
+      "title": "Cast Your Vote",
+      "panelLabel": "Panel:",
+      "jurorLabel": "Juror:",
+      "revealSuccess": "Vote revealed successfully. Panel will resolve when all jurors reveal.",
+      "generatingCommit": "Generating commit hash and submitting...",
+      "yourVote": "Your vote:",
+      "commitLabel": "Commit:",
+      "revealPhaseHint": "During the REVEAL phase, you can reveal your vote. Your commitment is locked.",
+      "revealingOnChain": "Revealing vote on-chain...",
+      "close": "Close",
+      "revealVote": "Reveal Vote",
+      "done": "Done",
+      "cancel": "Cancel",
+      "ruleForBuyer": "Rule for Buyer",
+      "ruleForSeller": "Rule for Seller",
+      "abstain": "Abstain"
+    },
+    "disputeDetail": {
+      "loading": "Loading dispute details...",
+      "back": "Back",
+      "backToDashboard": "← Back to Dashboard",
+      "title": "Dispute Detail",
+      "tradeId": "Trade ID",
+      "status": "Status",
+      "buyer": "Buyer",
+      "seller": "Seller",
+      "amount": "Amount",
+      "usdc": "USDC",
+      "juryPanel": "Jury Panel",
+      "resolution": "Resolution",
+      "tiedSplit": "Tied - Split 50/50",
+      "viewEvidenceFiles": "View Evidence Files"
+    },
+    "jurorPortal": {
+      "title": "Jury Portal",
+      "description": "Enter your Stellar address to access the juror dashboard.",
+      "placeholder": "Stellar address (G...)",
+      "loading": "Loading...",
+      "connect": "Connect",
+      "yourStake": "Your Stake",
+      "stakedAmount": "Staked Amount",
+      "usdc": "USDC",
+      "reputation": "Reputation",
+      "status": "Status",
+      "active": "Active",
+      "inactive": "Inactive",
+      "yourPanels": "Your Dispute Panels",
+      "noPanels": "No active dispute panels assigned.",
+      "panel": "Panel",
+      "tradeLabel": "Trade:",
+      "statusLabel": "Status:",
+      "escrowLabel": "Escrow:",
+      "viewEvidence": "View Evidence",
+      "castVote": "Cast Vote"
+    }
+  },
+  "disputeEvidence": {
+    "uploadPreview": {
+      "title": "Upload Evidence (Redaction Preview)",
+      "selectImage": "Select Image",
+      "scanning": "Scanning for sensitive information...",
+      "detectedPart1": "✓ Detected and redacted",
+      "detectedPart2": "sensitive item(s).",
+      "noteServerRedact": "Note: Server will strip EXIF data and apply final redactions automatically.",
+      "noSensitive": "No sensitive information detected.",
+      "serverWillStrip": "Server will strip EXIF data automatically.",
+      "cancel": "Cancel",
+      "uploading": "Uploading...",
+      "confirmUpload": "Confirm & Upload",
+      "uploadEvidenceBtn": "Upload Evidence"
+    }
   }
 }

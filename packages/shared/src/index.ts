@@ -345,3 +345,9 @@ export type {
 } from "./types/zk-range.js";
 
 export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";
+
+/* ------------------------------------------------------------------ */
+/*  Decentralized Jury Dispute Arbitration (#404)                      */
+/* ------------------------------------------------------------------ */
+
+export * from "./types/dispute-jury.js";

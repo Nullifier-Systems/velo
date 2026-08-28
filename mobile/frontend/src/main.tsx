@@ -14,6 +14,7 @@ import AdminDashboard from "./pages/AdminDashboard.js";
 import AdminCircuitBreakerDashboard from "./pages/AdminCircuitBreakerDashboard.js";
 import EnterpriseDashboard from "./pages/EnterpriseDashboard.js";
 import EnterpriseApprovals from "./pages/EnterpriseApprovals.js";
+import JurorPortal from "./pages/JurorPortal.js";
 
 import NotFound from "./pages/NotFound.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -42,6 +43,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/admin/circuit-breaker" element={<AdminCircuitBreakerDashboard />} />
           <Route path="/enterprise" element={<EnterpriseDashboard />} />
           <Route path="/enterprise/approvals" element={<EnterpriseApprovals />} />
+          <Route path="/juror" element={<JurorPortal />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
