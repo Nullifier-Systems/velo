@@ -350,3 +350,46 @@ export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";
 /* ------------------------------------------------------------------ */
 
 export * from "./types/dispute-jury.js";
+
+/* ------------------------------------------------------------------ */
+/*  Multi-Sig Escrow Threshold Release & Key Recovery Protocol (#433)  */
+/* ------------------------------------------------------------------ */
+
+/** Lifecycle of one trade's pinned release attempt in `multisig_escrow_releases`. */
+export type MultisigReleaseStatus = "pending" | "releasing" | "released" | "failed";
+
+/**
+ * A trade's registered on-chain `TradeSignerSet` (`register_trade_signers`
+ * in contracts/escrow/src/lib.rs) — the 2-of-N recovery quorum both buyer
+ * and seller jointly consented to, e.g. `[buyer_key, seller_key,
+ * backup_key]` with `threshold = 2`.
+ */
+export interface TradeSignerSet {
+  /** Hex-encoded 32-byte ed25519 public keys. */
+  keys: string[];
+  threshold: number;
+}
+
+/** GET /cash/multisig-release/:tradeId response — pinned payload + live progress. */
+export interface MultisigReleaseStatusResponse {
+  trade_id: string;
+  recipient_address: string;
+  release_amount_stroops: string;
+  nonce: string;
+  threshold: number;
+  registered_signers: number;
+  status: MultisigReleaseStatus;
+  release_tx_hash: string | null;
+  approvals_collected: number;
+  approved_by: string[];
+}
+
+/** POST /cash/multisig-release/approve response. */
+export interface MultisigReleaseApproveResponse {
+  released: boolean;
+  trade_id: string;
+  tx_hash?: string;
+  approvals_collected: number;
+  threshold: number;
+  approved_by: string[];
+}

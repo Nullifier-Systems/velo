@@ -42,6 +42,8 @@ import { spatialHotspotsRoutes } from "./routes/spatial-hotspots.js";
 import { globalSpatialMetricsWorker } from "./lib/workers/spatialMetricsWorker.js";
 import { collateralRoutes } from "./routes/collateral.js";
 import { CollateralGuardStore } from "./lib/collateralGuard.js";
+import { multisigEscrowRoutes } from "./routes/multisig-escrow.js";
+import { MultisigEscrowStore } from "./lib/multisigEscrowStore.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 
@@ -428,6 +430,13 @@ app.register(stateChannelRoutes, {
 app.register(collateralRoutes, {
   prefix: "/api/v1",
   store: new CollateralGuardStore(pgPool ?? undefined),
+});
+// Issue #433 — Multi-Sig Escrow Threshold Release & Key Recovery Protocol.
+// Shares the API's Postgres pool when configured; degrades to an
+// in-memory store in dev, same as the collateral guard above.
+app.register(multisigEscrowRoutes, {
+  prefix: "/api/v1",
+  store: new MultisigEscrowStore(pgPool ?? undefined),
 });
 // (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
 // VRF juror selection, and automated escrow resolution with stake slashing.

@@ -40,6 +40,18 @@ pub struct DisputeInfo {
     pub start_ledger: u32,
 }
 
+/// Issue #433 — a trade's registered 2-of-N recovery/threshold signer set
+/// for `release_escrow`. Set at most once per trade, jointly by the buyer
+/// and seller, so `release_escrow` has something real to check
+/// `designated_keys` against instead of trusting whatever key list the
+/// caller happens to pass in.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TradeSignerSet {
+    pub keys: Vec<BytesN<32>>,
+    pub threshold: u32,
+}
+
 #[contracttype]
 enum DataKey {
     Admin,
@@ -98,6 +110,10 @@ enum DataKey {
     /// Maximum escrow USD value allowed at lock time, in oracle base units
     /// (same scale as `price / 10^decimals`). `0` disables the limit.
     MaxUsdLimit,
+    /// Issue #433 — per-trade `TradeSignerSet` for `release_escrow`'s
+    /// 2-of-N recovery path. Absent until `register_trade_signers` is
+    /// called for that trade.
+    TradeSigners(BytesN<32>),
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -190,6 +206,14 @@ pub enum Error {
     /// ledger it was created — at least `MIN_COLLATERAL_LOCKUP_LEDGERS`
     /// (~25s) must elapse first.
     CooldownActive = 52,
+    /// `release_escrow` was called for a trade with no registered
+    /// `TradeSignerSet` (issue #433). The threshold-release path is
+    /// unusable until `register_trade_signers` has been called.
+    TradeSignersNotConfigured = 53,
+    /// `register_trade_signers` was called for a trade that already has a
+    /// registered signer set. Set-once by design — a single party must
+    /// never be able to silently swap the recovery quorum mid-trade.
+    TradeSignersAlreadySet = 54,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -1785,16 +1809,90 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Multi-Party Threshold Signature (2-of-3) Escrow Release Validation.
-    /// Releases escrowed funds if at least 2 valid Ed25519 signatures from the designated
-    /// authorized public keys (buyer, seller, arbitrator) are provided.
+    /// Registers the 2-of-N recovery / threshold-release signer set for one
+    /// trade (issue #433). `release_escrow` refuses to pay out until this
+    /// has been called — before this existed, `release_escrow` trusted
+    /// whatever `designated_keys` list the *caller* passed in, so anyone
+    /// could supply two throwaway keys of their own and drain the trade.
+    ///
+    /// Both counterparties must consent (`buyer.require_auth()` and
+    /// `seller.require_auth()`): neither side can unilaterally hand a third
+    /// party (e.g. an arbitrator/backup key) the ability to move funds.
+    /// Typical usage is `signers = [buyer_key, seller_key, backup_key]`,
+    /// `threshold = 2`, matching the N-of-M quorum model documented in
+    /// docs/security/admin-threshold-custody.md, scoped to this trade
+    /// instead of platform admin authority.
+    ///
+    /// Set-once and only while the trade is `Locked` — it cannot be
+    /// re-registered or changed after the fact.
+    pub fn register_trade_signers(
+        env: Env,
+        id: BytesN<32>,
+        signers: Vec<BytesN<32>>,
+        threshold: u32,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+
+        let trade_key = DataKey::Trade(id.clone());
+        let state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&trade_key)
+            .ok_or(Error::TradeNotFound)?;
+        if state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        let signer_key = DataKey::TradeSigners(id.clone());
+        if env.storage().persistent().has(&signer_key) {
+            return Err(Error::TradeSignersAlreadySet);
+        }
+        if signers.len() < 2 || threshold == 0 || threshold > signers.len() {
+            return Err(Error::InvalidSigners);
+        }
+        for i in 0..signers.len() {
+            let s = signers.get(i).unwrap();
+            for j in 0..i {
+                if signers.get(j).unwrap() == s {
+                    return Err(Error::DuplicateSigner);
+                }
+            }
+        }
+
+        state.buyer.require_auth();
+        state.seller.require_auth();
+
+        let record = TradeSignerSet {
+            keys: signers,
+            threshold,
+        };
+        env.storage().persistent().set(&signer_key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&signer_key, TTL_EXTEND, TTL_EXTEND);
+        Ok(())
+    }
+
+    /// Read-only accessor so the API/UI can check whether a trade has a
+    /// registered recovery signer set (and who's on it, and the required
+    /// threshold) before building an approval flow.
+    pub fn get_trade_signers(env: Env, id: BytesN<32>) -> Option<TradeSignerSet> {
+        env.storage().persistent().get(&DataKey::TradeSigners(id))
+    }
+
+    /// Threshold release: pays out a trade to `recipient_address` once
+    /// `threshold`-of-N valid ed25519 signatures (from the trade's
+    /// registered `TradeSignerSet`, see `register_trade_signers`) are
+    /// presented over `(escrow_id, release_amount, recipient_address,
+    /// nonce)`. This is the recovery path for a buyer who has lost their
+    /// HTLC secret, or an institutional flow that never wants a single key
+    /// able to move funds alone — it does not require the secret at all.
     pub fn release_escrow(
         env: Env,
         escrow_id: BytesN<32>,
         release_amount: i128,
         recipient_address: Address,
         nonce: u64,
-        designated_keys: Vec<BytesN<32>>,
         signatures: Vec<(BytesN<32>, BytesN<64>)>,
     ) -> Result<(), Error> {
         check_not_paused(&env);
@@ -1805,7 +1903,13 @@ impl EscrowContract {
             return Err(Error::NonceAlreadyUsed);
         }
 
-        if signatures.len() < 2 {
+        let signer_set: TradeSignerSet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeSigners(escrow_id.clone()))
+            .ok_or(Error::TradeSignersNotConfigured)?;
+
+        if signatures.len() < signer_set.threshold {
             return Err(Error::InsufficientSignatures);
         }
 
@@ -1822,7 +1926,7 @@ impl EscrowContract {
 
         for sig in signatures.iter() {
             let (pub_key, signature) = sig;
-            if !designated_keys.contains(&pub_key) {
+            if !is_authorized_key(&pub_key, &signer_set.keys) {
                 continue;
             }
             if seen_keys.contains(&pub_key) {
@@ -1835,7 +1939,7 @@ impl EscrowContract {
             valid_count += 1;
         }
 
-        if valid_count < 2 {
+        if valid_count < signer_set.threshold {
             return Err(Error::InsufficientSignatures);
         }
 
@@ -2546,6 +2650,18 @@ fn validate_signers(
 fn is_authorized(addr: &Address, authorized: &Vec<Address>) -> bool {
     for i in 0..authorized.len() {
         if authorized.get(i).unwrap() == *addr {
+            return true;
+        }
+    }
+    false
+}
+
+/// Same membership check as `is_authorized`, over raw ed25519 public keys
+/// instead of `Address` — used by `release_escrow` to validate signatures
+/// against a trade's registered `TradeSignerSet` (issue #433).
+fn is_authorized_key(key: &BytesN<32>, authorized: &Vec<BytesN<32>>) -> bool {
+    for i in 0..authorized.len() {
+        if authorized.get(i).unwrap() == *key {
             return true;
         }
     }

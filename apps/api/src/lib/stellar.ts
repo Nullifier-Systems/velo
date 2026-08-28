@@ -5,6 +5,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  StrKey,
   Transaction,
   TransactionBuilder,
   nativeToScVal,
@@ -15,6 +16,8 @@ import {
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
 export { RpcTimeoutError } from "./rpc-errors.js";
 import { RpcTimeoutError } from "./rpc-errors.js";
+import { createHash } from "node:crypto";
+import nacl from "tweetnacl";
 
 // Re-export commonly used SDK types and constants
 export { BASE_FEE, Keypair, Operation, TransactionBuilder, xdr, Account, nativeToScVal, scValToNative };
@@ -1485,6 +1488,256 @@ export async function readEscrowTokenBalance(
     timeoutLedger: Number(onChain.timeout_ledger ?? onChain.timeoutLedger ?? 0),
     status: rawStatus.toLowerCase(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Multi-sig threshold release & key recovery (issue #433)
+//
+// The escrow contract's `release_escrow` pays out a trade once
+// `threshold`-of-N valid ed25519 signatures are presented over a payload
+// derived from (escrow_id, release_amount, recipient_address, nonce) — see
+// contracts/escrow/src/lib.rs. It checks those signatures against the
+// trade's on-chain `TradeSignerSet` (`register_trade_signers`, requires
+// both buyer and seller auth), never against a caller-supplied key list.
+//
+// `release_escrow` itself does NOT call `require_auth()` on any Stellar
+// account — its authorization *is* the bundled ed25519 signatures, so
+// submitting it needs no client wallet interaction: the API's relayer key
+// can pay the fee and submit once threshold signatures are collected
+// off-chain (see routes/multisig-escrow.ts). `register_trade_signers` is
+// the opposite: it needs real buyer+seller Soroban authorization, so it
+// follows docs/non-custodial-signing.md's "server-prepared unsigned XDR,
+// client-side wallet signs" pattern instead of a custodial shortcut.
+// ---------------------------------------------------------------------------
+
+export interface MultisigReleasePayload {
+  /** Hex-encoded 32-byte trade id. */
+  tradeId: string;
+  releaseAmountStroops: bigint | string | number;
+  recipientAddress: string;
+  nonce: bigint | string | number;
+}
+
+/**
+ * Builds the exact byte payload `release_escrow` verifies signatures
+ * against: `sha256(to_xdr((escrow_id, release_amount, recipient_address,
+ * nonce)))`. Every registered signer (buyer/seller/backup) signs this hash
+ * off-chain with their raw ed25519 key; the API bundles the resulting
+ * signatures into one `release_escrow` call once `threshold` is met.
+ *
+ * Must byte-for-byte match the Rust side's `payload_input.to_xdr(&env)` —
+ * verify against a live/testnet contract call before relying on this in
+ * production, the way any other cross-language XDR encoding should be.
+ */
+export function multisigReleasePayloadHash(params: MultisigReleasePayload): Buffer {
+  const tupleScVal = xdr.ScVal.scvVec([
+    nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+    nativeToScVal(BigInt(params.releaseAmountStroops), { type: "i128" }),
+    nativeToScVal(params.recipientAddress, { type: "address" }),
+    nativeToScVal(BigInt(params.nonce), { type: "u64" }),
+  ]);
+  return createHash("sha256").update(tupleScVal.toXDR()).digest();
+}
+
+/** Raw 32-byte ed25519 public key (hex) backing a Stellar `G...` account address. */
+export function ed25519PublicKeyHexFromAddress(address: string): string {
+  return Buffer.from(StrKey.decodeEd25519PublicKey(address)).toString("hex");
+}
+
+/**
+ * Verifies one candidate signer's signature over the release payload
+ * before it is ever counted toward threshold — the contributor note on
+ * issue #433 ("ALWAYS verify candidate signatures correspond to
+ * registered threshold signers") applies off-chain too: this stops a junk
+ * or mismatched signature from occupying one of the `(trade_id,
+ * signer_address)` approval slots.
+ */
+export function verifyTradeSignerSignature(
+  payload: MultisigReleasePayload & { signerPublicKeyHex: string; signatureHex: string },
+): boolean {
+  try {
+    const digest = multisigReleasePayloadHash(payload);
+    return nacl.sign.detached.verify(
+      new Uint8Array(digest),
+      new Uint8Array(Buffer.from(payload.signatureHex, "hex")),
+      new Uint8Array(Buffer.from(payload.signerPublicKeyHex, "hex")),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export interface BuildRegisterTradeSignersParams {
+  contractId: string;
+  tradeId: string;
+  /** Hex-encoded 32-byte ed25519 public keys, e.g. [buyer, seller, backup]. */
+  signerPublicKeysHex: string[];
+  threshold: number;
+  /** Stellar `G...` address of whichever party submits the transaction. */
+  sourcePublicKey: string;
+}
+
+/**
+ * Builds the unsigned XDR for `register_trade_signers`. The contract
+ * requires both the trade's buyer and seller to authorize this call, so —
+ * per docs/non-custodial-signing.md — this returns an unsigned, simulated
+ * transaction for the client to collect both parties' wallet signatures
+ * on (each over their own Soroban authorization entry) before submission,
+ * rather than a backend-held key signing on their behalf.
+ */
+export async function buildRegisterTradeSignersTransaction(
+  params: BuildRegisterTradeSignersParams,
+): Promise<string> {
+  const account = await server.getAccount(params.sourcePublicKey);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "register_trade_signers",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          xdr.ScVal.scvVec(
+            params.signerPublicKeysHex.map((k) =>
+              nativeToScVal(Buffer.from(k, "hex"), { type: "bytes" }),
+            ),
+          ),
+          nativeToScVal(params.threshold, { type: "u32" }),
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  return prepared.toXDR();
+}
+
+/** On-chain `TradeSignerSet` as returned by `get_trade_signers`. */
+export interface OnChainTradeSignerSet {
+  keys: string[];
+  threshold: number;
+}
+
+/** Reads a trade's registered recovery/threshold signer set, if any. */
+export async function getTradeSignersOnChain(
+  contractId: string,
+  tradeId: string,
+): Promise<OnChainTradeSignerSet | null> {
+  const signer = loadSignerKeypair();
+  const account = await server.getAccount(signer.publicKey());
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: contractId,
+        function: "get_trade_signers",
+        args: [nativeToScVal(Buffer.from(tradeId, "hex"), { type: "bytes" })],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+  if (!sim.result) return null;
+
+  const native = scValToNative(sim.result.retval);
+  if (native == null) return null;
+  const keys = (native.keys as Buffer[]).map((k) => Buffer.from(k).toString("hex"));
+  return { keys, threshold: Number(native.threshold) };
+}
+
+export interface SubmitThresholdReleaseParams {
+  contractId: string;
+  tradeId: string;
+  releaseAmountStroops: bigint | string | number;
+  recipientAddress: string;
+  nonce: bigint | string | number;
+  /** Collected `(pubkey_hex, signature_hex)` pairs, at least `threshold` of them. */
+  signatures: Array<{ signerPublicKeyHex: string; signatureHex: string }>;
+}
+
+/**
+ * Submits `release_escrow` once threshold signatures are collected. No
+ * client wallet is involved: the contract's authorization is the bundled
+ * ed25519 signatures, not a Soroban account signature, so the API's own
+ * relayer key can pay the fee and broadcast (mirrors `releaseEscrow()`'s
+ * existing testnet-custodial submission pattern above).
+ */
+export async function submitThresholdRelease(
+  params: SubmitThresholdReleaseParams,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  const signaturesScVal = xdr.ScVal.scvVec(
+    params.signatures.map((s) =>
+      xdr.ScVal.scvVec([
+        nativeToScVal(Buffer.from(s.signerPublicKeyHex, "hex"), { type: "bytes" }),
+        nativeToScVal(Buffer.from(s.signatureHex, "hex"), { type: "bytes" }),
+      ]),
+    ),
+  );
+
+  const account = await server.getAccount(signer.publicKey());
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: params.contractId,
+        function: "release_escrow",
+        args: [
+          nativeToScVal(Buffer.from(params.tradeId, "hex"), { type: "bytes" }),
+          nativeToScVal(BigInt(params.releaseAmountStroops), { type: "i128" }),
+          nativeToScVal(params.recipientAddress, { type: "address" }),
+          nativeToScVal(BigInt(params.nonce), { type: "u64" }),
+          signaturesScVal,
+        ],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (Api.isSimulationError(sim)) {
+    throw new Error(`simulation failed: ${sim.error}`);
+  }
+
+  const prepared = assembleTransaction(tx, sim).build();
+  prepared.sign(signer);
+
+  const sendResult = await server.sendTransaction(prepared);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
+  let getResult = await server.getTransaction(sendResult.hash);
+  const start = Date.now();
+  while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
+    if (Date.now() - start > 30_000) {
+      throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    getResult = await server.getTransaction(sendResult.hash);
+  }
+
+  if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+  }
+
+  return { hash: sendResult.hash };
 }
 
 // ---------------------------------------------------------------------------

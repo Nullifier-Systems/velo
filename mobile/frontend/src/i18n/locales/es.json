@@ -273,6 +273,26 @@
     "failed": "Error de rotación: las firmas no coinciden",
     "retry": "Reintentar la propuesta"
   },
+  "multisigApproval": {
+    "dialogLabel": "Aprobar liberación por umbral",
+    "title": "Liberación multi-firma del depósito",
+    "subtitle": "Este trade se libera con un quórum de {{threshold}} de {{signers}} firmantes en vez del secreto del comprador.",
+    "recipientLabel": "Destinatario",
+    "amountLabel": "Monto",
+    "signerAddressLabel": "Tu dirección de firmante",
+    "signatureLabel": "Firma",
+    "invalidAddress": "Dirección de clave pública de Stellar no válida",
+    "invalidSignature": "La firma debe tener 128 caracteres hexadecimales",
+    "approve": "Enviar aprobación",
+    "submitting": "Enviando aprobación...",
+    "progressLabel": "Progreso del umbral de firmas",
+    "progress": "{{collected}} de {{required}} firmas recogidas",
+    "released": "Depósito liberado en la cadena",
+    "viewTx": "Ver transacción",
+    "failed": "Error al aprobar",
+    "retry": "Reintentar",
+    "loadError": "No se pudo cargar el conjunto de firmantes de recuperación de este trade"
+  },
   "indexer": {
     "monitorDashboard": "Panel de monitoreo del indexador",
     "loadingStatus": "Cargando estado del indexador...",
