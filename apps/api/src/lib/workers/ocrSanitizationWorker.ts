@@ -18,7 +18,8 @@ async function sanitizeImage(imageBuffer: Buffer): Promise<SanitizationResult> {
 
   // Run OCR
   const worker = await createWorker('eng');
-  const { data: { text, words } } = await worker.recognize(imageBuffer);
+  const { data } = await worker.recognize(imageBuffer);
+  const { text, words } = data as any;
   await worker.terminate();
 
   const ccRegex = /\b(?:\d[ -]*?){13,16}\b/g;

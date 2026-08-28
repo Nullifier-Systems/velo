@@ -69,7 +69,8 @@ export default function EvidenceRedactionPreview({
       const scaleY = height / img.height;
 
       const worker = await createWorker('eng');
-      const { data: { text, words } } = await worker.recognize(img);
+      const { data } = await worker.recognize(img);
+      const { text, words } = data as any;
       await worker.terminate();
 
       // Find CC numbers
