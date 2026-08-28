@@ -23,8 +23,12 @@ extern crate std;
 
 use htlc_core::{Htlc, TradeState, TradeStatus, Tranche};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, BytesN, Env,
+    Symbol,
 };
+
+mod mpt_verifier;
+use mpt_verifier::{MptError, MptVerifier};
 
 #[contracttype]
 enum DataKey {
@@ -39,6 +43,10 @@ enum DataKey {
     CrossChainState(BytesN<32>), // evm_tx_hash -> CrossChainTxInfo
     /// Track if timelock was extended for a trade
     TimelockExtended(BytesN<32>),
+    /// Trusted EVM block headers: block_hash -> (block_number, state_root)
+    TrustedBlockHeader(BytesN<32>), // block_hash -> (u32, BytesN<32>)
+    /// MPT root for state at a specific EVM block: (chain_id, block_hash) -> state_root
+    MptStateRoot((u32, BytesN<32>)), // (chain_id, block_hash) -> state_root
 }
 
 #[contracterror]
@@ -62,6 +70,16 @@ pub enum Error {
     TimelockAlreadyExtended = 13,
     /// Cross-chain: invalid Merkle root or proof
     InvalidMerkleProof = 14,
+    /// MPT verification: invalid proof structure
+    MptInvalidProof = 15,
+    /// MPT verification: proof path doesn't match expected key
+    MptInvalidPath = 16,
+    /// MPT verification: root hash mismatch
+    MptRootMismatch = 17,
+    /// Block header not trusted or not found
+    UntrustedBlockHeader = 18,
+    /// Invalid block height or block not finalized
+    InvalidBlockHeight = 19,
 }
 
 /// Cross-chain EVM transaction info: secret and block metadata
@@ -74,6 +92,18 @@ pub struct CrossChainTxInfo {
     pub evm_block_height: u32,
     /// Soroban ledger sequence when we learned about the reveal
     pub revealed_at_soroban_ledger: u32,
+}
+
+/// Trusted EVM block header information
+#[derive(Clone)]
+#[contracttype]
+pub struct TrustedBlockHeaderInfo {
+    /// Block number on the EVM chain
+    pub block_number: u32,
+    /// State root (MPT root) for this block
+    pub state_root: BytesN<32>,
+    /// Timestamp when this header was first trusted (Soroban ledger sequence)
+    pub trusted_at_ledger: u32,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7; // ~7 days at 10s/ledger, sanity cap
@@ -157,9 +187,72 @@ impl AtomicSwapContract {
         }
     }
 
-    /// Cross-chain: Record EVM secret reveal for later verification.
-    /// Called by relayer after observing LogHTLCWithdraw on EVM.
+    /// Cross-chain: Register a trusted EVM block header.
+    /// Only callable by admin. This establishes a trusted state root for MPT verification.
+    ///
+    /// # Arguments
+    /// * `block_hash` - The keccak256 hash of the EVM block header
+    /// * `block_number` - The block number on the EVM chain
+    /// * `state_root` - The Merkle root of the EVM state trie for this block
+    pub fn register_trusted_block_header(
+        env: Env,
+        block_hash: BytesN<32>,
+        block_number: u32,
+        state_root: BytesN<32>,
+    ) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        let current_ledger = env.ledger().sequence();
+        let header_info = TrustedBlockHeaderInfo {
+            block_number,
+            state_root,
+            trusted_at_ledger: current_ledger,
+        };
+
+        let key = DataKey::TrustedBlockHeader(block_hash.clone());
+        env.storage().persistent().set(&key, &header_info);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_EXTEND, TTL_EXTEND);
+
+        env.events().publish(
+            (Symbol::new(&env, "block_header_trusted"), block_hash),
+            block_number,
+        );
+
+        Ok(())
+    }
+
+    /// Cross-chain: Get trusted block header information.
+    /// Returns None if the block header is not trusted.
+    pub fn get_trusted_block_header(
+        env: Env,
+        block_hash: BytesN<32>,
+    ) -> Option<TrustedBlockHeaderInfo> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TrustedBlockHeader(block_hash))
+    }
+
+    /// Cross-chain: Record EVM secret reveal with MPT proof verification.
+    /// Called by relayer after observing LogHTLCWithdraw on EVM with cryptographic proof.
+    /// Validates the secret against the EVM state using Merkle-Patricia Trie proofs.
     /// Stores secret + block metadata. Returns adaptive timelock extension if reorg risk detected.
+    ///
+    /// # Arguments
+    /// * `evm_tx_hash` - Hash of the EVM transaction revealing the secret
+    /// * `secret` - The revealed preimage
+    /// * `evm_block_height` - Block number where the secret was revealed on EVM
+    /// * `chain_id` - Chain ID of the EVM network
+    /// * `evm_current_block` - Current block number on the EVM network
+    /// * `block_hash` - Hash of the EVM block containing the reveal
+    /// * `log_index` - Index of the log in the transaction
+    /// * `mpt_proof` - Merkle-Patricia Trie proof nodes
     ///
     /// Returns the number of ledgers to extend the Soroban timelock by:
     /// - 0 if finality is sufficient (no reorg risk)
@@ -171,13 +264,36 @@ impl AtomicSwapContract {
         evm_block_height: u32,
         chain_id: u32,
         evm_current_block: u32,
+        block_hash: BytesN<32>,
+        log_index: u32,
+        mpt_proof: soroban_sdk::Vec<soroban_sdk::Bytes>,
     ) -> Result<u32, Error> {
         let current_ledger = env.ledger().sequence();
 
         // Safety: ensure block height is not in the future
         if evm_block_height > evm_current_block {
-            return Err(Error::InvalidMerkleProof);
+            return Err(Error::InvalidBlockHeight);
         }
+
+        // Get trusted block header for this block
+        let block_header = Self::get_trusted_block_header(env.clone(), block_hash.clone())
+            .ok_or(Error::UntrustedBlockHeader)?;
+
+        // Verify block height matches
+        if block_header.block_number != evm_block_height {
+            return Err(Error::InvalidBlockHeight);
+        }
+
+        // Verify the MPT proof
+        let state_root = block_header.state_root;
+        let log_key = soroban_sdk::Bytes::from_slice(&env, &log_index.to_le_bytes());
+        Self::verify_mpt_log_inclusion(
+            &env,
+            &state_root,
+            &secret,
+            &log_key,
+            &mpt_proof,
+        )?;
 
         // Calculate block confirmations on EVM
         let confirmations = evm_current_block.saturating_sub(evm_block_height);
@@ -217,6 +333,29 @@ impl AtomicSwapContract {
         );
 
         Ok(timelock_extension)
+    }
+
+    /// Helper: Verify MPT log inclusion proof
+    /// Verifies that a log with the given secret is included in the state trie
+    fn verify_mpt_log_inclusion(
+        env: &Env,
+        state_root: &BytesN<32>,
+        secret: &BytesN<32>,
+        log_key: &soroban_sdk::Bytes,
+        mpt_proof: &soroban_sdk::Vec<soroban_sdk::Bytes>,
+    ) -> Result<(), Error> {
+        let verifier = MptVerifier::new(state_root.clone());
+
+        let secret_bytes: Bytes = secret.clone().into();
+
+        match verifier.verify(env, &log_key, &secret_bytes, &mpt_proof) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Error::ProofVerificationFailed),
+            Err(MptError::InvalidProof) => Err(Error::MptInvalidProof),
+            Err(MptError::InvalidPath) => Err(Error::MptInvalidPath),
+            Err(MptError::RootMismatch) => Err(Error::MptRootMismatch),
+            Err(_) => Err(Error::ProofVerificationFailed),
+        }
     }
 
     /// Cross-chain: Extend a trade's timelock to account for EVM reorg risk.
@@ -265,37 +404,54 @@ impl AtomicSwapContract {
 
     /// Cross-chain: Verify Merkle-Patricia inclusion proof for EVM storage/log.
     /// Verifies that log_data is a valid node in the Merkle-Patricia tree with the given root.
-    /// Caches results to avoid redundant cryptographic verification.
+    /// Uses deterministic MPT traversal for cryptographic security.
     ///
-    /// For EVM cross-chain proofs, the proof_hash typically represents:
-    /// - For log inclusion: keccak256(log_data)
-    /// - For storage slot: keccak256(storage_value)
+    /// # Arguments
+    /// * `state_root` - The MPT root hash (from a trusted block header)
+    /// * `proof_key` - The key path in the MPT (typically keccak256(storage_slot))
+    /// * `proof_value` - The expected value at this key
+    /// * `mpt_proof` - Vector of encoded MPT nodes representing the Merkle path
     ///
-    /// This implementation uses SHA256 as a cryptographic commitment for cache validation.
-    /// In a real production deployment, this would integrate with actual EVM RPC
-    /// proof verification (e.g., via `proof_verify` library or custom Merkle-Patricia traversal).
+    /// Returns `Ok(true)` if the value is correctly included in the MPT
     pub fn verify_merkle_proof(
         env: Env,
-        proof_hash: BytesN<32>,
-        log_data: BytesN<32>,
+        state_root: BytesN<32>,
+        proof_key: soroban_sdk::Bytes,
+        proof_value: soroban_sdk::Bytes,
+        mpt_proof: soroban_sdk::Vec<soroban_sdk::Bytes>,
     ) -> Result<bool, Error> {
-        let cache_key = DataKey::ProofCache(proof_hash.clone());
+        // Compute cache key from proof components to detect duplicate verifications
+        let state_root_bytes: Bytes = state_root.clone().into();
+        let mut cache_input = state_root_bytes;
+        cache_input.append(&proof_key);
+        cache_input.append(&proof_value);
+
+        let cache_hash = env.crypto().sha256(&cache_input);
+        let cache_key_bytes: BytesN<32> = cache_hash.try_into().unwrap_or_else(|_| {
+            BytesN::from_array(&env, &[0u8; 32])
+        });
+        let cache_key = DataKey::ProofCache(cache_key_bytes);
 
         // Check cache first to avoid redundant cryptographic operations
         if let Some(cached) = env.storage().persistent().get::<_, bool>(&cache_key) {
             return Ok(cached);
         }
 
-        // Verify proof by computing the hash of log_data
-        // In production, this would verify a full Merkle-Patricia path from a trusted root
-        let computed_hash = env.crypto().sha256(&log_data.into());
-        let is_valid = computed_hash.to_bytes() == proof_hash;
+        // Perform MPT verification
+        let verifier = MptVerifier::new(state_root);
+        let is_valid = match verifier.verify(&env, &proof_key, &proof_value, &mpt_proof) {
+            Ok(result) => result,
+            Err(MptError::InvalidProof) => return Err(Error::MptInvalidProof),
+            Err(MptError::InvalidPath) => return Err(Error::MptInvalidPath),
+            Err(MptError::RootMismatch) => return Err(Error::MptRootMismatch),
+            Err(_) => return Err(Error::ProofVerificationFailed),
+        };
 
-        // Cache verification result with TTL
+        // Cache verification result with TTL for 140 hours
         env.storage().persistent().set(&cache_key, &is_valid);
         env.storage()
             .persistent()
-            .extend_ttl(&cache_key, 50_000, 100_000); // ~140 hours
+            .extend_ttl(&cache_key, 50_000, 100_000);
 
         Ok(is_valid)
     }
