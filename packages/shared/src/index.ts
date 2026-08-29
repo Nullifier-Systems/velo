@@ -394,3 +394,59 @@ export interface MultisigReleaseApproveResponse {
   threshold: number;
   approved_by: string[];
 }
+
+/* ------------------------------------------------------------------ */
+/*  Distributed Webhook Event Delivery Engine & DLQ Recovery (#445)   */
+/* ------------------------------------------------------------------ */
+
+export type WebhookDeliveryStatus =
+  | "QUEUED"
+  | "DELIVERED"
+  | "FAILED"
+  | "DEAD_LETTER";
+
+export interface WebhookEndpoint {
+  endpointId: string;
+  userId: string;
+  targetUrl: string;
+  secretKey: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface WebhookDeliveryLog {
+  deliveryId: string;
+  endpointId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  signatureHeader: string;
+  attemptCount: number;
+  status: WebhookDeliveryStatus;
+  lastResponseCode: number | null;
+  createdAt: string;
+}
+
+export interface WebhookDeliveryMessage {
+  deliveryId: string;
+  endpointId: string;
+  targetUrl: string;
+  secretKey: string;
+  eventType: string;
+  payload: string;
+  signatureHeader: string;
+  attemptCount?: number;
+}
+
+export const WEBHOOK_DELIVERY = {
+  QUEUE: "velo:webhook-delivery-queue",
+  STREAM_KEY: "velo:webhook-delivery-queue",
+  DLQ: "velo:webhook-delivery-dlq",
+  DLQ_KEY: "velo:webhook-delivery-dlq",
+  GROUP: "webhook-delivery-group",
+  GROUP_NAME: "webhook-delivery-group",
+  MAX_RETRIES: 5,
+  MAX_ATTEMPTS: 5,
+  BASE_DELAY_MS: 1000,
+  SIGNATURE_HEADER: "x-velo-signature",
+} as const;
+
