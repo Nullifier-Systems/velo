@@ -4,12 +4,17 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import nodeCrypto from "node:crypto";
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, "crypto", { value: nodeCrypto.webcrypto });
+}
 import { Keypair } from "@stellar/stellar-sdk";
 import {
   CommitmentIssuer,
   createCommitmentIssuer,
 } from "../commitment-issuer.js";
 import { PedersenVault } from "../pedersen-vault.js";
+
 
 describe("CommitmentIssuer", () => {
   let issuer: CommitmentIssuer;

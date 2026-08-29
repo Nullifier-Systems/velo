@@ -48,6 +48,9 @@ import { MultisigEscrowStore } from "./lib/multisigEscrowStore.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
 import { WebhookStore } from "./lib/webhook-store.js";
+import { swapDisputeRoutes } from "./routes/swap-dispute.js";
+import { SwapDisputeStore } from "./lib/workers/swapDisputeWorker.js";
+
 
 
 const MAX_PAYMENTS_CACHE = 10000;
@@ -451,5 +454,12 @@ app.register(webhooksRoutes, {
   prefix: "/api/v1",
   store: webhookStore,
 });
+// (#446) Cross-Ledger Settlement Time-Lock Atomic Swap Dispute Bridge
+export const swapDisputeStore = new SwapDisputeStore(pgPool ?? undefined);
+app.register(swapDisputeRoutes, {
+  prefix: "/api/v1",
+  store: swapDisputeStore,
+});
+
 
 

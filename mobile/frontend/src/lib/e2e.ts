@@ -89,12 +89,22 @@ export async function computeSafetyNumber(publicKeyA: Uint8Array, publicKeyB: Ui
   combined.set(first, 0);
   combined.set(second, first.length);
 
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", combined));
+  const subtle =
+    globalThis.crypto?.subtle ??
+    (typeof window !== "undefined" ? window.crypto?.subtle : undefined);
+  let digest: Uint8Array;
+  if (subtle) {
+    digest = new Uint8Array(await subtle.digest("SHA-256", combined));
+  } else {
+    const { createHash } = await import("crypto");
+    digest = new Uint8Array(createHash("sha256").update(combined).digest());
+  }
   const hex = Array.from(digest.slice(0, 6))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
   return `${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`.toUpperCase();
 }
+
 
 export function getPinnedPeerKey(tradeId: string): string | null {
   return localStorage.getItem(peerPinKey(tradeId));
