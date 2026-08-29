@@ -12,15 +12,16 @@ const router = Router();
 router.post('/api/v1/relayer/bls-share', async (req: Request, res: Response) => {
   const parseResult = BlsShareRequestSchema.safeParse(req.body);
   if (!parseResult.success) {
-    return res.status(400).json({ error: parseResult.error.format() });
+    res.status(400).json({ error: parseResult.error.format() });
+    return;
   }
 
   const { swapId, peerId, partialSignature } = parseResult.data;
 
   // DB Transaction with SELECT FOR UPDATE concurrency lock
   // ...
-  
-  return res.status(202).json({
+
+  res.status(202).json({
     status: 'ACCEPTED',
     message: 'Partial BLS signature share recorded and queued for threshold aggregation.',
     swapId,
