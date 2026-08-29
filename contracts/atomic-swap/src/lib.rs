@@ -39,6 +39,14 @@ enum DataKey {
     CrossChainState(BytesN<32>), // evm_tx_hash -> CrossChainTxInfo
     /// Track if timelock was extended for a trade
     TimelockExtended(BytesN<32>),
+    /// Revealed preimage, persisted at `release()` time.
+    ///
+    /// The preimage is also published in the `released` event, but an event is
+    /// only observable by whoever happens to be watching when it fires. A
+    /// relayer that misses it has no way to recover the secret, and the
+    /// counterpart leg's collateral becomes unrecoverable. Persisting it makes
+    /// the secret readable at any later point via `get_revealed_secret`.
+    RevealedSecret(BytesN<32>),
 }
 
 #[contracterror]
@@ -116,6 +124,39 @@ impl AtomicSwapContract {
     /// was never locked. Useful for the relayer and for clients polling status.
     pub fn get_trade(env: Env, id: BytesN<32>) -> Option<TradeState> {
         env.storage().persistent().get(&DataKey::Trade(id))
+    }
+
+    /// The preimage revealed by `release()`, or `None` if this leg has not
+    /// been released.
+    ///
+    /// This is the recovery path for the relayer secret-leakage risk: the
+    /// preimage is normally read from the `released` event, but an event is
+    /// only seen by whoever is watching at the time. A relayer that was down,
+    /// restarting, or lagging can read the secret here instead of losing the
+    /// counterpart leg's collateral.
+    pub fn get_revealed_secret(env: Env, id: BytesN<32>) -> Option<BytesN<32>> {
+        env.storage().persistent().get(&DataKey::RevealedSecret(id))
+    }
+
+    /// Whether `refund()` would succeed for this trade at the current ledger.
+    ///
+    /// Lets the dispute bridge decide whether to submit without simulating a
+    /// call that might panic. Returns `false` for an unknown id, and defers to
+    /// `htlc_core::is_refund_claimable` so this answer and the contract's own
+    /// precondition can never disagree.
+    pub fn is_refund_claimable(env: Env, id: BytesN<32>) -> bool {
+        let Some(state) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, TradeState>(&DataKey::Trade(id))
+        else {
+            return false;
+        };
+        htlc_core::is_refund_claimable(
+            state.status,
+            state.timeout_ledger,
+            env.ledger().sequence(),
+        )
     }
 
     /// Cross-chain: Set finality depth (k-confirmations) for an EVM chain.
@@ -403,6 +444,16 @@ impl Htlc for AtomicSwapContract {
             &state.seller,
             &state.amount,
         );
+
+        // Persist the preimage before emitting it. The event is the fast path
+        // for a relayer that is watching; this key is the recovery path for one
+        // that was not. Without it a missed event means an unrecoverable
+        // counterpart leg.
+        let secret_key = DataKey::RevealedSecret(id.clone());
+        env.storage().persistent().set(&secret_key, &secret);
+        env.storage()
+            .persistent()
+            .extend_ttl(&secret_key, TTL_EXTEND, TTL_EXTEND);
 
         // The revealed secret is the cross-chain payload: the relayer reads it
         // from this event and uses it to claim the counterpart HTLC.
