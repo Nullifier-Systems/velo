@@ -15,7 +15,8 @@
 extern crate std;
 
 use htlc_core::{
-    apply_bps, calculate_fee, net_of, Htlc, TradeState, TradeStatus, Tranche, MAX_FEE_BPS,
+    apply_bps, calculate_fee, collateral_cooldown_remaining, net_of, Htlc, TradeState, TradeStatus,
+    Tranche, MAX_FEE_BPS, MIN_COLLATERAL_LOCKUP_LEDGERS,
 };
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -37,6 +38,18 @@ pub struct ArbitratorSet {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisputeInfo {
     pub start_ledger: u32,
+}
+
+/// Issue #433 — a trade's registered 2-of-N recovery/threshold signer set
+/// for `release_escrow`. Set at most once per trade, jointly by the buyer
+/// and seller, so `release_escrow` has something real to check
+/// `designated_keys` against instead of trusting whatever key list the
+/// caller happens to pass in.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TradeSignerSet {
+    pub keys: Vec<BytesN<32>>,
+    pub threshold: u32,
 }
 
 #[contracttype]
@@ -97,6 +110,10 @@ enum DataKey {
     /// Maximum escrow USD value allowed at lock time, in oracle base units
     /// (same scale as `price / 10^decimals`). `0` disables the limit.
     MaxUsdLimit,
+    /// Issue #433 — per-trade `TradeSignerSet` for `release_escrow`'s
+    /// 2-of-N recovery path. Absent until `register_trade_signers` is
+    /// called for that trade.
+    TradeSigners(BytesN<32>),
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -184,6 +201,19 @@ pub enum Error {
     /// math replaces raw `*`//` on stroop values so this surfaces as a
     /// recoverable error instead of a WASM panic that freezes escrow.
     FeeArithmeticOverflow = 51,
+    /// Collateral release attempted while the flash-loan cooldown is still
+    /// active (issue #420). A deposit can never be released in the same
+    /// ledger it was created — at least `MIN_COLLATERAL_LOCKUP_LEDGERS`
+    /// (~25s) must elapse first.
+    CooldownActive = 52,
+    /// `release_escrow` was called for a trade with no registered
+    /// `TradeSignerSet` (issue #433). The threshold-release path is
+    /// unusable until `register_trade_signers` has been called.
+    TradeSignersNotConfigured = 53,
+    /// `register_trade_signers` was called for a trade that already has a
+    /// registered signer set. Set-once by design — a single party must
+    /// never be able to silently swap the recovery quorum mid-trade.
+    TradeSignersAlreadySet = 54,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -243,6 +273,10 @@ pub struct CommitmentState {
     pub amount: i128,
     /// Ledger when commitment was created (for window enforcement).
     pub committed_at_ledger: u32,
+    /// Issue #420: ledger at which the collateral's flash-loan cooldown
+    /// expires. Releases before this ledger are rejected with
+    /// `Error::CooldownActive` (minimum ~5 ledgers / ~25 seconds).
+    pub cooldown_until_ledger: u32,
     /// Reveal window must open after Nmin blocks.
     pub reveal_window_min_ledgers: u32,
     /// Reveal window must close before Nmax blocks (commits expire after this).
@@ -416,6 +450,12 @@ const COMMIT_REVEAL_WINDOW_MAX_LEDGERS: u32 = 100; // ~15 minutes (same as lock 
 /// Collateral multiplier: bond required to make commit is % of trade amount.
 /// Stored as fixed-point (10000 = 100%, 500 = 5%).
 const COMMIT_COLLATERAL_RATE_FP: u32 = 500; // 5% collateral requirement
+
+/// Issue #420 — flash-loan attack prevention. The minimum lockup (in
+/// ledgers) between `commit_escrow` (collateral deposit) and any release of
+/// that collateral via `reveal_escrow`. Defined once in htlc-core so every
+/// HTLC-based contract enforces the identical floor (~25s at ~5s/ledger).
+const FLASH_LOAN_COOLDOWN_LEDGERS: u32 = MIN_COLLATERAL_LOCKUP_LEDGERS;
 
 /// Default dynamic fee configuration.
 /// Prevents transaction spam when pending escrow volume is high.
@@ -738,6 +778,15 @@ impl EscrowContract {
     /// Fixed delay (in ledgers) between `pause()` and effective lock blocking.
     pub fn pause_delay_ledgers(_env: Env) -> u32 {
         PAUSE_DELAY_LEDGERS
+    }
+
+    /// Issue #420: flash-loan cooldown length (in ledgers) enforced between
+    /// a collateral deposit (`commit_escrow`) and its release
+    /// (`reveal_escrow`). Exposed so off-chain services — the API's
+    /// release-check endpoint, cooldown worker, and provider dashboards —
+    /// mirror the on-chain rule exactly instead of hardcoding it.
+    pub fn collateral_cooldown_ledgers(_env: Env) -> u32 {
+        FLASH_LOAN_COOLDOWN_LEDGERS
     }
 
     /// Issue #283: Get the total number of trades recorded.
@@ -1563,6 +1612,12 @@ impl EscrowContract {
             collateral,
             amount,
             committed_at_ledger: env.ledger().sequence(),
+            // Issue #420: collateral deposited now cannot be released until
+            // this ledger (saturating — never panic at the u32 boundary).
+            cooldown_until_ledger: env
+                .ledger()
+                .sequence()
+                .saturating_add(FLASH_LOAN_COOLDOWN_LEDGERS),
             reveal_window_min_ledgers: COMMIT_REVEAL_WINDOW_MIN_LEDGERS,
             reveal_window_max_ledgers: COMMIT_REVEAL_WINDOW_MAX_LEDGERS,
         };
@@ -1632,8 +1687,20 @@ impl EscrowContract {
             .get(&commitment_key)
             .ok_or(Error::CommitmentNotFound)?;
 
-        // Verify commitment hasn't expired
+        // Issue #420 — flash-loan attack prevention (checked BEFORE any
+        // window/expiry logic so a same-ledger release attempt always
+        // surfaces as `CooldownActive`, never as a reveal-window error).
+        // Collateral pulled by `commit_escrow` cannot flow back out — via
+        // the refund-on-reveal path or any other — until at least
+        // `MIN_COLLATERAL_LOCKUP_LEDGERS` (~5 ledgers / ~25 seconds) have
+        // elapsed, which makes single-ledger deposit→release arbitrage
+        // impossible within one atomic transaction.
         let current_ledger = env.ledger().sequence();
+        if collateral_cooldown_remaining(commitment_state.committed_at_ledger, current_ledger) > 0 {
+            return Err(Error::CooldownActive);
+        }
+
+        // Verify commitment hasn't expired
         let committed_at = commitment_state.committed_at_ledger;
         let reveal_deadline = committed_at + commitment_state.reveal_window_max_ledgers;
 
@@ -1657,7 +1724,12 @@ impl EscrowContract {
             return Err(Error::RevealWindowClosed);
         }
 
-        // Verify reveal window is open (Nmin has passed)
+        // Verify reveal window is open (Nmin has passed).
+        // Note (#420): since the flash-loan cooldown (5 ledgers) now runs
+        // first and exceeds the legacy Nmin floor (2 ledgers), standard
+        // commitments always clear this check once they clear the cooldown.
+        // Retained as defense-in-depth for commitments stored with custom
+        // per-commitment window parameters.
         let reveal_open_at = committed_at + commitment_state.reveal_window_min_ledgers;
         if current_ledger < reveal_open_at {
             return Err(Error::RevealWindowNotOpen);
@@ -1737,16 +1809,90 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Multi-Party Threshold Signature (2-of-3) Escrow Release Validation.
-    /// Releases escrowed funds if at least 2 valid Ed25519 signatures from the designated
-    /// authorized public keys (buyer, seller, arbitrator) are provided.
+    /// Registers the 2-of-N recovery / threshold-release signer set for one
+    /// trade (issue #433). `release_escrow` refuses to pay out until this
+    /// has been called — before this existed, `release_escrow` trusted
+    /// whatever `designated_keys` list the *caller* passed in, so anyone
+    /// could supply two throwaway keys of their own and drain the trade.
+    ///
+    /// Both counterparties must consent (`buyer.require_auth()` and
+    /// `seller.require_auth()`): neither side can unilaterally hand a third
+    /// party (e.g. an arbitrator/backup key) the ability to move funds.
+    /// Typical usage is `signers = [buyer_key, seller_key, backup_key]`,
+    /// `threshold = 2`, matching the N-of-M quorum model documented in
+    /// docs/security/admin-threshold-custody.md, scoped to this trade
+    /// instead of platform admin authority.
+    ///
+    /// Set-once and only while the trade is `Locked` — it cannot be
+    /// re-registered or changed after the fact.
+    pub fn register_trade_signers(
+        env: Env,
+        id: BytesN<32>,
+        signers: Vec<BytesN<32>>,
+        threshold: u32,
+    ) -> Result<(), Error> {
+        check_not_paused(&env);
+
+        let trade_key = DataKey::Trade(id.clone());
+        let state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&trade_key)
+            .ok_or(Error::TradeNotFound)?;
+        if state.status != TradeStatus::Locked {
+            return Err(Error::TradeNotLocked);
+        }
+
+        let signer_key = DataKey::TradeSigners(id.clone());
+        if env.storage().persistent().has(&signer_key) {
+            return Err(Error::TradeSignersAlreadySet);
+        }
+        if signers.len() < 2 || threshold == 0 || threshold > signers.len() {
+            return Err(Error::InvalidSigners);
+        }
+        for i in 0..signers.len() {
+            let s = signers.get(i).unwrap();
+            for j in 0..i {
+                if signers.get(j).unwrap() == s {
+                    return Err(Error::DuplicateSigner);
+                }
+            }
+        }
+
+        state.buyer.require_auth();
+        state.seller.require_auth();
+
+        let record = TradeSignerSet {
+            keys: signers,
+            threshold,
+        };
+        env.storage().persistent().set(&signer_key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&signer_key, TTL_EXTEND, TTL_EXTEND);
+        Ok(())
+    }
+
+    /// Read-only accessor so the API/UI can check whether a trade has a
+    /// registered recovery signer set (and who's on it, and the required
+    /// threshold) before building an approval flow.
+    pub fn get_trade_signers(env: Env, id: BytesN<32>) -> Option<TradeSignerSet> {
+        env.storage().persistent().get(&DataKey::TradeSigners(id))
+    }
+
+    /// Threshold release: pays out a trade to `recipient_address` once
+    /// `threshold`-of-N valid ed25519 signatures (from the trade's
+    /// registered `TradeSignerSet`, see `register_trade_signers`) are
+    /// presented over `(escrow_id, release_amount, recipient_address,
+    /// nonce)`. This is the recovery path for a buyer who has lost their
+    /// HTLC secret, or an institutional flow that never wants a single key
+    /// able to move funds alone — it does not require the secret at all.
     pub fn release_escrow(
         env: Env,
         escrow_id: BytesN<32>,
         release_amount: i128,
         recipient_address: Address,
         nonce: u64,
-        designated_keys: Vec<BytesN<32>>,
         signatures: Vec<(BytesN<32>, BytesN<64>)>,
     ) -> Result<(), Error> {
         check_not_paused(&env);
@@ -1757,7 +1903,13 @@ impl EscrowContract {
             return Err(Error::NonceAlreadyUsed);
         }
 
-        if signatures.len() < 2 {
+        let signer_set: TradeSignerSet = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TradeSigners(escrow_id.clone()))
+            .ok_or(Error::TradeSignersNotConfigured)?;
+
+        if signatures.len() < signer_set.threshold {
             return Err(Error::InsufficientSignatures);
         }
 
@@ -1774,7 +1926,7 @@ impl EscrowContract {
 
         for sig in signatures.iter() {
             let (pub_key, signature) = sig;
-            if !designated_keys.contains(&pub_key) {
+            if !is_authorized_key(&pub_key, &signer_set.keys) {
                 continue;
             }
             if seen_keys.contains(&pub_key) {
@@ -1787,7 +1939,7 @@ impl EscrowContract {
             valid_count += 1;
         }
 
-        if valid_count < 2 {
+        if valid_count < signer_set.threshold {
             return Err(Error::InsufficientSignatures);
         }
 
@@ -2498,6 +2650,18 @@ fn validate_signers(
 fn is_authorized(addr: &Address, authorized: &Vec<Address>) -> bool {
     for i in 0..authorized.len() {
         if authorized.get(i).unwrap() == *addr {
+            return true;
+        }
+    }
+    false
+}
+
+/// Same membership check as `is_authorized`, over raw ed25519 public keys
+/// instead of `Address` — used by `release_escrow` to validate signatures
+/// against a trade's registered `TradeSignerSet` (issue #433).
+fn is_authorized_key(key: &BytesN<32>, authorized: &Vec<BytesN<32>>) -> bool {
+    for i in 0..authorized.len() {
+        if authorized.get(i).unwrap() == *key {
             return true;
         }
     }
@@ -4365,3 +4529,8 @@ mod unit_tests;
 
 #[cfg(test)]
 mod tranche_tests;
+
+/// Issue #420 — flash-loan attack prevention tests (commit-reveal
+/// collateral cooldown) plus general commit-reveal protocol coverage.
+#[cfg(test)]
+mod mev_protection_test;

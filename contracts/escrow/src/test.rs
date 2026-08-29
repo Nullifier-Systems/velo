@@ -452,7 +452,8 @@ fn test_release_escrow_threshold_success() {
     let (seller_sk, seller_pk) = generate_keypair(&f.env);
     let (arb_sk, arb_pk) = generate_keypair(&f.env);
 
-    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    let registered_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    f.client.register_trade_signers(&f.id, &registered_keys, &2);
 
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
@@ -467,14 +468,8 @@ fn test_release_escrow_threshold_success() {
 
     let signatures = vec![&f.env, (buyer_pk, sig1), (arb_pk, sig2)];
 
-    f.client.release_escrow(
-        &f.id,
-        &500,
-        &f.seller,
-        &nonce,
-        &designated_keys,
-        &signatures,
-    );
+    f.client
+        .release_escrow(&f.id, &500, &f.seller, &nonce, &signatures);
 
     let fee = (500 * 50) / 10_000;
     let payout = 500 - fee;
@@ -484,20 +479,22 @@ fn test_release_escrow_threshold_success() {
 
     let trade = f.client.get_trade(&f.id).unwrap();
     assert_eq!(trade.status, TradeStatus::Released);
+
+    let _ = seller_sk; // unused signer in this scenario, kept for readability
 }
 
 #[test]
-#[should_panic]
-fn test_release_escrow_invalid_signature_rejection() {
+#[should_panic(expected = "53")]
+fn test_release_escrow_rejects_unregistered_trade() {
+    // Issue #433 regression: `release_escrow` must refuse to pay out at
+    // all when no signer set has been registered, instead of trusting a
+    // caller-supplied key list (the original vulnerability).
     let f = setup();
     f.client
         .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
     let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
-    let (_, seller_pk) = generate_keypair(&f.env);
-    let (_, arb_pk) = generate_keypair(&f.env);
-
-    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    let (arb_sk, arb_pk) = generate_keypair(&f.env);
 
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
@@ -508,20 +505,68 @@ fn test_release_escrow_invalid_signature_rejection() {
         .to_bytes();
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
+    let sig2 = sign_payload(&f.env, &arb_sk, &payload);
+    let signatures = vec![&f.env, (buyer_pk, sig1), (arb_pk, sig2)];
 
-    // create an invalid signature
-    let invalid_sig = BytesN::from_array(&f.env, &[0u8; 64]);
+    f.client
+        .release_escrow(&f.id, &500, &f.seller, &nonce, &signatures);
+}
 
-    let signatures = vec![&f.env, (buyer_pk, sig1), (seller_pk, invalid_sig)];
+#[test]
+#[should_panic(expected = "41")]
+fn test_release_escrow_rejects_signatures_from_keys_outside_the_registry() {
+    // The actual vulnerability this issue closes: two fresh, self-generated
+    // keypairs that were never registered for this trade must not be able
+    // to drain it, even though both signatures verify cryptographically.
+    let f = setup();
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
 
-    f.client.release_escrow(
-        &f.id,
-        &500,
-        &f.seller,
-        &nonce,
-        &designated_keys,
-        &signatures,
-    );
+    let (buyer_sk, buyer_pk) = generate_keypair(&f.env);
+    let (seller_sk, seller_pk) = generate_keypair(&f.env);
+    let (arb_sk, arb_pk) = generate_keypair(&f.env);
+    let registered_keys = vec![&f.env, buyer_pk, seller_pk, arb_pk];
+    f.client.register_trade_signers(&f.id, &registered_keys, &2);
+
+    // An attacker's own keys — never registered for this trade.
+    let (attacker1_sk, attacker1_pk) = generate_keypair(&f.env);
+    let (attacker2_sk, attacker2_pk) = generate_keypair(&f.env);
+
+    let attacker = Address::generate(&f.env);
+    let nonce = 1u64;
+    let payload_input = (f.id.clone(), 500i128, attacker.clone(), nonce);
+    let payload = f
+        .env
+        .crypto()
+        .sha256(&payload_input.to_xdr(&f.env))
+        .to_bytes();
+
+    let sig1 = sign_payload(&f.env, &attacker1_sk, &payload);
+    let sig2 = sign_payload(&f.env, &attacker2_sk, &payload);
+    let signatures = vec![&f.env, (attacker1_pk, sig1), (attacker2_pk, sig2)];
+
+    f.client
+        .release_escrow(&f.id, &500, &attacker, &nonce, &signatures);
+
+    let _ = (buyer_sk, seller_sk, arb_sk);
+}
+
+#[test]
+#[should_panic(expected = "54")]
+fn test_register_trade_signers_is_set_once() {
+    let f = setup();
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let (_, buyer_pk) = generate_keypair(&f.env);
+    let (_, seller_pk) = generate_keypair(&f.env);
+    let keys = vec![&f.env, buyer_pk, seller_pk];
+    f.client.register_trade_signers(&f.id, &keys, &2);
+
+    let (_, other_pk) = generate_keypair(&f.env);
+    let (_, other_pk2) = generate_keypair(&f.env);
+    let replacement = vec![&f.env, other_pk, other_pk2];
+    f.client.register_trade_signers(&f.id, &replacement, &2);
 }
 
 #[test]
@@ -535,7 +580,8 @@ fn test_release_escrow_replay_rejection() {
     let (seller_sk, seller_pk) = generate_keypair(&f.env);
     let (_, arb_pk) = generate_keypair(&f.env);
 
-    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    let registered_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk];
+    f.client.register_trade_signers(&f.id, &registered_keys, &2);
 
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
@@ -554,24 +600,12 @@ fn test_release_escrow_replay_rejection() {
         (seller_pk.clone(), sig2.clone()),
     ];
 
-    f.client.release_escrow(
-        &f.id,
-        &500,
-        &f.seller,
-        &nonce,
-        &designated_keys,
-        &signatures,
-    );
+    f.client
+        .release_escrow(&f.id, &500, &f.seller, &nonce, &signatures);
 
     // Attempt replay
-    f.client.release_escrow(
-        &f.id,
-        &500,
-        &f.seller,
-        &nonce,
-        &designated_keys,
-        &signatures,
-    );
+    f.client
+        .release_escrow(&f.id, &500, &f.seller, &nonce, &signatures);
 }
 
 #[test]
@@ -585,7 +619,8 @@ fn test_release_escrow_insufficient_signatures() {
     let (_, seller_pk) = generate_keypair(&f.env);
     let (_, arb_pk) = generate_keypair(&f.env);
 
-    let designated_keys = vec![&f.env, buyer_pk.clone(), seller_pk.clone(), arb_pk.clone()];
+    let registered_keys = vec![&f.env, buyer_pk.clone(), seller_pk, arb_pk];
+    f.client.register_trade_signers(&f.id, &registered_keys, &2);
 
     let nonce = 1u64;
     let payload_input = (f.id.clone(), 500i128, f.seller.clone(), nonce);
@@ -597,17 +632,11 @@ fn test_release_escrow_insufficient_signatures() {
 
     let sig1 = sign_payload(&f.env, &buyer_sk, &payload);
 
-    // Provide only 1 valid signature
+    // Provide only 1 valid signature against a threshold of 2.
     let signatures = vec![&f.env, (buyer_pk, sig1)];
 
-    f.client.release_escrow(
-        &f.id,
-        &500,
-        &f.seller,
-        &nonce,
-        &designated_keys,
-        &signatures,
-    );
+    f.client
+        .release_escrow(&f.id, &500, &f.seller, &nonce, &signatures);
 }
 
 // ---------------------------------------------------------------------------

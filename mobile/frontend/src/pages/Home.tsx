@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "../components/LanguageSwitcher.js";
+import SpatialHotspotMapOverlay from "../components/SpatialHotspotMapOverlay.js";
 
 export default function Home() {
   const { t } = useTranslation();
@@ -27,7 +28,9 @@ export default function Home() {
             {t("nav.simulateCrash")}
           </button>
         </div>
+        <SpatialHotspotMapOverlay />
       </div>
     </main>
   );
 }
+

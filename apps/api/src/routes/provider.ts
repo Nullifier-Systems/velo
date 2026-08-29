@@ -294,9 +294,19 @@ export async function providerRoutes(app: FastifyInstance) {
       totalStroops += BigInt(trade.amountStroops);
     }
     
-    // Calculate volume in base units (7 decimal places) without integer truncation
     const totalVolume = Number(totalStroops) / 10_000_000;
     const feesEarned = totalVolume * 0.01;
+
+    const provider = getProviderByAddress(providerAddress);
+    let currentHotspotMultiplier = 1.0;
+    let currentH3Index: string | undefined = undefined;
+
+    if (provider && typeof provider.lat === "number" && typeof provider.lng === "number") {
+      const { latLngToCell } = await import("h3-js");
+      const { globalH3SpatialIndex } = await import("../lib/h3-spatial-index.js");
+      currentH3Index = latLngToCell(provider.lat, provider.lng, 7);
+      currentHotspotMultiplier = globalH3SpatialIndex.getHotspotMultiplier(provider.lat, provider.lng, 7);
+    }
 
     return reply.send({
       address: providerAddress,
@@ -304,6 +314,8 @@ export async function providerRoutes(app: FastifyInstance) {
         total_trades: completedTrades.length,
         total_volume_usdc: totalVolume.toFixed(2),
         fees_earned_usdc: feesEarned.toFixed(2),
+        current_hotspot_multiplier: currentHotspotMultiplier,
+        current_h3_index: currentH3Index,
       },
       trades: allTrades.map(t => ({
         id: t.id,

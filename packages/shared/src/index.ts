@@ -89,6 +89,8 @@ export const CIRCUIT_BREAKER = {
 } as const;
 
 export * from "./types/batch-auctions.js";
+export * from "./types/enterprise.js";
+export * from "./types/e2ee.js";
 
 /**
  * Timing + phase constants for the commit-reveal batch auction engine (#403).
@@ -164,12 +166,75 @@ export const SESSION_ROTATION_DLQ = "velo:session-rotation-dlq";
 export const SESSION_ROTATION_GROUP = "rotation-group";
 
 /* ------------------------------------------------------------------ */
-/*  Enterprise Multi-Tenant RBAC/ABAC & KMS (#401)                     */
+/*  Reorg-Resilient Event Indexer & Snapshot Engine                  */
 /* ------------------------------------------------------------------ */
-export * from "./types/enterprise.js";
+
+export interface IndexerBlockHeader {
+  ledger_sequence: number;
+  block_hash: string;
+  parent_hash: string;
+  created_at: string;
+}
+
+export interface IndexerUndoLog {
+  id: string;
+  ledger_sequence: number;
+  table_name: string;
+  previous_row_data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface IndexerReorgEvent {
+  id: string;
+  detected_at: string;
+  fork_ledger: number;
+  rollback_depth: number;
+  reason: string;
+  resolved_at?: string;
+  resolution_details?: Record<string, unknown>;
+}
+
+export interface IndexerRpcNodeHealth {
+  id: string;
+  rpc_url: string;
+  is_healthy: boolean;
+  last_check: string;
+  consecutive_failures: number;
+  last_failure_reason?: string;
+  last_success_at?: string;
+}
+
+export interface ReorgDetectionResult {
+  detected: boolean;
+  fork_ledger?: number;
+  expected_parent_hash?: string;
+  actual_parent_hash?: string;
+  rollback_depth?: number;
+}
+
+export interface SnapshotCheckpoint {
+  ledger_sequence: number;
+  block_hash: string;
+  created_at: string;
+  tables_snapshot: Record<string, unknown>;
+}
+
+export const REORG_RESILIENT_INDEXER = {
+  /** Maximum ledger depth to roll back during automatic reorg recovery */
+  MAX_ROLLBACK_DEPTH: 10,
+  /** Number of ledger confirmations required before marking trades as finalized */
+  FINALITY_CONFIRMATIONS: 6,
+  /** RPC failover timeout in milliseconds */
+  RPC_FAILOVER_TIMEOUT_MS: 500,
+  /** Interval for checking ledger header DAG continuity (ms) */
+  DAG_CONTINUITY_CHECK_MS: 1000,
+  /** Maximum consecutive RPC failures before marking node as unhealthy */
+  MAX_CONSECUTIVE_RPC_FAILURES: 3,
+} as const;
 
 /* ------------------------------------------------------------------ */
 /*  Bidirectional State Channels & Off-Chain Micropayment Streaming   */
+/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 
 /** Status of a state channel lifecycle. */
@@ -280,3 +345,52 @@ export type {
 } from "./types/zk-range.js";
 
 export { RANGE_PROOF_PARAMS, ATTRIBUTE_RANGES } from "./types/zk-range.js";
+
+/* ------------------------------------------------------------------ */
+/*  Decentralized Jury Dispute Arbitration (#404)                      */
+/* ------------------------------------------------------------------ */
+
+export * from "./types/dispute-jury.js";
+
+/* ------------------------------------------------------------------ */
+/*  Multi-Sig Escrow Threshold Release & Key Recovery Protocol (#433)  */
+/* ------------------------------------------------------------------ */
+
+/** Lifecycle of one trade's pinned release attempt in `multisig_escrow_releases`. */
+export type MultisigReleaseStatus = "pending" | "releasing" | "released" | "failed";
+
+/**
+ * A trade's registered on-chain `TradeSignerSet` (`register_trade_signers`
+ * in contracts/escrow/src/lib.rs) — the 2-of-N recovery quorum both buyer
+ * and seller jointly consented to, e.g. `[buyer_key, seller_key,
+ * backup_key]` with `threshold = 2`.
+ */
+export interface TradeSignerSet {
+  /** Hex-encoded 32-byte ed25519 public keys. */
+  keys: string[];
+  threshold: number;
+}
+
+/** GET /cash/multisig-release/:tradeId response — pinned payload + live progress. */
+export interface MultisigReleaseStatusResponse {
+  trade_id: string;
+  recipient_address: string;
+  release_amount_stroops: string;
+  nonce: string;
+  threshold: number;
+  registered_signers: number;
+  status: MultisigReleaseStatus;
+  release_tx_hash: string | null;
+  approvals_collected: number;
+  approved_by: string[];
+}
+
+/** POST /cash/multisig-release/approve response. */
+export interface MultisigReleaseApproveResponse {
+  released: boolean;
+  trade_id: string;
+  tx_hash?: string;
+  approvals_collected: number;
+  threshold: number;
+  approved_by: string[];
+}

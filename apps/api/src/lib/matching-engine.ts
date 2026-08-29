@@ -5,24 +5,28 @@ export interface MatchingWeights {
   w2_reputation: number;
   w3_feeSlippage: number;
   w4_pendingQueue: number;
+  w5_hotspotIncentive?: number;
 }
 
 export const DEFAULT_MATCHING_WEIGHTS: MatchingWeights = {
-  w1_proximity: 0.4,
-  w2_reputation: 0.3,
-  w3_feeSlippage: 0.2,
+  w1_proximity: 0.35,
+  w2_reputation: 0.25,
+  w3_feeSlippage: 0.15,
   w4_pendingQueue: 0.1,
+  w5_hotspotIncentive: 0.15,
 };
 
 export interface ScoredCandidate {
   provider: SpatialProvider;
   score: number;
   distanceKm: number;
+  feeMultiplier?: number;
   breakdown: {
     proximityScore: number;
     reputationScore: number;
     feeSlippageScore: number;
     queuePenalty: number;
+    hotspotIncentiveScore?: number;
   };
 }
 
@@ -30,7 +34,7 @@ export interface ScoredCandidate {
  * Multi-Parametric Matching Engine for Cash Requests & Provider Liquidity.
  * 
  * Formula:
- * Score = w1 * Proximity + w2 * ProviderReputation + w3 * FeeSlippage - w4 * PendingQueueDepth
+ * Score = w1 * Proximity + w2 * ProviderReputation + w3 * FeeSlippage - w4 * PendingQueueDepth + w5 * HotspotIncentive
  */
 export class MultiParametricMatchingEngine {
   private weights: MatchingWeights;
@@ -89,35 +93,49 @@ export class MultiParametricMatchingEngine {
   }
 
   /**
+   * Compute normalized Hotspot Incentive Score [0.0, 1.0].
+   * Multiplier ranges from 1.0 (0.0 score) to 2.0 (1.0 score).
+   */
+  private computeHotspotIncentiveScore(feeMultiplier?: number): number {
+    if (!feeMultiplier || feeMultiplier <= 1.0) return 0.0;
+    return Math.max(0.0, Math.min(1.0, (feeMultiplier - 1.0) / 1.0));
+  }
+
+  /**
    * Score and rank candidate providers for a given user location and search radius.
    */
   public scoreCandidates(
-    candidates: { provider: SpatialProvider; distanceKm: number }[],
+    candidates: { provider: SpatialProvider; distanceKm: number; feeMultiplier?: number }[],
     maxRadiusKm: number
   ): ScoredCandidate[] {
     const scored: ScoredCandidate[] = [];
+    const wHotspot = this.weights.w5_hotspotIncentive ?? 0.15;
 
-    for (const { provider, distanceKm } of candidates) {
+    for (const { provider, distanceKm, feeMultiplier } of candidates) {
       const proximityScore = this.computeProximityScore(distanceKm, maxRadiusKm);
       const reputationScore = this.computeReputationScore(provider);
       const feeSlippageScore = this.computeFeeSlippageScore(provider);
       const queuePenalty = this.computePendingQueuePenalty(provider);
+      const hotspotIncentiveScore = this.computeHotspotIncentiveScore(feeMultiplier);
 
       const score =
         this.weights.w1_proximity * proximityScore +
         this.weights.w2_reputation * reputationScore +
         this.weights.w3_feeSlippage * feeSlippageScore -
-        this.weights.w4_pendingQueue * queuePenalty;
+        this.weights.w4_pendingQueue * queuePenalty +
+        wHotspot * hotspotIncentiveScore;
 
       scored.push({
         provider,
         score,
         distanceKm,
+        feeMultiplier,
         breakdown: {
           proximityScore,
           reputationScore,
           feeSlippageScore,
           queuePenalty,
+          hotspotIncentiveScore,
         },
       });
     }
@@ -128,3 +146,4 @@ export class MultiParametricMatchingEngine {
 }
 
 export const globalMatchingEngine = new MultiParametricMatchingEngine();
+

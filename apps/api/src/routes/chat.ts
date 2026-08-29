@@ -227,11 +227,13 @@ export async function chatRoutes(app: FastifyInstance, options: ChatRouteOptions
         if (payload.type !== "message") return;
         const ciphertext = typeof payload.data?.ciphertext === "string" ? payload.data.ciphertext.trim() : "";
         const nonce = typeof payload.data?.nonce === "string" ? payload.data.nonce.trim() : "";
+        const header = payload.data?.header && typeof payload.data.header === "object" ? payload.data.header : undefined;
+        const x3dhInit = payload.data?.x3dhInit && typeof payload.data.x3dhInit === "object" ? payload.data.x3dhInit : undefined;
         if (!ciphertext || !nonce) return send(socket, { type: "error", message: "message must include ciphertext and nonce" });
 
         const current = await infrastructure.getTrade(tradeId);
         if (!current || current.status !== "locked") return send(socket, { type: "error", message: "Trade is no longer active" });
-        const saved = await infrastructure.saveMessage({ tradeId, sender: auth.participant, ciphertext, nonce });
+        const saved = await infrastructure.saveMessage({ tradeId, sender: auth.participant, ciphertext, nonce, header, x3dhInit });
         await infrastructure.publish(tradeId, { type: "message", data: saved });
       });
 
