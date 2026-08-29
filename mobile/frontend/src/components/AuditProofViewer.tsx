@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AuditInclusionProof } from '@stellar/velo-shared';
+import { AuditInclusionProof } from '@velo/shared';
 import { useTranslation } from "react-i18next";
 
 export const AuditProofViewer: React.FC<{ eventId: string }> = ({ eventId }) => {
@@ -48,7 +48,7 @@ export const AuditProofViewer: React.FC<{ eventId: string }> = ({ eventId }) => 
                     
                     <h4 className="font-semibold mt-4">{t('auditVault.merklePath')}</h4>
                     <ul className="list-disc pl-5 font-mono text-xs">
-                        {proof.proof.map((p, idx) => (
+                        {proof.proof.map((p: string, idx: number) => (
                             <li key={idx} className="break-all">{p}</li>
                         ))}
                     </ul>
