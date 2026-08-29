@@ -152,11 +152,7 @@ impl AtomicSwapContract {
         else {
             return false;
         };
-        htlc_core::is_refund_claimable(
-            state.status,
-            state.timeout_ledger,
-            env.ledger().sequence(),
-        )
+        htlc_core::is_refund_claimable(state.status, state.timeout_ledger, env.ledger().sequence())
     }
 
     /// Cross-chain: Set finality depth (k-confirmations) for an EVM chain.

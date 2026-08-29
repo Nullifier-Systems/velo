@@ -514,5 +514,23 @@
     "comparePrompt": "Compare this safety number out loud or side-by-side with your peer ({{address}}) to verify end-to-end encryption integrity and prevent machine-in-the-middle attacks.",
     "fingerprintSubtext": "Signal Double Ratchet Constant-Time Safety Number",
     "verifiedDone": "Verified & Done"
+  },
+  "swapDispute": {
+    "cardLabel": "Atomic swap dispute status",
+    "swapId": "Swap",
+    "counterparty": "Counterparty",
+    "expired": "Lockup expired at ledger {{ledger}}",
+    "countdown": "{{ledgers}} ledger(s) until refund unlocks (~{{seconds}}s)",
+    "secretStored": "Secret extracted and stored off-chain",
+    "secretPending": "No secret revealed yet on either chain",
+    "claimRefund": "Claim Dispute Refund",
+    "claiming": "Claiming…",
+    "status": {
+      "active": "Locked — awaiting counterparty",
+      "approachingExpiry": "Expiring soon",
+      "refundClaimable": "Timed out — refund available",
+      "secretExtracted": "Secret extracted — settling",
+      "resolved": "Resolved"
+    }
   }
 }
