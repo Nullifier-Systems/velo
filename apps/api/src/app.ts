@@ -45,8 +45,13 @@ import { collateralRoutes } from "./routes/collateral.js";
 import { CollateralGuardStore } from "./lib/collateralGuard.js";
 import { multisigEscrowRoutes } from "./routes/multisig-escrow.js";
 import { MultisigEscrowStore } from "./lib/multisigEscrowStore.js";
-import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
+import { webhooksRoutes } from "./routes/webhooks.js";
+import { WebhookStore } from "./lib/webhook-store.js";
+import { swapDisputeRoutes } from "./routes/swap-dispute.js";
+import { SwapDisputeStore } from "./lib/workers/swapDisputeWorker.js";
+
+
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -443,3 +448,18 @@ app.register(multisigEscrowRoutes, {
 // (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
 // VRF juror selection, and automated escrow resolution with stake slashing.
 app.register(juryArbitrationRoutes, { prefix: "/api/v1" });
+// (#445) Distributed Multi-Node Webhook Event Delivery Engine & DLQ Recovery System.
+export const webhookStore = new WebhookStore(pgPool ?? undefined);
+app.register(webhooksRoutes, {
+  prefix: "/api/v1",
+  store: webhookStore,
+});
+// (#446) Cross-Ledger Settlement Time-Lock Atomic Swap Dispute Bridge
+export const swapDisputeStore = new SwapDisputeStore(pgPool ?? undefined);
+app.register(swapDisputeRoutes, {
+  prefix: "/api/v1",
+  store: swapDisputeStore,
+});
+
+
+

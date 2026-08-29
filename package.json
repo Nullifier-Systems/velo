@@ -25,8 +25,11 @@
   },
   "devDependencies": {
     "tsx": "^4.16.2",
-    "typescript": "^5.5.4",
-    "turbo": "^2.10.11"
+    "turbo": "^2.10.11",
+    "typescript": "^5.5.4"
   },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "npm@10.0.0",
+  "dependencies": {
+    "@img/sharp-darwin-arm64": "^0.35.4"
+  }
 }

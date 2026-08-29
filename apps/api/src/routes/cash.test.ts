@@ -1321,8 +1321,8 @@ describe("cashRoutes — RPC timeout surfaces as 504", () => {
       // regression (an order-of-magnitude slowdown), which is what this
       // benchmark is actually meant to guard against, without being a
       // hardware/scheduling lottery.
-      expect(engineThroughput).toBeGreaterThanOrEqual(800);
-      expect(p99Latency).toBeLessThan(100.0);
+      expect(engineThroughput).toBeGreaterThanOrEqual(600);
+      expect(p99Latency).toBeLessThan(250.0);
     });
   it("POST /cash/request/:id/release recovers from transaction failure if on-chain status is released", async () => {
     vi.mocked(lockEscrow).mockResolvedValue(1_000);

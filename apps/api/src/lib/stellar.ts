@@ -1,3 +1,7 @@
+import nodeCrypto from "node:crypto";
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, "crypto", { value: nodeCrypto.webcrypto });
+}
 import {
   Address,
   BASE_FEE,
@@ -14,10 +18,11 @@ import {
   Account,
 } from "@stellar/stellar-sdk";
 import { Server, Api, assembleTransaction } from "@stellar/stellar-sdk/rpc";
-export { RpcTimeoutError } from "./rpc-errors.js";
 import { RpcTimeoutError } from "./rpc-errors.js";
+export { RpcTimeoutError };
 import { createHash } from "node:crypto";
 import nacl from "tweetnacl";
+
 
 // Re-export commonly used SDK types and constants
 export { BASE_FEE, Keypair, Operation, TransactionBuilder, xdr, Account, nativeToScVal, scValToNative };
@@ -1807,3 +1812,65 @@ export async function getRotationProposal(
   );
   return proposal ?? null;
 }
+
+export interface ClaimAtomicSwapRefundParams {
+  contractId: string;
+  swapId: string;
+}
+
+export interface ReleaseAtomicSwapParams {
+  contractId: string;
+  swapId: string;
+  secretHex: string;
+}
+
+/**
+ * Claim refund for an atomic swap whose expiration ledger has passed.
+ */
+export async function claimAtomicSwapRefund(
+  params: ClaimAtomicSwapRefundParams,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  const txHash = await invokeContract(
+    params.contractId,
+    "refund",
+    [nativeToScVal(Buffer.from(params.swapId, "hex"), { type: "bytes" })],
+    signer,
+  );
+  return { hash: typeof txHash === "string" ? txHash : "tx_success" };
+}
+
+/**
+ * Release atomic swap funds by providing the revealed secret preimage.
+ */
+export async function releaseAtomicSwap(
+  params: ReleaseAtomicSwapParams,
+): Promise<{ hash: string }> {
+  const signer = loadSignerKeypair();
+  const txHash = await invokeContract(
+    params.contractId,
+    "release",
+    [
+      nativeToScVal(Buffer.from(params.swapId, "hex"), { type: "bytes" }),
+      nativeToScVal(Buffer.from(params.secretHex, "hex"), { type: "bytes" }),
+    ],
+    signer,
+  );
+  return { hash: typeof txHash === "string" ? txHash : "tx_success" };
+}
+
+/**
+ * Read-only accessor for an atomic swap trade's on-chain state.
+ */
+export async function getAtomicSwapTrade(
+  contractId: string,
+  swapId: string,
+): Promise<any | null> {
+  const trade = await simulateContractRead<any | null>(
+    contractId,
+    "get_trade",
+    [nativeToScVal(Buffer.from(swapId, "hex"), { type: "bytes" })],
+  );
+  return trade ?? null;
+}
+

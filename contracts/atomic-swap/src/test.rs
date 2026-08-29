@@ -474,3 +474,65 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
     );
     assert_eq!(eth_extension, 0); // Sufficient, no extension
 }
+
+#[test]
+fn test_automated_dispute_secret_extraction_resolves_swap() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    // Dispute bridge worker extracts revealed secret preimage and calls extract_secret_and_resolve
+    client.extract_secret_and_resolve(&f.id, &f.secret);
+
+    // Seller receives full amount, contract balance is zero
+    assert_eq!(f.token.balance(&f.seller), 500);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    assert_eq!(f.token.balance(&f.buyer), 500);
+
+    let trade = client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, htlc_core::TradeStatus::Released);
+}
+
+#[test]
+fn test_automated_dispute_secret_extraction_with_wrong_secret_fails() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    let wrong_secret = BytesN::from_array(&f.env, &[99u8; 32]);
+    let res = client.try_extract_secret_and_resolve(&f.id, &wrong_secret);
+    assert!(res.is_err());
+
+    // Trade remains locked
+    let trade = client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, htlc_core::TradeStatus::Locked);
+}
+
+#[test]
+fn test_automated_dispute_refund_claim_on_counterparty_timeout() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
+
+    // Lock trade with 100 ledgers timeout
+    client.lock(&f.id, &f.seller, &f.buyer, &500, &f.secret_hash, &100);
+
+    // Before expiration, dispute refund claim should fail
+    let early_res = client.try_claim_dispute_refund(&f.id);
+    assert!(early_res.is_err());
+
+    // Advance ledger past expiration (timeout_ledger = 100)
+    f.env.ledger().with_mut(|li| li.sequence_number += 105);
+
+    // Automated dispute claim succeeds upon counterparty timeout
+    client.claim_dispute_refund(&f.id);
+
+    // Funds returned to buyer
+    assert_eq!(f.token.balance(&f.buyer), 1_000);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+
+    let trade = client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, htlc_core::TradeStatus::Refunded);
+}
+

@@ -299,7 +299,101 @@ impl AtomicSwapContract {
 
         Ok(is_valid)
     }
+
+    /// Dual-side secret extraction: automatically extracts revealed secret preimage and resolves swap. (#446)
+    pub fn extract_secret_and_resolve(
+        env: Env,
+        id: BytesN<32>,
+        secret: BytesN<32>,
+    ) -> Result<(), Error> {
+        let key = DataKey::Trade(id.clone());
+        let mut state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if state.status != TradeStatus::Locked {
+            return Ok(());
+        }
+
+        let computed = env.crypto().sha256(&secret.clone().into());
+        if computed.to_bytes() != state.secret_hash {
+            return Err(Error::InvalidSecret);
+        }
+
+        state.status = TradeStatus::Released;
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &state.seller, &state.amount);
+
+        env.events()
+            .publish((Symbol::new(&env, "released"), id.clone()), secret);
+        env.events().publish(
+            (Symbol::new(&env, "secret_extracted"), id),
+            (state.seller, state.amount),
+        );
+
+        Ok(())
+    }
+
+    /// Automated dispute timeout refund claim when counterparty fails to fulfill prior to timeout ledger. (#446)
+    pub fn claim_dispute_refund(
+        env: Env,
+        id: BytesN<32>,
+    ) -> Result<(), Error> {
+        let key = DataKey::Trade(id.clone());
+        let mut state: TradeState = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::TradeNotFound)?;
+
+        if state.status != TradeStatus::Locked {
+            return Ok(());
+        }
+
+        if env.ledger().sequence() < state.timeout_ledger {
+            return Err(Error::TimeoutNotReached);
+        }
+
+
+        state.status = TradeStatus::Refunded;
+        env.storage().persistent().set(&key, &state);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, 100_000, 100_000);
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &state.buyer, &state.amount);
+
+        env.events()
+            .publish((Symbol::new(&env, "refunded"), id.clone()), state.amount);
+        env.events().publish(
+            (Symbol::new(&env, "dispute_refunded"), id),
+            (state.buyer, state.amount),
+        );
+
+        Ok(())
+    }
 }
+
 
 #[contractimpl]
 impl Htlc for AtomicSwapContract {

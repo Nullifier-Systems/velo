@@ -4,6 +4,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // Hoist RPC server mocks so they are available before the module import.
 // ---------------------------------------------------------------------------
 const h = vi.hoisted(() => {
+  const nodeCrypto = require("node:crypto");
+  if (!globalThis.crypto) {
+    Object.defineProperty(globalThis, "crypto", { value: nodeCrypto.webcrypto });
+  }
   const preparedTx = {
     sign: () => {},
     hash: () => Buffer.from("00".repeat(32), "hex"),
@@ -19,6 +23,7 @@ const h = vi.hoisted(() => {
     getTransaction: vi.fn(),
   };
 });
+
 
 vi.mock("@stellar/stellar-sdk/rpc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@stellar/stellar-sdk/rpc")>();
