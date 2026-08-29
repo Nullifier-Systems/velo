@@ -393,18 +393,20 @@ impl ZkCredentialContract {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::AuditRoot(sequence), &root);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AuditRoot(sequence), &root);
         env.storage().persistent().extend_ttl(
             &DataKey::AuditRoot(sequence),
             TTL_EXTEND,
             TTL_EXTEND,
         );
 
-        env.events().publish((soroban_sdk::symbol_short!("audit"), sequence), root);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("audit"), sequence), root);
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod test;
