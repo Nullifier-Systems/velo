@@ -110,6 +110,31 @@ export async function getLatestLedgerSequence(): Promise<number> {
 }
 
 /**
+ * Normalizes a revealed preimage from either leg into lower-case hex.
+ *
+ * The Stellar leg surfaces a 32-byte preimage as raw bytes or as hex; EVM logs
+ * surface it `0x`-prefixed and often upper-cased. The dispute bridge stores
+ * one canonical form so a preimage observed twice, from two chains, is
+ * recognised as the same secret rather than written twice.
+ *
+ * Returns null for anything that is not exactly 32 bytes, so a malformed log
+ * entry is dropped rather than persisted as a bogus secret.
+ */
+export function normalizeRevealedPreimage(
+  raw: string | Uint8Array | Buffer | null | undefined,
+): string | null {
+  if (raw === null || raw === undefined) return null;
+
+  if (typeof raw !== "string") {
+    const bytes = Buffer.from(raw);
+    return bytes.length === 32 ? bytes.toString("hex") : null;
+  }
+
+  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
+  return /^[0-9a-fA-F]{64}$/.test(hex) ? hex.toLowerCase() : null;
+}
+
+/**
  * Issue #420: latest closed ledger sequence with bounded retries.
  *
  * The collateral release-check endpoint gates fund movements on this value,
