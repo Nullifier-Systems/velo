@@ -22,19 +22,13 @@ import LanguageSwitcher from "../LanguageSwitcher.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderSwitcher() {
-  // No Provider needed — the i18n singleton is imported above and shared
-  return render(<LanguageSwitcher />);
-}
+
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("LanguageSwitcher", () => {
-  const originalDir  = document.documentElement.dir;
-  const originalLang = document.documentElement.lang;
-
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     document.documentElement.dir  = "ltr";
@@ -43,8 +37,8 @@ describe("LanguageSwitcher", () => {
 
   afterEach(() => {
     cleanup();
-    document.documentElement.dir  = originalDir;
-    document.documentElement.lang = originalLang;
+    document.documentElement.dir  = "";
+    document.documentElement.lang = "";
   });
 
   // -------------------------------------------------------------------------
@@ -52,14 +46,13 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("renders the trigger button", () => {
-    renderSwitcher();
-    // The button has aria-haspopup so it's queryable by role
-    expect(screen.getByRole("button")).toBeInTheDocument();
+    const { getByRole } = render(<LanguageSwitcher />);
+    expect(getByRole("button")).toBeInTheDocument();
   });
 
   it("trigger starts with aria-expanded=false", () => {
-    renderSwitcher();
-    expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    const { getByRole } = render(<LanguageSwitcher />);
+    expect(getByRole("button").getAttribute("aria-expanded")).toBe("false");
   });
 
   // -------------------------------------------------------------------------
@@ -67,22 +60,22 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("shows all 5 language options when the trigger is clicked", async () => {
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    expect(screen.getByText("English")).toBeInTheDocument();
-    expect(screen.getByText("Español")).toBeInTheDocument();
-    expect(screen.getByText("Français")).toBeInTheDocument();
-    expect(screen.getByText("العربية")).toBeInTheDocument();
-    expect(screen.getByText("Português")).toBeInTheDocument();
+    expect(getByText("English")).toBeInTheDocument();
+    expect(getByText("Español")).toBeInTheDocument();
+    expect(getByText("Français")).toBeInTheDocument();
+    expect(getByText("العربية")).toBeInTheDocument();
+    expect(getByText("Português")).toBeInTheDocument();
   });
 
   it("marks the trigger as aria-expanded=true when open", async () => {
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
+    const { getByRole } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
     await waitFor(() =>
-      expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("true")
+      expect(getByRole("button").getAttribute("aria-expanded")).toBe("true")
     );
   });
 
@@ -91,11 +84,11 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("sets document.dir to 'rtl' when Arabic is selected", async () => {
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(screen.getByText("العربية"));
+    fireEvent.click(getByText("العربية"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("rtl")
     );
@@ -108,12 +101,12 @@ describe("LanguageSwitcher", () => {
 
   it("resets document.dir to 'ltr' when switching from Arabic to English", async () => {
     await i18n.changeLanguage("ar");
-    renderSwitcher();
+    const { getByRole, getByText } = render(<LanguageSwitcher />);
 
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(screen.getByText("English"));
+    fireEvent.click(getByText("English"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("ltr")
     );
@@ -121,11 +114,11 @@ describe("LanguageSwitcher", () => {
   });
 
   it("keeps dir='ltr' when French is selected", async () => {
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(screen.getByText("Français"));
+    fireEvent.click(getByText("Français"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("ltr")
     );
@@ -137,11 +130,11 @@ describe("LanguageSwitcher", () => {
 
   it("marks the active language option as aria-selected", async () => {
     await i18n.changeLanguage("fr");
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    const { getByRole, getAllByRole } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    const options = screen.getAllByRole("option");
+    const options = getAllByRole("option");
     const frOption = options.find((o) => o.textContent?.includes("Français"));
     expect(frOption).toBeDefined();
     expect(frOption!.getAttribute("aria-selected")).toBe("true");
@@ -152,13 +145,13 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("closes the dropdown after a language is selected", async () => {
-    renderSwitcher();
-    fireEvent.click(screen.getByRole("button"));
-    await waitFor(() => screen.getByRole("listbox"));
+    const { getByRole, getByText, queryByRole } = render(<LanguageSwitcher />);
+    fireEvent.click(getByRole("button"));
+    await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(screen.getByText("Español"));
+    fireEvent.click(getByText("Español"));
     await waitFor(() =>
-      expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+      expect(queryByRole("listbox")).not.toBeInTheDocument()
     );
   });
 });
