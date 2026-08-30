@@ -21,7 +21,7 @@ import LanguageSwitcher from "../LanguageSwitcher.js";
 // ---------------------------------------------------------------------------
 
 const changeLanguage = (lng: string): Promise<void> =>
-  act(() => new Promise((resolve) => i18n.changeLanguage(lng, () => resolve())));
+  act(() => new Promise<void>((resolve) => i18n.changeLanguage(lng, () => resolve())));
 
 function renderSwitcher() {
   return render(
