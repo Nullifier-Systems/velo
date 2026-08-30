@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { AuditInclusionProof } from "@stellar/velo-shared";
+import { AuditInclusionProof } from "@velo/shared";
 import { computeMerkleRoot, computeMerkleProof } from "./merkle-aggregator.js";
 
 export class ProofGenerator {

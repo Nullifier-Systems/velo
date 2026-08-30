@@ -12,7 +12,7 @@ describe("Audit Vault Routes", () => {
         );
 
         const app = fastify();
-        app.decorate("pg", {}); // Mock pg pool
+        app.decorate("pg", {} as any); // Mock pg pool
         app.register(auditVaultRoutes);
 
         const response = await app.inject({
@@ -37,7 +37,7 @@ describe("Audit Vault Routes", () => {
         });
 
         const app = fastify();
-        app.decorate("pg", {}); // Mock pg pool
+        app.decorate("pg", {} as any); // Mock pg pool
         app.register(auditVaultRoutes);
 
         const response = await app.inject({

@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { createHash } from "node:crypto";
-import { AuditLogEvent } from "@stellar/velo-shared";
+import { AuditEventPayload } from "@velo/shared";
 
 export class HashChainEngine {
     constructor(private pool: Pool) {}

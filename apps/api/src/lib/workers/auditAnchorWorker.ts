@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { anchorAuditRoot } from "../stellar.js";
 import { computeMerkleRoot } from "../audit/merkle-aggregator.js";
-import { CONTRACTS } from "@stellar/velo-shared";
+import { CONTRACTS } from "@velo/shared";
 
 export class AuditAnchorWorker {
     private isRunning = false;
