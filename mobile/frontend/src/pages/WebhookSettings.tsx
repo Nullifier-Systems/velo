@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import "./WebhookSettings.css";
 
 /**
@@ -52,6 +53,7 @@ function statusClass(status: DeliveryStatus): string {
 }
 
 export default function WebhookSettings() {
+  const { t } = useTranslation();
   const [userId, setUserId] = useState("");
   const [loggedInAs, setLoggedInAs] = useState<string | null>(null);
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([]);
@@ -112,11 +114,11 @@ export default function WebhookSettings() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error ?? "Failed to register endpoint");
+        setError(json.error ?? t("webhookSettings.registerFailed"));
         return;
       }
       setTargetUrl("");
-      setNotice(`Endpoint registered. Secret key (save this now): ${json.secret_key}`);
+      setNotice(t("webhookSettings.registeredNotice", { secretKey: json.secret_key }));
       await loadEndpoints(loggedInAs);
     } catch (err) {
       setError(String(err));
@@ -133,10 +135,10 @@ export default function WebhookSettings() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error ?? "Replay failed — delivery may already be queued");
+        setError(json.error ?? t("webhookSettings.replayFailed"));
         return;
       }
-      setNotice(`Delivery ${deliveryId} re-queued for delivery.`);
+      setNotice(t("webhookSettings.replayNotice", { deliveryId }));
       if (selectedEndpointId) await loadDeliveries(selectedEndpointId);
     } catch (err) {
       setError(String(err));
@@ -146,16 +148,16 @@ export default function WebhookSettings() {
   if (!loggedInAs) {
     return (
       <div className="webhook-settings">
-        <h1>Webhook Settings</h1>
+        <h1>{t("webhookSettings.title")}</h1>
         <form onSubmit={handleLogIn} className="webhook-form">
-          <label htmlFor="user-id">Your wallet / developer ID</label>
+          <label htmlFor="user-id">{t("webhookSettings.userIdLabel")}</label>
           <input
             id="user-id"
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
-            placeholder="GABC...XYZ"
+            placeholder={t("webhookSettings.userIdPlaceholder")}
           />
-          <button type="submit">Continue</button>
+          <button type="submit">{t("webhookSettings.continue")}</button>
         </form>
       </div>
     );
@@ -163,39 +165,39 @@ export default function WebhookSettings() {
 
   return (
     <div className="webhook-settings">
-      <h1>Webhook Settings</h1>
-      <p className="webhook-subtitle">Signed in as {loggedInAs}</p>
+      <h1>{t("webhookSettings.title")}</h1>
+      <p className="webhook-subtitle">{t("webhookSettings.signedInAs", { userId: loggedInAs })}</p>
 
       {error && <div className="webhook-alert webhook-alert--error">{error}</div>}
       {notice && <div className="webhook-alert webhook-alert--notice">{notice}</div>}
 
       <section>
-        <h2>Register a new endpoint</h2>
+        <h2>{t("webhookSettings.registerHeading")}</h2>
         <form onSubmit={handleRegister} className="webhook-form">
-          <label htmlFor="target-url">Target URL (HTTPS in production)</label>
+          <label htmlFor="target-url">{t("webhookSettings.targetUrlLabel")}</label>
           <input
             id="target-url"
             type="url"
             required
             value={targetUrl}
             onChange={(event) => setTargetUrl(event.target.value)}
-            placeholder="https://your-service.example.com/velo-webhook"
+            placeholder={t("webhookSettings.targetUrlPlaceholder")}
           />
-          <button type="submit">Register endpoint</button>
+          <button type="submit">{t("webhookSettings.registerButton")}</button>
         </form>
       </section>
 
       <section>
-        <h2>Your endpoints</h2>
+        <h2>{t("webhookSettings.yourEndpoints")}</h2>
         {endpoints.length === 0 ? (
-          <p>No endpoints registered yet.</p>
+          <p>{t("webhookSettings.noEndpoints")}</p>
         ) : (
           <table className="webhook-table">
             <thead>
               <tr>
-                <th>Target URL</th>
-                <th>Secret key</th>
-                <th>Status</th>
+                <th>{t("webhookSettings.colTargetUrl")}</th>
+                <th>{t("webhookSettings.colSecretKey")}</th>
+                <th>{t("webhookSettings.colStatus")}</th>
                 <th />
               </tr>
             </thead>
@@ -204,10 +206,10 @@ export default function WebhookSettings() {
                 <tr key={endpoint.endpoint_id}>
                   <td>{endpoint.target_url}</td>
                   <td className="webhook-secret">{endpoint.secret_key}</td>
-                  <td>{endpoint.is_active ? "Active" : "Inactive"}</td>
+                  <td>{endpoint.is_active ? t("webhookSettings.active") : t("webhookSettings.inactive")}</td>
                   <td>
                     <button type="button" onClick={() => setSelectedEndpointId(endpoint.endpoint_id)}>
-                      View deliveries
+                      {t("webhookSettings.viewDeliveries")}
                     </button>
                   </td>
                 </tr>
@@ -219,17 +221,17 @@ export default function WebhookSettings() {
 
       {selectedEndpointId && (
         <section>
-          <h2>Recent deliveries</h2>
+          <h2>{t("webhookSettings.recentDeliveries")}</h2>
           {deliveries.length === 0 ? (
-            <p>No deliveries yet for this endpoint.</p>
+            <p>{t("webhookSettings.noDeliveries")}</p>
           ) : (
             <table className="webhook-table">
               <thead>
                 <tr>
-                  <th>Event</th>
-                  <th>Attempts</th>
-                  <th>Status</th>
-                  <th>Last response</th>
+                  <th>{t("webhookSettings.colEvent")}</th>
+                  <th>{t("webhookSettings.colAttempts")}</th>
+                  <th>{t("webhookSettings.colStatus")}</th>
+                  <th>{t("webhookSettings.colLastResponse")}</th>
                   <th />
                 </tr>
               </thead>
@@ -245,7 +247,7 @@ export default function WebhookSettings() {
                     <td>
                       {log.status === "DEAD_LETTER" && (
                         <button type="button" onClick={() => handleReplay(log.delivery_id)}>
-                          Replay
+                          {t("webhookSettings.replay")}
                         </button>
                       )}
                     </td>
