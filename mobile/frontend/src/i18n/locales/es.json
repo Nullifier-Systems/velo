@@ -498,6 +498,23 @@
       "uploadEvidenceBtn": "Subir evidencia"
     }
   },
+  "auditVault": {
+    "title": "Portal de Cumplimiento y Auditoría",
+    "vaultActive": "Bóveda a prueba de manipulaciones activa",
+    "instruction": "Ingresa un ID de Secuencia de Evento para recuperar su prueba de inclusión Merkle criptográficamente verificable anclada en la red Stellar.",
+    "placeholder": "ID de Secuencia de Evento (ej. 1005)",
+    "searchLog": "Buscar registro",
+    "proofTitle": "Prueba de inclusión de auditoría",
+    "loading": "Cargando...",
+    "verifyBtn": "Verificar evento en Stellar",
+    "status": "Estado:",
+    "verified": "✅ Verificado",
+    "failed": "❌ Falló",
+    "eventId": "ID de evento:",
+    "merkleRoot": "Raíz Merkle:",
+    "stellarTxHash": "Hash Tx Stellar:",
+    "merklePath": "Ruta de prueba Merkle"
+  },
   "e2ee": {
     "tradeChat": "Chat de comercio",
     "protocolBadge": "X3DH + Double Ratchet",

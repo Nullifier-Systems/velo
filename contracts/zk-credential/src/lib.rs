@@ -38,6 +38,7 @@ pub enum DataKey {
     TreeConfig,
     SubTree(u32),
     Node(u32, u32),
+    AuditRoot(u64),
 }
 
 #[contracterror]
@@ -382,6 +383,28 @@ impl ZkCredentialContract {
         }
 
         true
+    }
+
+    /// Admin method to anchor a Merkle root for the audit log vault
+    pub fn anchor_audit_root(env: Env, sequence: u64, root: BytesN<32>) -> Result<(), Error> {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AuditRoot(sequence), &root);
+        env.storage().persistent().extend_ttl(
+            &DataKey::AuditRoot(sequence),
+            TTL_EXTEND,
+            TTL_EXTEND,
+        );
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("audit"), sequence), root);
+        Ok(())
     }
 }
 

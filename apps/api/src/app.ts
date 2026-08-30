@@ -127,6 +127,12 @@ export const stellarEventStore = pgPool
   : undefined;
 if (pgPool) app.decorate("pg", pgPool);
 
+import { AuditAnchorWorker } from "./lib/workers/auditAnchorWorker.js";
+export const auditAnchorWorker = pgPool ? new AuditAnchorWorker(pgPool) : undefined;
+if (auditAnchorWorker) {
+    auditAnchorWorker.start();
+}
+
 // Echo the request ID back to the client so a failed call can be traced
 // in the logs — see docs/request-tracing.md.
 app.addHook("onRequest", async (req, reply) => {
@@ -414,6 +420,8 @@ app.register(reputationRoutes, { prefix: "/api/v1" });
 app.register(providerRoutes, { prefix: "/api/v1" });
 app.register(adminRoutes, { prefix: "/api/v1" });
 app.register(sessionRoutes, { prefix: "/api/v1" });
+import { auditVaultRoutes } from "./routes/audit-vault.js";
+app.register(auditVaultRoutes, { prefix: "/api/v1" });
 app.register(sessionRotationRoutes, { prefix: "/api/v1" });
 app.register(ratesRoutes, { prefix: "/api/v1" });
 app.register(statusRoutes, { prefix: "/api/v1" });

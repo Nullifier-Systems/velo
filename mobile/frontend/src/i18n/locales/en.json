@@ -498,6 +498,23 @@
       "uploadEvidenceBtn": "Upload Evidence"
     }
   },
+  "auditVault": {
+    "title": "Compliance & Audit Portal",
+    "vaultActive": "Tamper-Proof Vault Active",
+    "instruction": "Enter an Event Sequence ID to retrieve its cryptographically verifiable Merkle inclusion proof anchored on the Stellar network.",
+    "placeholder": "Event Sequence ID (e.g. 1005)",
+    "searchLog": "Search Log",
+    "proofTitle": "Audit Inclusion Proof",
+    "loading": "Loading...",
+    "verifyBtn": "Verify Event on Stellar",
+    "status": "Status:",
+    "verified": "✅ Verified",
+    "failed": "❌ Failed",
+    "eventId": "Event ID:",
+    "merkleRoot": "Merkle Root:",
+    "stellarTxHash": "Stellar Tx Hash:",
+    "merklePath": "Merkle Proof Path"
+  },
   "e2ee": {
     "tradeChat": "Trade Chat",
     "protocolBadge": "X3DH + Double Ratchet",

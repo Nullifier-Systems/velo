@@ -1832,3 +1832,53 @@ export async function getRotationProposal(
   );
   return proposal ?? null;
 }
+
+export async function anchorAuditRoot(contractId: string, sequence: number, rootHex: string): Promise<string> {
+    const signer = loadSignerKeypair();
+    const account = await server.getAccount(signer.publicKey());
+    const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+    })
+    .addOperation(
+        Operation.invokeContractFunction({
+            contract: contractId,
+            function: "anchor_audit_root",
+            args: [
+                nativeToScVal(BigInt(sequence), { type: "u64" }),
+                nativeToScVal(Buffer.from(rootHex, "hex"), { type: "bytes" })
+            ],
+        })
+    )
+    .setTimeout(30)
+    .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (Api.isSimulationError(sim)) {
+        throw new Error(`simulation failed: ${sim.error}`);
+    }
+
+    const prepared = assembleTransaction(tx, sim).build();
+    prepared.sign(signer);
+
+    const sendResult = await server.sendTransaction(prepared);
+    if (sendResult.status === "ERROR") {
+        throw new Error(`submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+    }
+
+    let getResult = await server.getTransaction(sendResult.hash);
+    const start = Date.now();
+    while (getResult.status === Api.GetTransactionStatus.NOT_FOUND) {
+        if (Date.now() - start > 30_000) {
+            throw new Error(`timed out waiting for tx ${sendResult.hash} to confirm`);
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+        getResult = await server.getTransaction(sendResult.hash);
+    }
+
+    if (getResult.status !== Api.GetTransactionStatus.SUCCESS) {
+        throw new Error(`tx ${sendResult.hash} failed with status ${getResult.status}`);
+    }
+
+    return sendResult.hash;
+}
