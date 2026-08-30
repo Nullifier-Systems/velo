@@ -1,0 +1,107 @@
+.webhook-settings {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: system-ui, sans-serif;
+}
+
+.webhook-subtitle {
+  color: #666;
+  margin-top: -8px;
+}
+
+.webhook-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  margin-bottom: 24px;
+}
+
+.webhook-form label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.webhook-form input {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.webhook-form button {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #1a1a2e;
+  color: white;
+  cursor: pointer;
+}
+
+.webhook-alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.webhook-alert--error {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.webhook-alert--notice {
+  background: #eaf6ea;
+  color: #1e5b2f;
+  word-break: break-all;
+}
+
+.webhook-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 24px;
+}
+
+.webhook-table th,
+.webhook-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+}
+
+.webhook-secret {
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+  max-width: 260px;
+}
+
+.webhook-status {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.webhook-status--delivered {
+  background: #eaf6ea;
+  color: #1e5b2f;
+}
+
+.webhook-status--queued {
+  background: #eef1fb;
+  color: #2b3a8f;
+}
+
+.webhook-status--failed {
+  background: #fff4e5;
+  color: #8a5300;
+}
+
+.webhook-status--dead-letter {
+  background: #fdecea;
+  color: #b3261e;
+}

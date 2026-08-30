@@ -26,7 +26,8 @@ import {
   buildRefundCountdown,
 } from "../lib/timeouts.js";
 import { RpcTimeoutError } from "../lib/rpc-errors.js";
-import { sendRefundAlert } from "../lib/webhook.js";
+import { sendRefundAlert, notifyDeveloperWebhooks } from "../lib/webhook.js";
+import { WebhookDeliveryStore } from "../lib/webhookDeliveryStore.js";
 import { notifyTradeStatus } from "./chat.js";
 import { randomHex32 } from "../lib/crypto.js";
 import {
@@ -236,6 +237,32 @@ function discoveryAvailability(agentCount: number, locale: Locale) {
  * GET  /api/v1/cash/pause         — on-chain circuit breaker state (free)
  */
 export async function cashRoutes(app: FastifyInstance) {
+  // Shares the API's Postgres pool when configured (see app.ts's
+  // `app.decorate("pg", pgPool)`); degrades to an in-memory store in dev,
+  // same as the other stores registered alongside this one.
+  const webhookDeliveryStore = new WebhookDeliveryStore((app as any).pg ?? null);
+
+  /**
+   * Enqueues a signed developer-webhook delivery for a refund event to both
+   * trade participants, alongside the existing ops alert. Never awaited by
+   * callers for its own sake — a queueing hiccup must not fail a refund that
+   * already landed on-chain.
+   */
+  function notifyRefundWebhooks(record: { id: string; amountStroops: string; buyer: string; seller: string }): void {
+    const eventPayload = {
+      trade_id: record.id,
+      amount_stroops: record.amountStroops,
+      buyer: record.buyer,
+      seller: record.seller,
+    };
+    void notifyDeveloperWebhooks(webhookDeliveryStore, record.buyer, "REFUNDED", eventPayload).catch(
+      (error) => app.log.error(error, "developer webhook notify (buyer) failed"),
+    );
+    void notifyDeveloperWebhooks(webhookDeliveryStore, record.seller, "REFUNDED", eventPayload).catch(
+      (error) => app.log.error(error, "developer webhook notify (seller) failed"),
+    );
+  }
+
   app.get(
     "/cash/pause",
     {
@@ -1372,6 +1399,7 @@ export async function cashRoutes(app: FastifyInstance) {
               buyer: record.buyer,
               seller: record.seller,
             });
+            notifyRefundWebhooks(record);
             return { id: record.id, status: "refunded" };
           }
           const current = getCashRequest(record.id);
@@ -1402,6 +1430,7 @@ export async function cashRoutes(app: FastifyInstance) {
               buyer: record.buyer,
               seller: record.seller,
             });
+            notifyRefundWebhooks(record);
             return { id: record.id, status: "refunded" };
           }
           const current = getCashRequest(record.id);
@@ -1435,6 +1464,7 @@ export async function cashRoutes(app: FastifyInstance) {
         buyer: record.buyer,
         seller: record.seller,
       });
+            notifyRefundWebhooks(record);
 
       return { id: record.id, status: "refunded" };
     },
