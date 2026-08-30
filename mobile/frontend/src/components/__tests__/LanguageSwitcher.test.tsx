@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import "../i18n/index.js"; // initialise i18n singleton (same pattern as all other tests)
+import "../../i18n/index.js"; // initialise i18n singleton (same pattern as all other tests)
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import i18n from "../i18n/index.js";
-import LanguageSwitcher from "./LanguageSwitcher.js";
+import i18n from "../../i18n/index.js";
+import LanguageSwitcher from "../LanguageSwitcher.js";
 
 /**
  * UI layout tests for LanguageSwitcher — issue #435
