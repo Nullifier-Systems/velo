@@ -90,6 +90,7 @@ export async function userPreferencesRoutes(
       if (!SUPPORTED_LOCALES.includes(locale as Locale)) {
         throw new ApiError(
           400,
+          "INVALID_PARAMETER",
           `Unsupported locale '${locale}'. Supported: ${SUPPORTED_LOCALES.join(", ")}`
         );
       }
@@ -99,6 +100,7 @@ export async function userPreferencesRoutes(
       if (!SUPPORTED_CURRENCIES.has(upperCurrency)) {
         throw new ApiError(
           400,
+          "INVALID_PARAMETER",
           `Unsupported currency '${currency}'. Supported: ${[...SUPPORTED_CURRENCIES].join(", ")}`
         );
       }
