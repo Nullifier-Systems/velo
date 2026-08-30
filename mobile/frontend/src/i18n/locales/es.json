@@ -514,5 +514,23 @@
     "comparePrompt": "Compara este número de seguridad en voz alta o lado a lado con tu par ({{address}}) para verificar la integridad del cifrado de extremo a extremo y evitar ataques de intermediario.",
     "fingerprintSubtext": "Número de seguridad de tiempo constante de Signal Double Ratchet",
     "verifiedDone": "Verificado y listo"
+  },
+  "swapDispute": {
+    "cardLabel": "Estado de disputa del intercambio atómico",
+    "swapId": "Intercambio",
+    "counterparty": "Contraparte",
+    "expired": "El bloqueo expiró en el ledger {{ledger}}",
+    "countdown": "{{ledgers}} ledger(s) hasta que se desbloquee el reembolso (~{{seconds}}s)",
+    "secretStored": "Secreto extraído y almacenado fuera de la cadena",
+    "secretPending": "Aún no se ha revelado ningún secreto en ninguna cadena",
+    "claimRefund": "Reclamar reembolso de disputa",
+    "claiming": "Reclamando…",
+    "status": {
+      "active": "Bloqueado — esperando a la contraparte",
+      "approachingExpiry": "Expira pronto",
+      "refundClaimable": "Expirado — reembolso disponible",
+      "secretExtracted": "Secreto extraído — liquidando",
+      "resolved": "Resuelto"
+    }
   }
 }

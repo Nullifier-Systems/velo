@@ -180,6 +180,77 @@ const ____: unknown = ((): unknown => {
  */
 export const AVERAGE_LEDGER_CLOSE_SECONDS = 6;
 
+// ============================================================================
+// Cross-ledger atomic swap dispute bridge
+// ============================================================================
+
+/**
+ * How often the swap dispute worker scans for revealed preimages and expiries.
+ *
+ * Deliberately shorter than one ledger close (~6s): the requirement is that a
+ * revealed secret is extracted within one ledger sequence, so the scan has to
+ * run at least once per ledger to have a chance of catching it.
+ * Can be overridden via SWAP_DISPUTE_POLL_INTERVAL_MS.
+ */
+export const DEFAULT_SWAP_DISPUTE_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * Ledgers of margin before a swap's expiry at which it is treated as at-risk
+ * and operators are alerted.
+ *
+ * ~50 ledgers ≈ 5 minutes. The point is to fire while a refund can still be
+ * organised, not to announce the loss afterwards.
+ */
+export const SWAP_DISPUTE_WARNING_MARGIN_LEDGERS = 50;
+
+/**
+ * Extra ledgers to wait after expiry before claiming an automated refund.
+ *
+ * Zero: the on-chain `refund()` already enforces
+ * `current_ledger >= timeout_ledger`, so waiting longer only prolongs the
+ * lockup this feature exists to end. Kept as a named constant so the "no extra
+ * grace" decision is explicit rather than an accident of the code.
+ */
+export const SWAP_DISPUTE_REFUND_GRACE_LEDGERS = 0;
+
+/** Lifecycle of one cross-chain swap as tracked by the dispute bridge. */
+export interface SwapDisputeCountdown {
+  expirationLedger: number;
+  latestLedger: number;
+  ledgersUntilExpiry: number;
+  /** True once the on-chain refund precondition is satisfied. */
+  refundClaimable: boolean;
+  /** True while inside the warning margin but not yet expired. */
+  approachingExpiry: boolean;
+  estimatedSecondsUntilExpiry: number;
+}
+
+/**
+ * Builds the countdown the dispute card and worker both read from.
+ *
+ * `refundClaimable` mirrors the contract's own precondition exactly
+ * (`latestLedger >= expirationLedger`), so the UI never offers a claim the
+ * chain would reject.
+ */
+export function buildSwapDisputeCountdown(
+  expirationLedger: number,
+  latestLedger: number,
+  warningMarginLedgers: number = SWAP_DISPUTE_WARNING_MARGIN_LEDGERS,
+): SwapDisputeCountdown {
+  const ledgersUntilExpiry = Math.max(0, expirationLedger - latestLedger);
+  const refundClaimable =
+    latestLedger >= expirationLedger + SWAP_DISPUTE_REFUND_GRACE_LEDGERS;
+
+  return {
+    expirationLedger,
+    latestLedger,
+    ledgersUntilExpiry,
+    refundClaimable,
+    approachingExpiry: !refundClaimable && ledgersUntilExpiry <= warningMarginLedgers,
+    estimatedSecondsUntilExpiry: ledgersUntilExpiry * AVERAGE_LEDGER_CLOSE_SECONDS,
+  };
+}
+
 /** Public countdown for when permissionless refund becomes available. */
 export interface RefundCountdown {
   timeoutLedger: number;

@@ -182,6 +182,32 @@ pub fn is_collateral_locked(deposit_ledger: u32, current_ledger: u32) -> bool {
     collateral_cooldown_remaining(deposit_ledger, current_ledger) > 0
 }
 
+/// Ledgers remaining before an HTLC's permissionless refund unlocks.
+/// `0` means `refund()` will pass its timeout precondition right now.
+///
+/// Saturating, so a `timeout_ledger` near `u32::MAX` cannot panic under
+/// `overflow-checks` and a `current_ledger` past the timeout yields exactly
+/// `0` rather than wrapping to a huge remaining count.
+pub fn ledgers_until_refund(timeout_ledger: u32, current_ledger: u32) -> u32 {
+    timeout_ledger.saturating_sub(current_ledger)
+}
+
+/// Whether a swap leg is eligible for an automated refund claim.
+///
+/// Two conditions, and both matter:
+///
+///   * the timeout has elapsed — the same check `refund()` itself enforces,
+///     so this never reports claimable for a call the contract would reject;
+///   * the trade is still `Locked` — a released, refunded, or arbitrator-
+///     resolved trade must never be refunded again.
+///
+/// The dispute bridge calls this before submitting, and the off-chain store
+/// mirrors it (`refusalReason` in apps/api/src/lib/swapDisputeStore.ts), so
+/// both sides agree on what "claimable" means.
+pub fn is_refund_claimable(status: TradeStatus, timeout_ledger: u32, current_ledger: u32) -> bool {
+    status == TradeStatus::Locked && ledgers_until_refund(timeout_ledger, current_ledger) == 0
+}
+
 #[cfg(test)]
 mod cooldown_tests {
     use super::*;
@@ -264,5 +290,60 @@ mod fee_math_tests {
         assert_eq!(calculate_fee(i128::MAX, 2), Err(FeeMathError::Overflow));
         assert_eq!(apply_bps(i128::MAX, 2), Err(FeeMathError::Overflow));
         assert_eq!(net_of(0, 1), Err(FeeMathError::Overflow));
+    }
+}
+
+#[cfg(test)]
+mod refund_claim_tests {
+    use super::*;
+
+    #[test]
+    fn countdown_reaches_zero_at_the_timeout_ledger() {
+        assert_eq!(ledgers_until_refund(1_100, 1_000), 100);
+        assert_eq!(ledgers_until_refund(1_100, 1_099), 1);
+        assert_eq!(ledgers_until_refund(1_100, 1_100), 0);
+    }
+
+    #[test]
+    fn countdown_saturates_instead_of_wrapping() {
+        // Past the timeout stays 0 rather than wrapping to a huge number,
+        // which would make an expired swap look like it had ages left.
+        assert_eq!(ledgers_until_refund(1_100, 5_000), 0);
+        // And a timeout near u32::MAX must not panic under overflow-checks.
+        assert_eq!(ledgers_until_refund(u32::MAX, 0), u32::MAX);
+    }
+
+    #[test]
+    fn locked_and_expired_is_claimable() {
+        assert!(is_refund_claimable(TradeStatus::Locked, 1_100, 1_100));
+        assert!(is_refund_claimable(TradeStatus::Locked, 1_100, 9_999));
+    }
+
+    #[test]
+    fn locked_but_unexpired_is_not_claimable() {
+        assert!(!is_refund_claimable(TradeStatus::Locked, 1_100, 1_099));
+    }
+
+    #[test]
+    fn terminal_states_are_never_claimable() {
+        // Even long past the timeout: refunding any of these would move funds
+        // that have already been settled.
+        for status in [
+            TradeStatus::Released,
+            TradeStatus::Refunded,
+            TradeStatus::Resolved,
+        ] {
+            assert!(
+                !is_refund_claimable(status, 1_100, 9_999),
+                "{status:?} must never be refund-claimable"
+            );
+        }
+    }
+
+    #[test]
+    fn disputed_is_not_claimable_by_the_bridge() {
+        // A disputed trade belongs to the arbitrator, not to the automated
+        // refund path — the bridge must not pull it out from under them.
+        assert!(!is_refund_claimable(TradeStatus::Disputed, 1_100, 9_999));
     }
 }

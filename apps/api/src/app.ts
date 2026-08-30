@@ -45,6 +45,8 @@ import { collateralRoutes } from "./routes/collateral.js";
 import { CollateralGuardStore } from "./lib/collateralGuard.js";
 import { multisigEscrowRoutes } from "./routes/multisig-escrow.js";
 import { MultisigEscrowStore } from "./lib/multisigEscrowStore.js";
+import { swapDisputeRoutes } from "./routes/swap-dispute.js";
+import { SwapDisputeStore } from "./lib/swapDisputeStore.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 
@@ -439,6 +441,14 @@ app.register(collateralRoutes, {
 app.register(multisigEscrowRoutes, {
   prefix: "/api/v1",
   store: new MultisigEscrowStore(pgPool ?? undefined),
+});
+// Cross-Ledger Settlement Time-Lock Atomic Swap Dispute Bridge: automated
+// secret extraction and refund claims when a cross-chain counterparty stalls.
+// Shares the pool so its SELECT ... FOR UPDATE claims coordinate with the
+// dispute worker; degrades to an in-memory store in dev like the routes above.
+app.register(swapDisputeRoutes, {
+  prefix: "/api/v1",
+  store: new SwapDisputeStore(pgPool ?? null),
 });
 // (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
 // VRF juror selection, and automated escrow resolution with stake slashing.

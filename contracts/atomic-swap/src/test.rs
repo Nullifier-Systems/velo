@@ -474,3 +474,143 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
     );
     assert_eq!(eth_extension, 0); // Sufficient, no extension
 }
+
+// ============================================================================
+// Cross-Ledger Settlement Time-Lock Atomic Swap Dispute Bridge
+// ============================================================================
+//
+// Two guarantees the dispute bridge is built on:
+//
+//   * a revealed preimage stays recoverable even if nobody was watching the
+//     `released` event when it fired;
+//   * an expired leg can be refunded by anyone, automatically, without the
+//     honest party having to wait out a manual dispute.
+
+/// The preimage is readable from contract state after release, not only from
+/// the event log. This is the fix for relayer secret leakage: a relayer that
+/// was down when the event fired can still recover the secret and claim the
+/// counterpart leg.
+#[test]
+fn revealed_secret_is_persisted_for_late_readers() {
+    let f = setup(10_000);
+
+    // Before release there is nothing to read.
+    assert_eq!(f.client.get_revealed_secret(&f.id), None);
+
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+    f.client.release(&f.id, &f.secret);
+
+    // After release the preimage is durable state, independent of events.
+    assert_eq!(f.client.get_revealed_secret(&f.id), Some(f.secret.clone()));
+}
+
+/// The persisted preimage really is the swap's secret — it hashes to the
+/// trade's `secret_hash`, so a relayer can use it on the counterpart chain.
+#[test]
+fn persisted_secret_hashes_to_the_trade_secret_hash() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+    f.client.release(&f.id, &f.secret);
+
+    let extracted = f.client.get_revealed_secret(&f.id).expect("secret stored");
+    let rehashed = f.env.crypto().sha256(&extracted.into()).to_bytes();
+    assert_eq!(rehashed, f.secret_hash);
+}
+
+/// A refunded leg never reveals a secret — there is nothing to extract, and
+/// the bridge must not report one.
+#[test]
+fn refunded_swap_exposes_no_secret() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+
+    f.env.ledger().with_mut(|li| li.sequence_number += 101);
+    f.client.refund(&f.id);
+
+    assert_eq!(f.client.get_revealed_secret(&f.id), None);
+}
+
+/// `is_refund_claimable` tracks the contract's own timeout precondition
+/// exactly, so the bridge never submits a refund the chain would reject.
+#[test]
+fn refund_claimable_flips_exactly_at_timeout() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+
+    // Locked but not yet expired.
+    assert!(!f.client.is_refund_claimable(&f.id));
+
+    // One ledger short of the timeout: still not claimable.
+    f.env.ledger().with_mut(|li| li.sequence_number += 99);
+    assert!(!f.client.is_refund_claimable(&f.id));
+
+    // At the timeout ledger it becomes claimable, and refund() agrees.
+    f.env.ledger().with_mut(|li| li.sequence_number += 1);
+    assert!(f.client.is_refund_claimable(&f.id));
+    f.client.refund(&f.id);
+    assert_eq!(f.token.balance(&f.buyer), 10_000);
+}
+
+/// A released leg is never refund-claimable, however long ago it settled.
+/// Refunding it would return funds the seller has already been paid.
+#[test]
+fn released_swap_is_never_refund_claimable() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+    f.client.release(&f.id, &f.secret);
+
+    f.env.ledger().with_mut(|li| li.sequence_number += 10_000);
+    assert!(!f.client.is_refund_claimable(&f.id));
+}
+
+/// An already-refunded leg is not claimable again — the honest counterparty's
+/// automated claim runs at most once.
+#[test]
+fn refunded_swap_is_not_claimable_again() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+
+    f.env.ledger().with_mut(|li| li.sequence_number += 101);
+    assert!(f.client.is_refund_claimable(&f.id));
+    f.client.refund(&f.id);
+
+    assert!(!f.client.is_refund_claimable(&f.id));
+}
+
+/// An unknown swap id is not claimable, rather than panicking — the worker
+/// scans ids it has not necessarily seen locked on this contract.
+#[test]
+fn unknown_swap_is_not_refund_claimable() {
+    let f = setup(10_000);
+    let unknown = BytesN::from_array(&f.env, &[0xABu8; 32]);
+    assert!(!f.client.is_refund_claimable(&unknown));
+    assert_eq!(f.client.get_revealed_secret(&unknown), None);
+}
+
+/// Counterparty-timeout scenario end to end: the counterparty never reveals,
+/// the leg expires, and the honest buyer is made whole automatically without
+/// anyone holding the secret.
+#[test]
+fn expired_swap_refunds_honest_party_without_a_secret() {
+    let f = setup(10_000);
+    f.client
+        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+    assert_eq!(f.token.balance(&f.buyer), 5_000);
+
+    // Counterparty stalls: no reveal on either leg, timeout elapses.
+    f.env.ledger().with_mut(|li| li.sequence_number += 101);
+    assert_eq!(f.client.get_revealed_secret(&f.id), None);
+    assert!(f.client.is_refund_claimable(&f.id));
+
+    // Permissionless refund — no buyer signature needed.
+    f.client.refund(&f.id);
+
+    assert_eq!(f.token.balance(&f.buyer), 10_000);
+    assert_eq!(f.token.balance(&f.seller), 0);
+}
