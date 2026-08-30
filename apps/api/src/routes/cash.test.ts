@@ -44,6 +44,7 @@ vi.mock("../lib/stellar.js", () => ({
 // Mock the webhook/refund alert function
 vi.mock("../lib/webhook.js", () => ({
   sendRefundAlert: vi.fn(),
+  notifyDeveloperWebhooks: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("cashRoutes", () => {

@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { createHmac } from "node:crypto";
+import { createClient, type RedisClientType } from "redis";
+import { WEBHOOK_DELIVERY_QUEUE } from "@velo/shared";
+import type { WebhookDeliveryStore } from "./webhookDeliveryStore.js";
 
 const WEBHOOK_URL = process.env.REFUND_WEBHOOK_URL;
 
@@ -211,4 +215,87 @@ export async function sendSwapExpiryWarningAlert(params: {
       Counterparty: `\`${counterparty}\``,
     },
   });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Distributed Multi-Node Webhook Event Delivery Engine (#445)        */
+/* ------------------------------------------------------------------ */
+//
+// Everything above this line is the single-destination ops alert (Slack /
+// Discord) fired inline and best-effort. This section is a different
+// surface: developers register their own target URL to receive signed
+// trade-status events. Sending those inline in the request thread means one
+// slow or dead client endpoint blocks a real API response — so these are
+// always enqueued onto a Redis Stream (`velo:webhook-delivery-queue`) for
+// `webhookDeliveryWorker` to actually deliver, never fetched here.
+
+/** HMAC-SHA256 over the exact JSON string sent as the request body. */
+export function signWebhookPayload(payloadJson: string, secretKey: string): string {
+  return createHmac("sha256", secretKey).update(payloadJson).digest("hex");
+}
+
+let deliveryQueueClient: RedisClientType | undefined;
+
+async function deliveryQueue(): Promise<RedisClientType | undefined> {
+  const url = process.env.REDIS_URL;
+  if (!url) return undefined;
+  if (!deliveryQueueClient) {
+    deliveryQueueClient = createClient({ url }) as RedisClientType;
+    deliveryQueueClient.on("error", (error) =>
+      console.error("Redis webhook delivery queue error", error),
+    );
+    await deliveryQueueClient.connect();
+  }
+  return deliveryQueueClient;
+}
+
+/**
+ * Signs and enqueues one webhook delivery for every active endpoint a
+ * developer has registered, so callers (e.g. cash.ts on refund/completion)
+ * just describe the event once regardless of how many endpoints exist.
+ *
+ * A missing REDIS_URL (local dev without Redis) degrades to a no-op with a
+ * warning rather than throwing — a notification outage must never fail the
+ * trade action that triggered it.
+ */
+export async function notifyDeveloperWebhooks(
+  store: WebhookDeliveryStore,
+  userId: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const endpoints = await store.listActiveEndpoints(userId);
+  if (endpoints.length === 0) return;
+
+  const client = await deliveryQueue();
+  // The envelope object is what's persisted on the delivery log, and what
+  // gets re-stringified on DLQ replay — so replay reproduces the exact bytes
+  // that were signed, and a client's signature check still passes.
+  const envelope = { type: eventType, data: payload };
+  const payloadJson = JSON.stringify(envelope);
+
+  for (const endpoint of endpoints) {
+    const signatureHeader = signWebhookPayload(payloadJson, endpoint.secretKey);
+    const log = await store.createDeliveryLog({
+      endpointId: endpoint.endpointId,
+      eventType,
+      payload: envelope,
+      signatureHeader,
+    });
+
+    if (!client) {
+      console.warn("REDIS_URL not configured; webhook delivery not enqueued", {
+        deliveryId: log.deliveryId,
+      });
+      continue;
+    }
+
+    await client.xAdd(WEBHOOK_DELIVERY_QUEUE, "*", {
+      deliveryId: log.deliveryId,
+      endpointId: endpoint.endpointId,
+      targetUrl: endpoint.targetUrl,
+      payload: payloadJson,
+      signature: signatureHeader,
+    });
+  }
 }
