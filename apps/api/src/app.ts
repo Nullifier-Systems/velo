@@ -51,6 +51,7 @@ import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { WebhookDeliveryStore } from "./lib/webhookDeliveryStore.js";
+import { userPreferencesRoutes } from "./routes/user-preferences.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -472,3 +473,6 @@ app.register(webhookRoutes, {
 // (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
 // VRF juror selection, and automated escrow resolution with stake slashing.
 app.register(juryArbitrationRoutes, { prefix: "/api/v1" });
+// (#435) Multi-Lingual i18n & RTL support: persists per-provider locale and
+// display currency preferences to provider_profiles.
+app.register(userPreferencesRoutes, { prefix: "/api/v1" });

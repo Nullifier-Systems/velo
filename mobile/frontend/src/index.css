@@ -535,4 +535,57 @@ body {
   color: #64748b;
 }
 
+/* ==========================================================================
+   RTL (Right-to-Left) Layout Support — issue #435
+   All directional rules use CSS logical properties so they work for both
+   LTR (English, Spanish, French, Portuguese) and RTL (Arabic) without
+   duplicating selectors.
+   ========================================================================== */
+
+/* Use logical margin instead of fixed margin-right so currency symbols
+   sit on the correct side in both LTR and RTL layouts.              */
+.ticket-amount-currency {
+  margin-inline-end: 0.2rem;
+  margin-right: 0;
+}
+
+/* In RTL, the status stamp should mirror to the start (left) side.   */
+[dir="rtl"] .status-stamp {
+  right: auto;
+  left: 5%;
+  transform: rotate(15deg);
+}
+
+/* Flip flex rows so label/value pairs read naturally in Arabic.       */
+[dir="rtl"] .detail-row {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .claim-ticket__header,
+[dir="rtl"] .claim-ticket__row {
+  flex-direction: row-reverse;
+}
+
+/* Instructions text should honour the active direction.              */
+[dir="rtl"] .instructions {
+  text-align: start;
+}
+
+/* Hotspot spatial header flex — swap the refresh button side.        */
+[dir="rtl"] .spatial-hotspot-header {
+  flex-direction: row-reverse;
+}
+
+/* Error and loading states should align text to the start in RTL.    */
+[dir="rtl"] .loading-state,
+[dir="rtl"] .error-state {
+  text-align: start;
+}
+
+/* Home card text alignment for RTL.                                  */
+[dir="rtl"] .home-card {
+  text-align: start;
+}
+
+
 
