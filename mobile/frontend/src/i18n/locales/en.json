@@ -549,5 +549,34 @@
       "secretExtracted": "Secret extracted — settling",
       "resolved": "Resolved"
     }
+  },
+  "webhookSettings": {
+    "title": "Webhook Settings",
+    "userIdLabel": "Your wallet / developer ID",
+    "userIdPlaceholder": "GABC...XYZ",
+    "continue": "Continue",
+    "signedInAs": "Signed in as {{userId}}",
+    "registerHeading": "Register a new endpoint",
+    "targetUrlLabel": "Target URL (HTTPS in production)",
+    "targetUrlPlaceholder": "https://your-service.example.com/velo-webhook",
+    "registerButton": "Register endpoint",
+    "yourEndpoints": "Your endpoints",
+    "noEndpoints": "No endpoints registered yet.",
+    "colTargetUrl": "Target URL",
+    "colSecretKey": "Secret key",
+    "colStatus": "Status",
+    "active": "Active",
+    "inactive": "Inactive",
+    "viewDeliveries": "View deliveries",
+    "recentDeliveries": "Recent deliveries",
+    "noDeliveries": "No deliveries yet for this endpoint.",
+    "colEvent": "Event",
+    "colAttempts": "Attempts",
+    "colLastResponse": "Last response",
+    "replay": "Replay",
+    "registeredNotice": "Endpoint registered. Secret key (save this now): {{secretKey}}",
+    "replayNotice": "Delivery {{deliveryId}} re-queued for delivery.",
+    "registerFailed": "Failed to register endpoint",
+    "replayFailed": "Replay failed — delivery may already be queued"
   }
 }

@@ -549,5 +549,34 @@
       "secretExtracted": "Secreto extraído — liquidando",
       "resolved": "Resuelto"
     }
+  },
+  "webhookSettings": {
+    "title": "Configuración de Webhooks",
+    "userIdLabel": "Tu dirección / ID de desarrollador",
+    "userIdPlaceholder": "GABC...XYZ",
+    "continue": "Continuar",
+    "signedInAs": "Sesión iniciada como {{userId}}",
+    "registerHeading": "Registrar un nuevo endpoint",
+    "targetUrlLabel": "URL de destino (HTTPS en producción)",
+    "targetUrlPlaceholder": "https://tu-servicio.example.com/velo-webhook",
+    "registerButton": "Registrar endpoint",
+    "yourEndpoints": "Tus endpoints",
+    "noEndpoints": "Aún no hay endpoints registrados.",
+    "colTargetUrl": "URL de destino",
+    "colSecretKey": "Clave secreta",
+    "colStatus": "Estado",
+    "active": "Activo",
+    "inactive": "Inactivo",
+    "viewDeliveries": "Ver entregas",
+    "recentDeliveries": "Entregas recientes",
+    "noDeliveries": "Aún no hay entregas para este endpoint.",
+    "colEvent": "Evento",
+    "colAttempts": "Intentos",
+    "colLastResponse": "Última respuesta",
+    "replay": "Reintentar",
+    "registeredNotice": "Endpoint registrado. Clave secreta (guárdala ahora): {{secretKey}}",
+    "replayNotice": "Entrega {{deliveryId}} reencolada para su envío.",
+    "registerFailed": "No se pudo registrar el endpoint",
+    "replayFailed": "Falló el reintento — la entrega puede que ya esté en cola"
   }
 }

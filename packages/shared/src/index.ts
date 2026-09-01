@@ -395,3 +395,40 @@ export interface MultisigReleaseApproveResponse {
   threshold: number;
   approved_by: string[];
 }
+
+/* ------------------------------------------------------------------ */
+/*  Distributed Multi-Node Webhook Event Delivery Engine & DLQ (#445) */
+/* ------------------------------------------------------------------ */
+
+export type WebhookDeliveryStatus = "QUEUED" | "DELIVERED" | "FAILED" | "DEAD_LETTER";
+
+export interface WebhookEndpoint {
+  endpointId: string;
+  userId: string;
+  targetUrl: string;
+  /** Never re-sent to the client after creation; only the digest is stored server-side conceptually, but kept plaintext here to keep HMAC signing simple, matching the migration's secret_key column. */
+  secretKey: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface WebhookDeliveryLog {
+  deliveryId: string;
+  endpointId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  signatureHeader: string;
+  attemptCount: number;
+  status: WebhookDeliveryStatus;
+  lastResponseCode: number | null;
+  createdAt?: string;
+}
+
+/** Redis stream the API enqueues signed webhook deliveries onto. */
+export const WEBHOOK_DELIVERY_QUEUE = "velo:webhook-delivery-queue";
+/** Dead-letter stream mirroring deliveries that exhausted every retry. */
+export const WEBHOOK_DELIVERY_DLQ = "velo:webhook-delivery-dlq";
+/** Consumer group the webhook delivery worker reads the queue with. */
+export const WEBHOOK_DELIVERY_GROUP = "webhook-delivery-group";
+/** Max delivery attempts before a webhook is routed to the DLQ. */
+export const WEBHOOK_DELIVERY_MAX_ATTEMPTS = 5;

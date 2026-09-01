@@ -49,7 +49,8 @@ import { swapDisputeRoutes } from "./routes/swap-dispute.js";
 import { SwapDisputeStore } from "./lib/swapDisputeStore.js";
 import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
-import { userPreferencesRoutes } from "./routes/user-preferences.js";
+import { webhookRoutes } from "./routes/webhooks.js";
+import { WebhookDeliveryStore } from "./lib/webhookDeliveryStore.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -458,6 +459,15 @@ app.register(multisigEscrowRoutes, {
 app.register(swapDisputeRoutes, {
   prefix: "/api/v1",
   store: new SwapDisputeStore(pgPool ?? null),
+});
+// Distributed Multi-Node Webhook Event Delivery Engine & DLQ Recovery
+// (#445): developer-registered endpoint registration, delivery-log lookup,
+// and dead-letter replay. Shares the pool so DLQ replay's SELECT ... FOR
+// UPDATE coordinates with webhookDeliveryWorker; degrades to an in-memory
+// store in dev like the routes above.
+app.register(webhookRoutes, {
+  prefix: "/api/v1",
+  store: new WebhookDeliveryStore(pgPool ?? null),
 });
 // (#404) Decentralized Jury Dispute Arbitration: commit-reveal voting,
 // VRF juror selection, and automated escrow resolution with stake slashing.

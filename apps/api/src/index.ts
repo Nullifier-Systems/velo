@@ -17,6 +17,8 @@ import { createEnterpriseStore } from "./lib/enterprise-store.js";
 import { startApprovalTimeoutWorker } from "./lib/workers/approvalTimeoutWorker.js";
 import { startCollateralCooldownWorker } from "./lib/workers/cooldownWorker.js";
 import { CollateralGuardStore } from "./lib/collateralGuard.js";
+import { startWebhookDeliveryWorker } from "./lib/workers/webhookDeliveryWorker.js";
+import { WebhookDeliveryStore } from "./lib/webhookDeliveryStore.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -124,6 +126,34 @@ async function startServer() {
       startApprovalTimeoutWorker({ store: enterpriseStore });
     } catch (error) {
       app.log.error(error, "approval timeout worker failed to start");
+    }
+
+    // (#445) Distributed Multi-Node Webhook Event Delivery Engine: drains
+    // velo:webhook-delivery-queue, delivers signed developer-webhook
+    // payloads, and dead-letters deliveries that exhaust their retries.
+    // Needs both the delivery log (Postgres) and the queue (Redis).
+    if (process.env.REDIS_URL) {
+      try {
+        const deliveryQueueRedis = createClient({ url: process.env.REDIS_URL });
+        deliveryQueueRedis.on("error", (error) =>
+          app.log.error(error, "webhook delivery queue error"),
+        );
+        await deliveryQueueRedis.connect();
+        startWebhookDeliveryWorker({
+          store: new WebhookDeliveryStore(pgPool ?? null),
+          redis: deliveryQueueRedis,
+          onEvent: (event) => {
+            if (event.type === "dead-letter") {
+              app.log.warn(event, "webhook delivery dead-lettered");
+            }
+          },
+        });
+      } catch (error) {
+        // A Redis outage must not stop the API from serving requests.
+        app.log.error(error, "webhook delivery worker failed to start");
+      }
+    } else {
+      app.log.warn("REDIS_URL is not configured; webhook delivery worker is disabled");
     }
   } catch (err) {
     app.log.error(err);
