@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { resolveLocale, t, type Locale } from "../lib/i18n.js";
 import { ApiError } from "../lib/errors.js";
-import type { Pool } from "pg";
 
 /** Supported currency codes for locale-aware cash formatting. */
 const SUPPORTED_CURRENCIES = new Set([
@@ -19,35 +18,20 @@ interface PreferencesBody {
 /**
  * POST /api/v1/user/preferences
  *
- * Persists a provider's preferred locale and display currency.
- * Responds with the saved values, localised into the requested locale.
+ * Validates and returns a provider's preferred locale and display currency.
+ * The response is localised into the requested locale.
  *
  * Body:  { locale: string, currency: string }
- * Query: ?stellarAddress=G...  (identifies the provider row)
  */
-export async function userPreferencesRoutes(
-  app: FastifyInstance,
-  opts: { prefix?: string; db?: Pool | null }
-) {
-  const db = opts.db ?? null;
-
-  app.post<{ Body: PreferencesBody; Querystring: { stellarAddress?: string } }>(
+export async function userPreferencesRoutes(app: FastifyInstance) {
+  app.post<{ Body: PreferencesBody }>(
     "/user/preferences",
     {
       schema: {
         description:
-          "Update the authenticated provider's preferred locale and display currency. " +
+          "Validate and return the provider's preferred locale and display currency. " +
           "The response body is localised into the chosen locale.",
         tags: ["user"],
-        querystring: {
-          type: "object",
-          properties: {
-            stellarAddress: {
-              type: "string",
-              description: "Stellar public key (G…) identifying the provider.",
-            },
-          },
-        },
         body: {
           type: "object",
           required: ["locale", "currency"],
@@ -77,14 +61,10 @@ export async function userPreferencesRoutes(
       },
     },
     async (
-      request: FastifyRequest<{
-        Body: PreferencesBody;
-        Querystring: { stellarAddress?: string };
-      }>,
+      request: FastifyRequest<{ Body: PreferencesBody }>,
       reply: FastifyReply
     ) => {
       const { locale, currency } = request.body;
-      const { stellarAddress } = request.query;
 
       // Validate locale
       if (!SUPPORTED_LOCALES.includes(locale as Locale)) {
@@ -102,17 +82,6 @@ export async function userPreferencesRoutes(
           400,
           "INVALID_PARAMETER",
           `Unsupported currency '${currency}'. Supported: ${[...SUPPORTED_CURRENCIES].join(", ")}`
-        );
-      }
-
-      // Persist to DB when a stellarAddress and pool are available.
-      if (stellarAddress && db) {
-        await db.query(
-          `UPDATE provider_profiles
-              SET preferred_locale   = $1,
-                  preferred_currency = $2
-            WHERE stellar_address = $3`,
-          [locale, upperCurrency, stellarAddress]
         );
       }
 

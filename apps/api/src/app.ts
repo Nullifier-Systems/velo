@@ -474,4 +474,4 @@ app.register(webhookRoutes, {
 app.register(juryArbitrationRoutes, { prefix: "/api/v1" });
 // (#435) Multi-Lingual i18n & RTL support: persists per-provider locale and
 // display currency preferences to provider_profiles.
-app.register(userPreferencesRoutes, { prefix: "/api/v1", db: pgPool ?? null });
+app.register(userPreferencesRoutes, { prefix: "/api/v1" });
