@@ -51,6 +51,7 @@ import { getChatInfrastructure } from "./lib/chat-infrastructure.js";
 import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { WebhookDeliveryStore } from "./lib/webhookDeliveryStore.js";
+import { userPreferencesRoutes } from "./routes/user-preferences.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
