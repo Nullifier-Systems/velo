@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import "../../i18n/index.js"; // initialise i18n singleton (same pattern as all other tests)
-import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import i18n from "../../i18n/index.js";
 import LanguageSwitcher from "../LanguageSwitcher.js";
@@ -17,12 +17,6 @@ import LanguageSwitcher from "../LanguageSwitcher.js";
  *  5. aria-selected marks the active option
  *  6. Dropdown closes after selection
  */
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -60,9 +54,10 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("shows all 5 language options when the trigger is clicked", async () => {
-    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    const { getByRole } = render(<LanguageSwitcher />);
     fireEvent.click(getByRole("button"));
-    await waitFor(() => getByRole("listbox"));
+    const listbox = await waitFor(() => getByRole("listbox"));
+    const { getByText } = within(listbox);
 
     expect(getByText("English")).toBeInTheDocument();
     expect(getByText("Español")).toBeInTheDocument();
@@ -84,11 +79,11 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("sets document.dir to 'rtl' when Arabic is selected", async () => {
-    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    const { getByRole } = render(<LanguageSwitcher />);
     fireEvent.click(getByRole("button"));
-    await waitFor(() => getByRole("listbox"));
+    const listbox = await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(getByText("العربية"));
+    fireEvent.click(within(listbox).getByText("العربية"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("rtl")
     );
@@ -101,12 +96,12 @@ describe("LanguageSwitcher", () => {
 
   it("resets document.dir to 'ltr' when switching from Arabic to English", async () => {
     await i18n.changeLanguage("ar");
-    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    const { getByRole } = render(<LanguageSwitcher />);
 
     fireEvent.click(getByRole("button"));
-    await waitFor(() => getByRole("listbox"));
+    const listbox = await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(getByText("English"));
+    fireEvent.click(within(listbox).getByText("English"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("ltr")
     );
@@ -114,11 +109,11 @@ describe("LanguageSwitcher", () => {
   });
 
   it("keeps dir='ltr' when French is selected", async () => {
-    const { getByRole, getByText } = render(<LanguageSwitcher />);
+    const { getByRole } = render(<LanguageSwitcher />);
     fireEvent.click(getByRole("button"));
-    await waitFor(() => getByRole("listbox"));
+    const listbox = await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(getByText("Français"));
+    fireEvent.click(within(listbox).getByText("Français"));
     await waitFor(() =>
       expect(document.documentElement.dir).toBe("ltr")
     );
@@ -145,11 +140,11 @@ describe("LanguageSwitcher", () => {
   // -------------------------------------------------------------------------
 
   it("closes the dropdown after a language is selected", async () => {
-    const { getByRole, getByText, queryByRole } = render(<LanguageSwitcher />);
+    const { getByRole, queryByRole } = render(<LanguageSwitcher />);
     fireEvent.click(getByRole("button"));
-    await waitFor(() => getByRole("listbox"));
+    const listbox = await waitFor(() => getByRole("listbox"));
 
-    fireEvent.click(getByText("Español"));
+    fireEvent.click(within(listbox).getByText("Español"));
     await waitFor(() =>
       expect(queryByRole("listbox")).not.toBeInTheDocument()
     );
