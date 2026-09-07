@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useTranslation } from "react-i18next";
-import LanguageSwitcher from "../components/LanguageSwitcher.js";
+import LanguageSwitcher, { formatCurrency } from "../components/LanguageSwitcher.js";
 import {
   fetchCashRequest,
   releaseCashRequest,
@@ -86,11 +86,17 @@ function WaitingBanner({ elapsedMs }: { elapsedMs: number }) {
 }
 
 export default function ClaimQR() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const secret = searchParams.get('secret');
   const chatToken = searchParams.get('chatToken') ?? "";
+
+  /** Format a raw stroop amount (7-decimal string) into the locale's currency. */
+  const formatAmount = (stroops: string): string => {
+    const usdc = parseFloat(stroops) / 1e7;
+    return formatCurrency(usdc, i18n.language ?? "en");
+  };
 
   const [status, setStatus] = useState<CashRequestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -440,7 +446,7 @@ export default function ClaimQR() {
                   </div>
                   {status.releasedAmount && (
                     <p className="claim-ticket__tranche-amount">
-                      {formatStroopsPrecise(status.releasedAmount)} / {formatStroopsPrecise(status.amountStroops)} {t("claim.trancheReleased")}
+                      {formatAmount(status.releasedAmount)} / {formatAmount(status.amountStroops)} {t("claim.trancheReleased")}
                     </p>
                   )}
                 </div>
@@ -473,7 +479,7 @@ export default function ClaimQR() {
           <div className="claim-ticket__row">
             <span className="claim-ticket__label">{t("common.amount")}</span>
             <span className="claim-ticket__amount">
-              {formatStroopsPrecise(status.amountStroops)}
+              {formatAmount(status.amountStroops)}
             </span>
           </div>
           <div className="claim-ticket__row">

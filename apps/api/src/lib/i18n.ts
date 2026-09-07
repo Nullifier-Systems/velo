@@ -1,9 +1,12 @@
 import en from "../i18n/locales/en.json" with { type: "json" };
 import es from "../i18n/locales/es.json" with { type: "json" };
+import fr from "../i18n/locales/fr.json" with { type: "json" };
+import ar from "../i18n/locales/ar.json" with { type: "json" };
+import pt from "../i18n/locales/pt.json" with { type: "json" };
 
-export type Locale = "en" | "es";
+export type Locale = "en" | "es" | "fr" | "ar" | "pt";
 
-const translations: Record<Locale, typeof en> = { en, es };
+const translations: Record<Locale, typeof en> = { en, es, fr, ar, pt };
 
 /**
  * Resolve the best locale from an Accept-Language header.
@@ -23,6 +26,9 @@ export function resolveLocale(acceptLanguage: string | undefined): Locale {
 
   for (const { tag } of locales) {
     if (tag === "es") return "es";
+    if (tag === "fr") return "fr";
+    if (tag === "ar") return "ar";
+    if (tag === "pt") return "pt";
     if (tag === "en") return "en";
   }
   return "en";
@@ -31,7 +37,9 @@ export function resolveLocale(acceptLanguage: string | undefined): Locale {
 /**
  * Get a localized string with optional interpolation.
  * Usage: t("en", "errors.notFound") => "Request not found"
- * Usage: t("es", "notifications.claimUpdate", { id: "abc", amount: "10.00", status: "released" })
+ * Usage: t("ar", "notifications.claimUpdate", { id: "abc", amount: "10.00", status: "released" })
+ *
+ * Falls back to English when a key is missing in the requested locale.
  */
 export function t(
   locale: Locale,
@@ -47,7 +55,7 @@ export function t(
   }
 
   if (typeof value !== "string") {
-    // Try fallback to English
+    // Fallback to English when the key is missing in the requested locale.
     let fallback: any = translations.en;
     for (const k of keys) {
       if (fallback === undefined || fallback === null) break;
