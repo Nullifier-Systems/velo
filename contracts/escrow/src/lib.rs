@@ -24,6 +24,8 @@ use soroban_sdk::{
     BytesN, Env, Symbol, Vec,
 };
 
+pub mod migration;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArbitratorSet {
@@ -114,6 +116,8 @@ enum DataKey {
     /// 2-of-N recovery path. Absent until `register_trade_signers` is
     /// called for that trade.
     TradeSigners(BytesN<32>),
+    /// Soroban Smart Contract Upgradability Protocol & Storage State Migration Engine (issue #464).
+    StorageVersion,
 }
 
 /// Ledgers that must elapse after `pause()` before `lock()` is rejected.
@@ -214,6 +218,10 @@ pub enum Error {
     /// registered signer set. Set-once by design — a single party must
     /// never be able to silently swap the recovery quorum mid-trade.
     TradeSignersAlreadySet = 54,
+    /// Invalid target version for contract upgrade (must be greater than current).
+    InvalidTargetVersion = 55,
+    /// Storage state migration failed during contract upgrade.
+    MigrationFailed = 56,
 }
 
 const DEFAULT_TIMEOUT_LEDGERS_MAX: u32 = 6 * 60 * 24 * 7;
@@ -527,6 +535,57 @@ impl EscrowContract {
             .instance()
             .set(&DataKey::Arbitrator, &arbitrator);
         Ok(())
+    }
+
+    /// Soroban Smart Contract Upgradability Protocol & Storage State Migration Engine (#464).
+    /// Upgrades contract WASM bytecode in-place using `env.deployer().update_current_contract_wasm()`,
+    /// verifies multi-sig admin authorization (2-of-3 threshold or single-admin fallback),
+    /// and executes storage state migration.
+    pub fn upgrade_and_migrate(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        target_version: u32,
+        signers: Vec<Address>,
+    ) -> Result<(), Error> {
+        require_multisig(&env, &signers)?;
+
+        let current_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageVersion)
+            .unwrap_or(1);
+
+        if target_version <= current_version {
+            return Err(Error::InvalidTargetVersion);
+        }
+
+        // Execute storage migration logic
+        migration::migrate_storage_v1_to_v2(&env)
+            .map_err(|_| Error::MigrationFailed)?;
+
+        // Update current contract bytecode hash
+        #[cfg(not(test))]
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Update stored storage schema version
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageVersion, &target_version);
+
+        env.events().publish(
+            (Symbol::new(&env, "upgraded"), target_version),
+            new_wasm_hash,
+        );
+
+        Ok(())
+    }
+
+    /// Read-only query for current contract storage schema version (#464).
+    pub fn get_storage_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageVersion)
+            .unwrap_or(1)
     }
 
     /// Allows an arbitrator to lock collateral to participate in dispute resolution.

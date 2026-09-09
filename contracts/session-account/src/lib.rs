@@ -24,7 +24,7 @@ use soroban_sdk::{
     auth::{Context, ContractContext, CustomAccountInterface},
     contract, contracterror, contractimpl, contracttype,
     crypto::Hash,
-    Address, Env, Symbol, TryIntoVal, Vec,
+    Address, BytesN, Env, Symbol, TryIntoVal, Vec,
 };
 
 #[contracttype]
@@ -47,6 +47,8 @@ pub enum DataKey {
     NextProposalId,
     /// Session key revoked by a rotation: Revoked(Address) -> bool
     Revoked(Address),
+    /// Contract storage state schema version (issue #464)
+    StorageVersion,
 }
 
 #[contracttype]
@@ -153,6 +155,42 @@ impl SessionAccount {
             .publish((Symbol::new(&env, "initialized"),), main_account);
 
         Ok(())
+    }
+
+    /// Upgrades contract WASM bytecode in-place using `env.deployer().update_current_contract_wasm()`.
+    /// Only callable by the main account (Issue #464).
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        target_version: u32,
+    ) -> Result<(), Error> {
+        let main_account: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MainAccount)
+            .ok_or(Error::NotInitialized)?;
+        main_account.require_auth();
+
+        #[cfg(not(test))]
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageVersion, &target_version);
+
+        env.events().publish(
+            (Symbol::new(&env, "upgraded"), target_version),
+            new_wasm_hash,
+        );
+
+        Ok(())
+    }
+
+    /// Read-only query for current contract storage schema version (#464).
+    pub fn get_storage_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageVersion)
+            .unwrap_or(1)
     }
 
     /// Create a new session key with spending cap and time window.

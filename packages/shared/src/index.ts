@@ -432,3 +432,22 @@ export const WEBHOOK_DELIVERY_DLQ = "velo:webhook-delivery-dlq";
 export const WEBHOOK_DELIVERY_GROUP = "webhook-delivery-group";
 /** Max delivery attempts before a webhook is routed to the DLQ. */
 export const WEBHOOK_DELIVERY_MAX_ATTEMPTS = 5;
+
+/* ------------------------------------------------------------------ */
+/*  Soroban Contract Upgradability Protocol & State Migration (#464)  */
+/* ------------------------------------------------------------------ */
+
+export interface ContractUpgradeProposal {
+  proposalId: string;
+  contractId: string;
+  newWasmHash: string;
+  storageVersion: number;
+  signaturesCollected: number;
+  executed: boolean;
+  createdAt?: string;
+}
+
+export interface ContractUpgradeSignature {
+  signerAddress: string;
+  signature: string;
+}

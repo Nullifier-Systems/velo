@@ -751,3 +751,30 @@ fn lock_exceeding_max_usd_limit_panics_with_exceeds_error() {
     let id = BytesN::from_array(&env, &[9u8; 32]);
     client.lock(&id, &seller, &buyer, &1_001, &secret_hash, &100);
 }
+
+#[test]
+fn test_contract_upgrade_and_state_migration() {
+    let f = setup();
+    lock_trade(&f);
+
+    // Initial version defaults to 1
+    assert_eq!(f.client.get_storage_version(), 1);
+
+    let new_wasm_hash = BytesN::from_array(&f.env, &[99u8; 32]);
+
+    // Executing upgrade_and_migrate
+    f.client.upgrade_and_migrate(&new_wasm_hash, &2, &f.no_sigs);
+
+    // Storage version updated to 2
+    assert_eq!(f.client.get_storage_version(), 2);
+
+    // Verify trade balance remains intact post-upgrade
+    let trade = f.client.get_trade(&f.id).unwrap();
+    assert_eq!(trade.status, htlc_core::TradeStatus::Locked);
+    assert_eq!(trade.amount, 500);
+
+    // Successfully claim trade post-upgrade
+    f.client.release(&f.id, &f.secret);
+    let completed_trade = f.client.get_trade(&f.id).unwrap();
+    assert_eq!(completed_trade.status, htlc_core::TradeStatus::Released);
+}

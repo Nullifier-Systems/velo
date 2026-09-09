@@ -1882,3 +1882,29 @@ export async function anchorAuditRoot(contractId: string, sequence: number, root
 
     return sendResult.hash;
 }
+
+/**
+ * Soroban contract upgrade & state migration invocation (Issue #464).
+ * Invokes `upgrade_and_migrate` on the targeted contract with multi-sig signers.
+ */
+export async function upgradeContractWasm(params: {
+  contractId: string;
+  newWasmHash: string;
+  storageVersion: number;
+  signers: string[];
+}): Promise<string> {
+  const signer = loadSignerKeypair();
+  const wasmHashBytes = Buffer.from(params.newWasmHash, "hex");
+  const signersScVal = params.signers.map((s) => nativeToScVal(s, { type: "address" }));
+
+  return await invokeContract(
+    params.contractId,
+    "upgrade_and_migrate",
+    [
+      nativeToScVal(wasmHashBytes, { type: "bytes" }),
+      nativeToScVal(params.storageVersion, { type: "u32" }),
+      nativeToScVal(signersScVal, { type: "vec" }),
+    ],
+    signer,
+  );
+}

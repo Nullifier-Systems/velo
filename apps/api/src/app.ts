@@ -52,6 +52,7 @@ import { juryArbitrationRoutes } from "./routes/jury-arbitration.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { WebhookDeliveryStore } from "./lib/webhookDeliveryStore.js";
 import { userPreferencesRoutes } from "./routes/user-preferences.js";
+import { contractGovernanceRoutes } from "./routes/contract-governance.js";
 
 const MAX_PAYMENTS_CACHE = 10000;
 const usedPayments = new Map<string, number>();
@@ -476,3 +477,5 @@ app.register(juryArbitrationRoutes, { prefix: "/api/v1" });
 // (#435) Multi-Lingual i18n & RTL support: persists per-provider locale and
 // display currency preferences to provider_profiles.
 app.register(userPreferencesRoutes, { prefix: "/api/v1" });
+// (#464) Soroban Smart Contract Upgradability Protocol & Storage State Migration Engine
+app.register(contractGovernanceRoutes, { prefix: "/api/v1" });
