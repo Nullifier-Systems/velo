@@ -11,7 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-sdk": "^17.0.1",
     "@velo/shared": "*",
     "dexie": "^4.4.5",
     "i18next": "^26.3.6",

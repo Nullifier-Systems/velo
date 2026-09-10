@@ -19,7 +19,7 @@
     "@fastify/swagger": "^8.15.0",
     "@fastify/swagger-ui": "^2.1.0",
     "@fastify/websocket": "^8.0.0",
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-sdk": "^17.0.1",
     "@velo/shared": "*",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",
