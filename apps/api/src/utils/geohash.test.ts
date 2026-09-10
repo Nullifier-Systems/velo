@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { encodeGeohash, decodeGeohash, cellFor, haversineKm } from "./geohash.js";
+import {
+  encodeGeohash,
+  decodeGeohash,
+  cellFor,
+  haversineKm,
+  isPointInPolygon,
+  evaluateGeofenceCompliance,
+} from "./geohash.js";
 
 describe("geohash", () => {
   it("encodes known reference points correctly", () => {
@@ -42,4 +49,42 @@ describe("geohash", () => {
     expect(km).toBeGreaterThan(500);
     expect(km).toBeLessThan(560);
   });
+
+  describe("geofence compliance engine (issue #465)", () => {
+    const testSanctionZone = {
+      id: "zone-1",
+      name: "Restricted Airport Hub",
+      category: "restricted" as const,
+      polygon: [
+        { lat: 10.0, lon: 10.0 },
+        { lat: 10.0, lon: 20.0 },
+        { lat: 20.0, lon: 20.0 },
+        { lat: 20.0, lon: 10.0 },
+      ],
+      isBlacklisted: true,
+    };
+
+    it("correctly identifies point inside polygon", () => {
+      expect(isPointInPolygon({ lat: 15.0, lon: 15.0 }, testSanctionZone.polygon)).toBe(true);
+    });
+
+    it("correctly identifies point outside polygon", () => {
+      expect(isPointInPolygon({ lat: 25.0, lon: 25.0 }, testSanctionZone.polygon)).toBe(false);
+      expect(isPointInPolygon({ lat: 5.0, lon: 5.0 }, testSanctionZone.polygon)).toBe(false);
+    });
+
+    it("blocks transactions inside blacklisted zones", () => {
+      const result = evaluateGeofenceCompliance({ lat: 15.0, lon: 15.0 }, [testSanctionZone]);
+      expect(result.allowed).toBe(false);
+      expect(result.matchedZone?.id).toBe("zone-1");
+      expect(result.reason).toContain("Restricted Airport Hub");
+    });
+
+    it("allows transactions outside blacklisted zones", () => {
+      const result = evaluateGeofenceCompliance({ lat: 5.0, lon: 5.0 }, [testSanctionZone]);
+      expect(result.allowed).toBe(true);
+      expect(result.matchedZone).toBeUndefined();
+    });
+  });
 });
+

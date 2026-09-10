@@ -143,3 +143,66 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+export interface Point {
+  lat: number;
+  lon: number;
+}
+
+export interface GeoFenceZone {
+  id: string;
+  name: string;
+  category: "sanctioned" | "high_risk" | "restricted" | "airport";
+  polygon: Point[];
+  isBlacklisted: boolean;
+  maxCashLimit?: number;
+}
+
+/**
+ * Checks if a coordinate point lies inside a polygonal geofence zone using ray-casting.
+ */
+export function isPointInPolygon(point: Point, polygon: Point[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  const x = point.lon;
+  const y = point.lat;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lon;
+    const yi = polygon[i].lat;
+    const xj = polygon[j].lon;
+    const yj = polygon[j].lat;
+
+    const intersect =
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
+}
+
+/**
+ * Evaluates whether a coordinate falls within any blacklisted or restricted geofence zones.
+ */
+export function evaluateGeofenceCompliance(
+  coord: Point,
+  zones: GeoFenceZone[]
+): {
+  allowed: boolean;
+  matchedZone?: GeoFenceZone;
+  reason?: string;
+} {
+  for (const zone of zones) {
+    if (isPointInPolygon(coord, zone.polygon)) {
+      if (zone.isBlacklisted) {
+        return {
+          allowed: false,
+          matchedZone: zone,
+          reason: `Location is inside blacklisted zone: ${zone.name} (${zone.category})`,
+        };
+      }
+    }
+  }
+  return { allowed: true };
+}
+
