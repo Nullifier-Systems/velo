@@ -30,7 +30,7 @@
     "sharp": "^0.35.4",
     "tesseract.js": "^7.0.0",
     "tweetnacl": "^1.0.3",
-    "zod": "^3.25.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
