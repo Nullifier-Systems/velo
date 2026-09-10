@@ -33,7 +33,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "fake-indexeddb": "^6.2.5",
-    "jsdom": "^25.0.1",
+    "jsdom": "^30.0.1",
     "typescript": "^5.5.4",
     "vite": "^8.2.2",
     "vitest": "^2.0.5"
