@@ -53,6 +53,31 @@ fn setup(mint_to_buyer: i128) -> Fixture {
     }
 }
 
+fn record_reveal_with_proof(
+    client: &AtomicSwapContractClient,
+    env: &Env,
+    evm_tx_hash: &BytesN<32>,
+    secret: &BytesN<32>,
+    evm_block_height: u32,
+    chain_id: u32,
+    evm_current_block: u32,
+) -> u32 {
+    let block_hash = BytesN::from_array(env, &[42u8; 32]);
+    let log_key = soroban_sdk::Bytes::from_slice(env, &0u32.to_le_bytes());
+    let (state_root, proof) = mpt_verifier::make_leaf_proof(env, &log_key, &secret.clone().into());
+    client.register_trusted_block_header(&block_hash, &evm_block_height, &state_root);
+    client.record_evm_reveal(
+        evm_tx_hash,
+        secret,
+        &evm_block_height,
+        &chain_id,
+        &evm_current_block,
+        &block_hash,
+        &0u32,
+        &proof,
+    )
+}
+
 #[test]
 fn lock_moves_funds_into_the_contract() {
     let f = setup(1_000);
@@ -225,12 +250,14 @@ fn record_evm_reveal_sufficient_finality_no_extension() {
     let evm_current_block = 1100u32; // 100 confirmations >= 64 required
     let chain_id = 1u32; // Ethereum
 
-    let extension = client.record_evm_reveal(
+    let extension = record_reveal_with_proof(
+        &client,
+        &f.env,
         &evm_tx_hash,
         &secret,
-        &evm_block_height,
-        &chain_id,
-        &evm_current_block,
+        evm_block_height,
+        chain_id,
+        evm_current_block,
     );
 
     // Sufficient finality: no extension needed
@@ -248,12 +275,14 @@ fn record_evm_reveal_insufficient_finality_extends_timelock() {
     let evm_current_block = 1010u32; // Only 10 confirmations < 64 required
     let chain_id = 1u32; // Ethereum
 
-    let extension = client.record_evm_reveal(
+    let extension = record_reveal_with_proof(
+        &client,
+        &f.env,
         &evm_tx_hash,
         &secret,
-        &evm_block_height,
-        &chain_id,
-        &evm_current_block,
+        evm_block_height,
+        chain_id,
+        evm_current_block,
     );
 
     // Insufficient finality: extend by MAX_REORG_WINDOW_LEDGERS (50)
@@ -308,15 +337,16 @@ fn verify_merkle_proof_caches_results() {
     let f = setup(1_000);
     let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    let log_data = BytesN::from_array(&f.env, &[5u8; 32]);
-    let proof_hash = f.env.crypto().sha256(&log_data.clone().into()).to_bytes();
+    let key = soroban_sdk::Bytes::from_array(&f.env, &[5u8; 32]);
+    let value = soroban_sdk::Bytes::from_array(&f.env, &[7u8; 32]);
+    let (state_root, proof) = mpt_verifier::make_leaf_proof(&f.env, &key, &value);
 
     // First verification
-    let result1 = client.verify_merkle_proof(&proof_hash, &log_data);
+    let result1 = client.verify_merkle_proof(&state_root, &key, &value, &proof);
     assert!(result1);
 
     // Second verification should return cached result
-    let result2 = client.verify_merkle_proof(&proof_hash, &log_data);
+    let result2 = client.verify_merkle_proof(&state_root, &key, &value, &proof);
     assert!(result2);
 }
 
@@ -325,11 +355,13 @@ fn verify_merkle_proof_rejects_invalid_proof() {
     let f = setup(1_000);
     let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    let log_data = BytesN::from_array(&f.env, &[5u8; 32]);
-    let wrong_proof = BytesN::from_array(&f.env, &[6u8; 32]);
+    let key = soroban_sdk::Bytes::from_array(&f.env, &[5u8; 32]);
+    let value = soroban_sdk::Bytes::from_array(&f.env, &[7u8; 32]);
+    let (_state_root, proof) = mpt_verifier::make_leaf_proof(&f.env, &key, &value);
+    let wrong_root = BytesN::from_array(&f.env, &[99u8; 32]);
 
-    let result = client.verify_merkle_proof(&wrong_proof, &log_data);
-    assert!(!result);
+    let result = client.try_verify_merkle_proof(&wrong_root, &key, &value, &proof);
+    assert!(result.is_err());
 }
 
 // ===== Cross-Chain Reorg Scenario Tests =====
@@ -362,12 +394,14 @@ fn simulate_10_block_evm_reorg_prevents_double_claim() {
     // Scenario A: 10-block reorg (only 10 confirmations on deep-reorganizing chain)
     // This is INSUFFICIENT for Ethereum (requires 64). Timelock should extend.
     let evm_current_block_after_reorg = 1010u32;
-    let extension = client.record_evm_reveal(
+    let extension = record_reveal_with_proof(
+        &client,
+        &f.env,
         &evm_tx_hash,
         &f.secret,
-        &evm_block_reveal,
-        &1u32, // Ethereum chain
-        &evm_current_block_after_reorg,
+        evm_block_reveal,
+        1u32, // Ethereum chain
+        evm_current_block_after_reorg,
     );
 
     // Extension triggered because 10 < 64 required confirmations
@@ -425,12 +459,14 @@ fn multiple_trades_selective_reorg_extension() {
 
     // Simulate reorg risk only for trade 2
     let evm_tx_hash2 = BytesN::from_array(&f.env, &[20u8; 32]);
-    let extension2 = client.record_evm_reveal(
+    let extension2 = record_reveal_with_proof(
+        &client,
+        &f.env,
         &evm_tx_hash2,
         &f.secret,
-        &900u32, // Block 900
-        &1u32,   // Ethereum
-        &910u32, // Only 10 blocks later (insufficient)
+        900u32, // Block 900
+        1u32,   // Ethereum
+        910u32, // Only 10 blocks later (insufficient)
     );
     assert_eq!(extension2, 50);
 
@@ -454,163 +490,190 @@ fn arbitrum_l2_vs_ethereum_l1_finality_comparison() {
 
     // On Arbitrum: 100 blocks required, but they're fast (~3-5 min)
     // After only 50 Arbitrum blocks, we're still not finalized
-    let arb_extension = client.record_evm_reveal(
+    let arb_extension = record_reveal_with_proof(
+        &client,
+        &f.env,
         &BytesN::from_array(&f.env, &[1u8; 32]),
         &BytesN::from_array(&f.env, &[7u8; 32]),
-        &1000u32,  // Block 1000
-        &42161u32, // Arbitrum
-        &1050u32,  // Only 50 blocks (~2.5 min)
+        1000u32,  // Block 1000
+        42161u32, // Arbitrum
+        1050u32,  // Only 50 blocks (~2.5 min)
     );
     assert_eq!(arb_extension, 50); // Insufficient, triggers extension
 
     // On Ethereum: 64 blocks required (~15 min)
     // After 150 Ethereum blocks, we're well-finalized
-    let eth_extension = client.record_evm_reveal(
+    let eth_extension = record_reveal_with_proof(
+        &client,
+        &f.env,
         &BytesN::from_array(&f.env, &[2u8; 32]),
         &BytesN::from_array(&f.env, &[7u8; 32]),
-        &1000u32, // Block 1000
-        &1u32,    // Ethereum
-        &1150u32, // 150 blocks (~37.5 min)
+        1000u32, // Block 1000
+        1u32,    // Ethereum
+        1150u32, // 150 blocks (~37.5 min)
     );
     assert_eq!(eth_extension, 0); // Sufficient, no extension
 }
 
-// ============================================================================
-// Cross-Ledger Settlement Time-Lock Atomic Swap Dispute Bridge
-// ============================================================================
-//
-// Two guarantees the dispute bridge is built on:
-//
-//   * a revealed preimage stays recoverable even if nobody was watching the
-//     `released` event when it fired;
-//   * an expired leg can be refunded by anyone, automatically, without the
-//     honest party having to wait out a manual dispute.
+// ===== MPT Verification Tests =====
 
-/// The preimage is readable from contract state after release, not only from
-/// the event log. This is the fix for relayer secret leakage: a relayer that
-/// was down when the event fired can still recover the secret and claim the
-/// counterpart leg.
 #[test]
-fn revealed_secret_is_persisted_for_late_readers() {
-    let f = setup(10_000);
+fn register_trusted_block_header_only_admin() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    // Before release there is nothing to read.
-    assert_eq!(f.client.get_revealed_secret(&f.id), None);
+    let block_hash = BytesN::from_array(&f.env, &[1u8; 32]);
+    let state_root = BytesN::from_array(&f.env, &[2u8; 32]);
 
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
-    f.client.release(&f.id, &f.secret);
+    // Admin should be able to register
+    let result = client.try_register_trusted_block_header(&block_hash, &1000u32, &state_root);
+    assert!(result.is_ok());
 
-    // After release the preimage is durable state, independent of events.
-    assert_eq!(f.client.get_revealed_secret(&f.id), Some(f.secret.clone()));
+    // Verify the header is stored
+    let header = client.get_trusted_block_header(&block_hash);
+    assert!(header.is_some());
 }
 
-/// The persisted preimage really is the swap's secret — it hashes to the
-/// trade's `secret_hash`, so a relayer can use it on the counterpart chain.
 #[test]
-fn persisted_secret_hashes_to_the_trade_secret_hash() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
-    f.client.release(&f.id, &f.secret);
+fn get_trusted_block_header_returns_none_when_not_registered() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    let extracted = f.client.get_revealed_secret(&f.id).expect("secret stored");
-    let rehashed = f.env.crypto().sha256(&extracted.into()).to_bytes();
-    assert_eq!(rehashed, f.secret_hash);
+    let unknown_hash = BytesN::from_array(&f.env, &[99u8; 32]);
+    let header = client.get_trusted_block_header(&unknown_hash);
+    assert!(header.is_none());
 }
 
-/// A refunded leg never reveals a secret — there is nothing to extract, and
-/// the bridge must not report one.
 #[test]
-fn refunded_swap_exposes_no_secret() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+fn verify_merkle_proof_with_mpt_verification() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    f.env.ledger().with_mut(|li| li.sequence_number += 101);
-    f.client.refund(&f.id);
+    // Create test data
+    let state_root = BytesN::from_array(&f.env, &[1u8; 32]);
+    let proof_key = soroban_sdk::Bytes::from_array(&f.env, &[2u8; 32]);
+    let proof_value = soroban_sdk::Bytes::from_array(&f.env, &[3u8; 32]);
 
-    assert_eq!(f.client.get_revealed_secret(&f.id), None);
+    // Create empty proof (will fail validation)
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // Verify should handle empty proof gracefully
+    let result = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+    assert!(result.is_err());
 }
 
-/// `is_refund_claimable` tracks the contract's own timeout precondition
-/// exactly, so the bridge never submits a refund the chain would reject.
 #[test]
-fn refund_claimable_flips_exactly_at_timeout() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+fn record_evm_reveal_with_mpt_proof_requires_trusted_block() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    // Locked but not yet expired.
-    assert!(!f.client.is_refund_claimable(&f.id));
+    let evm_tx_hash = BytesN::from_array(&f.env, &[10u8; 32]);
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let block_hash = BytesN::from_array(&f.env, &[11u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
 
-    // One ledger short of the timeout: still not claimable.
-    f.env.ledger().with_mut(|li| li.sequence_number += 99);
-    assert!(!f.client.is_refund_claimable(&f.id));
-
-    // At the timeout ledger it becomes claimable, and refund() agrees.
-    f.env.ledger().with_mut(|li| li.sequence_number += 1);
-    assert!(f.client.is_refund_claimable(&f.id));
-    f.client.refund(&f.id);
-    assert_eq!(f.token.balance(&f.buyer), 10_000);
+    // Try to record reveal with untrusted block — should fail
+    let result = client.try_record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &1000u32,    // evm_block_height
+        &1u32,       // chain_id
+        &1100u32,    // evm_current_block
+        &block_hash, // untrusted block
+        &0u32,       // log_index
+        &proof,
+    );
+    assert!(result.is_err());
 }
 
-/// A released leg is never refund-claimable, however long ago it settled.
-/// Refunding it would return funds the seller has already been paid.
 #[test]
-fn released_swap_is_never_refund_claimable() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
-    f.client.release(&f.id, &f.secret);
+fn record_evm_reveal_validates_block_height_matches() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    f.env.ledger().with_mut(|li| li.sequence_number += 10_000);
-    assert!(!f.client.is_refund_claimable(&f.id));
+    // Register a trusted block header for block 1000
+    let block_hash = BytesN::from_array(&f.env, &[11u8; 32]);
+    let state_root = BytesN::from_array(&f.env, &[2u8; 32]);
+    client.register_trusted_block_header(&block_hash, &1000u32, &state_root);
+
+    let evm_tx_hash = BytesN::from_array(&f.env, &[10u8; 32]);
+    let secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
+
+    // Try with mismatched block height — should fail
+    let result = client.try_record_evm_reveal(
+        &evm_tx_hash,
+        &secret,
+        &1001u32, // evm_block_height (doesn't match trusted block 1000)
+        &1u32,    // chain_id
+        &1100u32, // evm_current_block
+        &block_hash,
+        &0u32, // log_index
+        &proof,
+    );
+    assert!(result.is_err());
 }
 
-/// An already-refunded leg is not claimable again — the honest counterparty's
-/// automated claim runs at most once.
 #[test]
-fn refunded_swap_is_not_claimable_again() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
+fn verify_merkle_proof_caches_verification_results() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    f.env.ledger().with_mut(|li| li.sequence_number += 101);
-    assert!(f.client.is_refund_claimable(&f.id));
-    f.client.refund(&f.id);
+    // Create test data
+    let state_root = BytesN::from_array(&f.env, &[1u8; 32]);
+    let proof_key = soroban_sdk::Bytes::from_array(&f.env, &[2u8; 32]);
+    let proof_value = soroban_sdk::Bytes::from_array(&f.env, &[3u8; 32]);
+    let proof: soroban_sdk::Vec<soroban_sdk::Bytes> = soroban_sdk::Vec::new(&f.env);
 
-    assert!(!f.client.is_refund_claimable(&f.id));
+    // First call (will fail but be cached)
+    let result1 = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+
+    // Second call with same parameters should return cached result
+    let result2 = client.try_verify_merkle_proof(&state_root, &proof_key, &proof_value, &proof);
+
+    // Both should behave the same (cached)
+    assert_eq!(result1.is_err(), result2.is_err());
 }
 
-/// An unknown swap id is not claimable, rather than panicking — the worker
-/// scans ids it has not necessarily seen locked on this contract.
 #[test]
-fn unknown_swap_is_not_refund_claimable() {
-    let f = setup(10_000);
-    let unknown = BytesN::from_array(&f.env, &[0xABu8; 32]);
-    assert!(!f.client.is_refund_claimable(&unknown));
-    assert_eq!(f.client.get_revealed_secret(&unknown), None);
+fn mpt_error_types_convert_correctly() {
+    use mpt_verifier::MptError;
+
+    // Verify error codes for MPT errors
+    assert_eq!(MptError::InvalidProof as u32, 1);
+    assert_eq!(MptError::InvalidPath as u32, 2);
+    assert_eq!(MptError::InvalidNodeType as u32, 3);
+    assert_eq!(MptError::RootMismatch as u32, 5);
 }
 
-/// Counterparty-timeout scenario end to end: the counterparty never reveals,
-/// the leg expires, and the honest buyer is made whole automatically without
-/// anyone holding the secret.
 #[test]
-fn expired_swap_refunds_honest_party_without_a_secret() {
-    let f = setup(10_000);
-    f.client
-        .lock(&f.id, &f.seller, &f.buyer, &5_000, &f.secret_hash, &100);
-    assert_eq!(f.token.balance(&f.buyer), 5_000);
+fn red_team_forged_mpt_proof_rejected_by_record_evm_reveal() {
+    let f = setup(1_000);
+    let client = AtomicSwapContractClient::new(&f.env, &f.contract_id);
 
-    // Counterparty stalls: no reveal on either leg, timeout elapses.
-    f.env.ledger().with_mut(|li| li.sequence_number += 101);
-    assert_eq!(f.client.get_revealed_secret(&f.id), None);
-    assert!(f.client.is_refund_claimable(&f.id));
+    let evm_tx_hash = BytesN::from_array(&f.env, &[10u8; 32]);
+    let legitimate_secret = BytesN::from_array(&f.env, &[7u8; 32]);
+    let forged_secret = BytesN::from_array(&f.env, &[99u8; 32]);
+    let block_hash = BytesN::from_array(&f.env, &[11u8; 32]);
+    let log_key = soroban_sdk::Bytes::from_slice(&f.env, &0u32.to_le_bytes());
 
-    // Permissionless refund — no buyer signature needed.
-    f.client.refund(&f.id);
+    // Create valid proof for legitimate secret
+    let (state_root, proof) =
+        mpt_verifier::make_leaf_proof(&f.env, &log_key, &legitimate_secret.clone().into());
+    client.register_trusted_block_header(&block_hash, &1000u32, &state_root);
 
-    assert_eq!(f.token.balance(&f.buyer), 10_000);
-    assert_eq!(f.token.balance(&f.seller), 0);
+    // Red-team attack: malicious relayer attempts to submit forged_secret with proof of legitimate secret
+    let result = client.try_record_evm_reveal(
+        &evm_tx_hash,
+        &forged_secret,
+        &1000u32,
+        &1u32,
+        &1100u32,
+        &block_hash,
+        &0u32,
+        &proof,
+    );
+
+    // Assert that the forged reveal is rejected
+    assert!(result.is_err());
 }

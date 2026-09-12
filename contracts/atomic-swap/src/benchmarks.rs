@@ -60,16 +60,17 @@ fn bench_batch_proof_verification() {
     for i in 0..10 {
         let mut data = [i as u8; 32];
         data[0] = i as u8;
-        let log_data = BytesN::from_array(&env, &data);
-        let proof_hash = env.crypto().sha256(&log_data.clone().into()).to_bytes();
-        proofs.push((proof_hash, log_data));
+        let key = soroban_sdk::Bytes::from_array(&env, &data);
+        let val = soroban_sdk::Bytes::from_array(&env, &data);
+        let (root, proof) = mpt_verifier::make_leaf_proof(&env, &key, &val);
+        proofs.push((root, key, val, proof));
     }
 
     let start = env.ledger().sequence();
 
     // Verify all proofs
-    for (proof_hash, log_data) in proofs.iter() {
-        let _result = client.verify_merkle_proof(proof_hash, log_data);
+    for (root, key, val, proof) in proofs.iter() {
+        let _result = client.verify_merkle_proof(root, key, val, proof);
     }
 
     let end = env.ledger().sequence();
@@ -115,8 +116,21 @@ fn bench_multi_chain_finality_tracking() {
             let mut arr = [idx as u8; 32];
             BytesN::from_array(&env, &arr)
         };
-        let _extension =
-            client.record_evm_reveal(&tx_hash, &secret, &evm_block, chain_id, &evm_current);
+        let block_hash = BytesN::from_array(&env, &[idx as u8; 32]);
+        let log_key = soroban_sdk::Bytes::from_slice(&env, &0u32.to_le_bytes());
+        let (state_root, proof) =
+            mpt_verifier::make_leaf_proof(&env, &log_key, &secret.clone().into());
+        client.register_trusted_block_header(&block_hash, evm_block, &state_root);
+        let _extension = client.record_evm_reveal(
+            &tx_hash,
+            &secret,
+            evm_block,
+            chain_id,
+            evm_current,
+            &block_hash,
+            &0u32,
+            &proof,
+        );
     }
 
     let end = env.ledger().sequence();
@@ -232,17 +246,26 @@ fn bench_worst_case_reorg_scenario() {
         let evm_block_reveal = 1000u32 + (i as u32 * 100);
         let evm_current_block = evm_block_reveal + 10; // Only 10 confirmations < 64
 
+        let block_hash = BytesN::from_array(&env, &[42u8 + i as u8; 32]);
+        let log_key = soroban_sdk::Bytes::from_slice(&env, &0u32.to_le_bytes());
+        let (state_root, proof) =
+            mpt_verifier::make_leaf_proof(&env, &log_key, &secret.clone().into());
+        client.register_trusted_block_header(&block_hash, &evm_block_reveal, &state_root);
+
         let _extension = client.record_evm_reveal(
             &tx_hash,
             &secret,
             &evm_block_reveal,
             &1u32,
             &evm_current_block,
+            &block_hash,
+            &0u32,
+            &proof,
         );
 
         // Verify proof
-        let proof_hash = env.crypto().sha256(&secret.clone().into()).to_bytes();
-        let _is_valid = client.verify_merkle_proof(&proof_hash, &secret);
+        let _is_valid =
+            client.verify_merkle_proof(&state_root, &log_key, &secret.clone().into(), &proof);
 
         // Extend timelock
         let _new_timeout = client.extend_timelock_for_reorg(&id);
